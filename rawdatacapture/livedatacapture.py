@@ -16,6 +16,7 @@ BUFFER_SIZE = 65535       # Max UDP packet payload allocation
 
 DCA1000_HEADER_SIZE = 10
 UINT32_MODULO = 2**32
+SOCKET_TIMEOUT_SECONDS = 0.5
 
 
 @dataclass(frozen=True)
@@ -276,12 +277,14 @@ def listen_for_frames(
     data_port: int,
     config: RadarCaptureConfig,
     buffer_size: int,
+    socket_timeout_seconds: float,
 ) -> None:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
     frame_buffer = FrameBuffer(config.bytes_per_frame, stats)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(socket_timeout_seconds)
     sock.bind((host_ip, data_port))
 
     print(
@@ -292,7 +295,11 @@ def listen_for_frames(
 
     try:
         while True:
-            packet, _addr = sock.recvfrom(buffer_size)
+            try:
+                packet, _addr = sock.recvfrom(buffer_size)
+            except socket.timeout:
+                continue
+
             try:
                 header = DCA1000PacketHeader.parse(packet)
             except ValueError:
@@ -329,6 +336,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host-ip", default=UDP_IP, help="Host Ethernet IP to bind.")
     parser.add_argument("--data-port", type=int, default=UDP_PORT)
     parser.add_argument("--buffer-size", type=int, default=BUFFER_SIZE)
+    parser.add_argument(
+        "--socket-timeout",
+        type=float,
+        default=SOCKET_TIMEOUT_SECONDS,
+        help="Seconds between socket polls so Ctrl+C can stop the receiver.",
+    )
     return parser.parse_args()
 
 
@@ -672,6 +685,7 @@ def main() -> None:
         data_port=args.data_port,
         config=config,
         buffer_size=args.buffer_size,
+        socket_timeout_seconds=args.socket_timeout,
     )
 
 

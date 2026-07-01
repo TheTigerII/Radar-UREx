@@ -10,6 +10,7 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 
 - Binds a UDP socket to host IP `192.168.33.30`, data port `4098`.
 - Receives DCA1000 Ethernet packets.
+- Uses a short UDP socket timeout so Ctrl+C can stop the receiver cleanly.
 - Parses the 10-byte DCA1000 inline packet header when sequence numbering is enabled.
 - Tracks packet sequence numbers and reports lost, duplicate, and out-of-order packets.
 - Uses the DCA1000 byte-count field to maintain a continuous payload byte stream.
@@ -119,6 +120,7 @@ Current script status:
 implemented:
   socket bind
   packet receive
+  Ctrl+C-friendly socket timeout
   DCA1000 header parse
   sequence tracking
   packet loss counters
