@@ -46,3 +46,56 @@ Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=64148
 Streaming stopped.
 stats: packets=2859, frames=8, lost_packets=22, out_of_order=0, duplicates=0, byte_gaps=1/32032B, byte_overlaps=0/0B, malformed=0
 --- Live capture log ended ---
+
+--- Live capture log started: D:\Library\Documents\GitHub\Radar-UREx\rawdatacapture\livedatacapture.log ---
+Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=128, bytes_per_frame=524288, iq_swap=False, channel_interleave=True, lvds_lanes=2)
+Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+Trigger frames now. Press Ctrl+C to stop.
+stats: packets=200, frames=0, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=62025.80
+stats: packets=400, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+stats: packets=600, frames=1, invalid_frames=0, lost_packets=77, out_of_order=0, duplicates=0, byte_gaps=1/112112B, byte_overlaps=0/0B, malformed=0
+Dropped frame: incomplete payload, gap_bytes=112112, bytes_per_frame=524288
+stats: packets=800, frames=2, invalid_frames=1, lost_packets=77, out_of_order=0, duplicates=0, byte_gaps=1/112112B, byte_overlaps=0/0B, malformed=0
+stats: packets=1000, frames=2, invalid_frames=1, lost_packets=77, out_of_order=0, duplicates=0, byte_gaps=1/112112B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=61419.85
+stats: packets=1200, frames=3, invalid_frames=1, lost_packets=90, out_of_order=0, duplicates=0, byte_gaps=2/131040B, byte_overlaps=0/0B, malformed=0
+Dropped frame: incomplete payload, gap_bytes=18928, bytes_per_frame=524288
+stats: packets=1400, frames=4, invalid_frames=2, lost_packets=90, out_of_order=0, duplicates=0, byte_gaps=2/131040B, byte_overlaps=0/0B, malformed=0
+stats: packets=1600, frames=4, invalid_frames=2, lost_packets=90, out_of_order=0, duplicates=0, byte_gaps=2/131040B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=62115.74
+stats: packets=1800, frames=5, invalid_frames=2, lost_packets=100, out_of_order=0, duplicates=0, byte_gaps=3/145600B, byte_overlaps=0/0B, malformed=0
+stats: packets=2000, frames=5, invalid_frames=2, lost_packets=100, out_of_order=0, duplicates=0, byte_gaps=3/145600B, byte_overlaps=0/0B, malformed=0
+Dropped frame: incomplete payload, gap_bytes=14560, bytes_per_frame=524288
+stats: packets=2200, frames=6, invalid_frames=3, lost_packets=100, out_of_order=0, duplicates=0, byte_gaps=3/145600B, byte_overlaps=0/0B, malformed=0
+stats: packets=2400, frames=6, invalid_frames=3, lost_packets=100, out_of_order=0, duplicates=0, byte_gaps=3/145600B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=61889.94
+stats: packets=2600, frames=7, invalid_frames=3, lost_packets=190, out_of_order=0, duplicates=0, byte_gaps=5/276640B, byte_overlaps=0/0B, malformed=0
+Dropped frame: incomplete payload, gap_bytes=131040, bytes_per_frame=524288
+
+--- Live capture log started: D:\Library\Documents\GitHub\Radar-UREx\rawdatacapture\livedatacapture.log ---
+Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=128, bytes_per_frame=524288, iq_swap=False, channel_interleave=True, lvds_lanes=2)
+Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+Trigger frames now. Press Ctrl+C to stop.
+stats: packets=200, frames=0, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=63686.30
+stats: packets=400, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+stats: packets=600, frames=1, invalid_frames=0, lost_packets=26, out_of_order=0, duplicates=0, byte_gaps=1/37856B, byte_overlaps=0/0B, malformed=0
+Dropped frame: incomplete payload, gap_bytes=37856, bytes_per_frame=524288
+stats: packets=800, frames=2, invalid_frames=1, lost_packets=26, out_of_order=0, duplicates=0, byte_gaps=1/37856B, byte_overlaps=0/0B, malformed=0
+stats: packets=1000, frames=2, invalid_frames=1, lost_packets=26, out_of_order=0, duplicates=0, byte_gaps=1/37856B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=63233.34
+stats: packets=1200, frames=3, invalid_frames=1, lost_packets=26, out_of_order=0, duplicates=0, byte_gaps=1/37856B, byte_overlaps=0/0B, malformed=0
+stats: packets=1400, frames=3, invalid_frames=1, lost_packets=26, out_of_order=0, duplicates=0, byte_gaps=1/37856B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=63184.74
+stats: packets=1600, frames=4, invalid_frames=1, lost_packets=38, out_of_order=0, duplicates=0, byte_gaps=2/55328B, byte_overlaps=0/0B, malformed=0
+Dropped frame: incomplete payload, gap_bytes=17472, bytes_per_frame=524288
+stats: packets=1800, frames=5, invalid_frames=2, lost_packets=38, out_of_order=0, duplicates=0, byte_gaps=2/55328B, byte_overlaps=0/0B, malformed=0
+stats: packets=2000, frames=5, invalid_frames=2, lost_packets=38, out_of_order=0, duplicates=0, byte_gaps=2/55328B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=63298.07
+stats: packets=2200, frames=6, invalid_frames=2, lost_packets=45, out_of_order=0, duplicates=0, byte_gaps=3/65520B, byte_overlaps=0/0B, malformed=0
+stats: packets=2400, frames=6, invalid_frames=2, lost_packets=45, out_of_order=0, duplicates=0, byte_gaps=3/65520B, byte_overlaps=0/0B, malformed=0
+Dropped frame: incomplete payload, gap_bytes=10192, bytes_per_frame=524288
+stats: packets=2600, frames=7, invalid_frames=3, lost_packets=45, out_of_order=0, duplicates=0, byte_gaps=3/65520B, byte_overlaps=0/0B, malformed=0
+stats: packets=2800, frames=7, invalid_frames=3, lost_packets=45, out_of_order=0, duplicates=0, byte_gaps=3/65520B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=63476.36
