@@ -18,7 +18,7 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 - Accumulates UDP payload bytes until a full radar frame is available.
 - Marks frames touched by byte gaps as invalid and skips FFT on those frames.
 - Converts only complete frame bytes to a complex radar cube shaped `[chirp, rx, sample]`.
-- Runs a first-pass range FFT across the ADC sample axis and prints the strongest range bin.
+- Runs a first-pass range FFT across the ADC sample axis and prints the strongest range in meters plus the source FFT bin.
 - Optionally shows a live range profile or range-Doppler heatmap.
 - Appends terminal status output to a log file for later review.
 

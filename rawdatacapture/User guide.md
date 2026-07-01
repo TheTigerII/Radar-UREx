@@ -44,7 +44,7 @@ Trigger frames now. Press Ctrl+C to stop.
 Expected frame output:
 
 ```text
-Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=...
+Complete frame cube_shape=(128, 4, 256), peak_range_m=..., peak_range_bin=30, peak_magnitude=...
 ```
 
 Stop with:
@@ -80,11 +80,11 @@ python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.
 Plot axes:
 
 ```text
-X-axis: range FFT bin
+X-axis: range in meters
 Y-axis: average FFT magnitude across chirps and RX channels
 ```
 
-The X-axis is currently bin index, not meters.
+The script derives range in meters from `digOutSampleRate` and `freqSlopeConst` in the radar config. The terminal still prints `peak_range_bin` for debugging, but `peak_range_m` is the physical range estimate.
 
 ## Range-Doppler Heatmap
 

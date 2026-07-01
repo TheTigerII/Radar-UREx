@@ -21,6 +21,7 @@ DCA1000_HEADER_SIZE = 10
 UINT32_MODULO = 2**32
 SOCKET_TIMEOUT_SECONDS = 0.5
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
+SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 _LOG_FILE: Optional[TextIO] = None
 
 
@@ -107,6 +108,8 @@ class RadarCaptureConfig:
     iq_swap: bool
     channel_interleave: bool
     lvds_lanes: int
+    sample_rate_ksps: Optional[float] = None
+    frequency_slope_mhz_per_us: Optional[float] = None
 
     @classmethod
     def from_dimensions(
@@ -118,6 +121,8 @@ class RadarCaptureConfig:
         iq_swap: bool = False,
         channel_interleave: bool = True,
         lvds_lanes: int = 2,
+        sample_rate_ksps: Optional[float] = None,
+        frequency_slope_mhz_per_us: Optional[float] = None,
     ) -> "RadarCaptureConfig":
         bytes_per_complex_sample = 4  # int16 I + int16 Q
         bytes_per_frame = (
@@ -134,6 +139,8 @@ class RadarCaptureConfig:
             iq_swap=iq_swap,
             channel_interleave=channel_interleave,
             lvds_lanes=lvds_lanes,
+            sample_rate_ksps=sample_rate_ksps,
+            frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
         )
 
     @classmethod
@@ -171,6 +178,23 @@ class RadarCaptureConfig:
             return command_config
 
         return _config_from_mapping(data, source_name="XML")
+
+    @property
+    def range_resolution_m(self) -> Optional[float]:
+        if not self.sample_rate_ksps or not self.frequency_slope_mhz_per_us:
+            return None
+
+        sample_rate_hz = self.sample_rate_ksps * 1_000.0
+        slope_hz_per_s = self.frequency_slope_mhz_per_us * 1e12
+        return SPEED_OF_LIGHT_M_PER_S * sample_rate_hz / (
+            2.0 * slope_hz_per_s * self.num_adc_samples
+        )
+
+    def range_axis_m(self) -> Optional[np.ndarray]:
+        resolution = self.range_resolution_m
+        if resolution is None:
+            return None
+        return np.arange(self.num_adc_samples, dtype=np.float32) * resolution
 
 
 class FrameBuffer:
@@ -276,7 +300,7 @@ class LiveDisplay:
         )
         self.process.start()
 
-    def update(self, range_fft: np.ndarray) -> None:
+    def update(self, range_fft: np.ndarray, range_axis_m: Optional[np.ndarray]) -> None:
         if self.mode == "none":
             return
 
@@ -285,9 +309,9 @@ class LiveDisplay:
             return
 
         if self.mode == "range":
-            payload = compute_range_profile(range_fft)
+            payload = (range_axis_m, compute_range_profile(range_fft))
         elif self.mode == "range-doppler":
-            payload = compute_range_doppler_heatmap(range_fft)
+            payload = (range_axis_m, compute_range_doppler_heatmap(range_fft))
         else:
             return
 
@@ -346,7 +370,7 @@ def _run_display_process(
     if mode == "range":
         line = axis.plot([], [], lw=1.5)[0]
         axis.set_title("Live Range Profile")
-        axis.set_xlabel("Range bin")
+        axis.set_xlabel("Range (m)")
         axis.set_ylabel("Magnitude")
         axis.grid(True, alpha=0.3)
     elif mode == "range-doppler":
@@ -358,7 +382,7 @@ def _run_display_process(
         )
         figure.colorbar(image, ax=axis, label="Magnitude (dB)")
         axis.set_title("Live Range-Doppler Heatmap")
-        axis.set_xlabel("Range bin")
+        axis.set_xlabel("Range (m)")
         axis.set_ylabel("Doppler bin")
 
     figure.tight_layout()
@@ -374,9 +398,11 @@ def _run_display_process(
                     break
 
             if mode == "range" and line is not None:
-                _draw_range_profile(axis, line, payload)
+                range_axis_m, range_profile = payload
+                _draw_range_profile(axis, line, range_axis_m, range_profile)
             elif mode == "range-doppler" and image is not None:
-                _draw_range_doppler(axis, image, payload)
+                range_axis_m, heatmap = payload
+                _draw_range_doppler(axis, image, range_axis_m, heatmap)
 
             figure.canvas.draw_idle()
         except queue.Empty:
@@ -387,20 +413,40 @@ def _run_display_process(
     plt.close(figure)
 
 
-def _draw_range_profile(axis: Any, line: Any, range_profile: np.ndarray) -> None:
-    bins = np.arange(range_profile.size)
-    line.set_data(bins, range_profile)
-    axis.set_xlim(0, max(range_profile.size - 1, 1))
+def _draw_range_profile(
+    axis: Any,
+    line: Any,
+    range_axis_m: Optional[np.ndarray],
+    range_profile: np.ndarray,
+) -> None:
+    x_axis = _range_plot_axis(range_axis_m, range_profile.size)
+    line.set_data(x_axis, range_profile)
+    axis.set_xlim(float(x_axis[0]), float(max(x_axis[-1], x_axis[0] + 1.0)))
     profile_max = float(np.max(range_profile)) if range_profile.size else 1.0
     axis.set_ylim(0, max(profile_max * 1.1, 1.0))
 
 
-def _draw_range_doppler(axis: Any, image: Any, heatmap: np.ndarray) -> None:
+def _draw_range_doppler(
+    axis: Any,
+    image: Any,
+    range_axis_m: Optional[np.ndarray],
+    heatmap: np.ndarray,
+) -> None:
+    x_axis = _range_plot_axis(range_axis_m, heatmap.shape[1])
     image.set_data(heatmap)
-    image.set_extent((0, heatmap.shape[1] - 1, 0, heatmap.shape[0] - 1))
+    image.set_extent((float(x_axis[0]), float(x_axis[-1]), 0, heatmap.shape[0] - 1))
     image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
-    axis.set_xlim(0, max(heatmap.shape[1] - 1, 1))
+    axis.set_xlim(float(x_axis[0]), float(max(x_axis[-1], x_axis[0] + 1.0)))
     axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
+
+
+def _range_plot_axis(
+    range_axis_m: Optional[np.ndarray],
+    fallback_size: int,
+) -> np.ndarray:
+    if range_axis_m is not None and range_axis_m.size == fallback_size:
+        return range_axis_m
+    return np.arange(fallback_size, dtype=np.float32)
 
 
 def process_complete_frame(
@@ -419,14 +465,24 @@ def process_complete_frame(
     range_fft = compute_range_fft(radar_cube)
     range_profile = compute_range_profile(range_fft)
     peak_range_bin = int(np.argmax(range_profile))
+    range_axis_m = config.range_axis_m()
+    peak_range_m = (
+        float(range_axis_m[peak_range_bin]) if range_axis_m is not None else None
+    )
+    peak_range_text = (
+        f"peak_range_m={peak_range_m:.3f}"
+        if peak_range_m is not None
+        else f"peak_range_bin={peak_range_bin}"
+    )
 
     emit(
         "Complete frame "
         f"cube_shape={radar_cube.shape}, "
+        f"{peak_range_text}, "
         f"peak_range_bin={peak_range_bin}, "
         f"peak_magnitude={range_profile[peak_range_bin]:.2f}"
     )
-    display.update(range_fft)
+    display.update(range_fft, range_axis_m)
 
 
 def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
@@ -698,6 +754,12 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         num_chirps_per_frame = num_loops * (chirp_end_idx - chirp_start_idx + 1)
 
     iq_swap = bool(_optional_int(data, "iqSwap", "IQSwap", "sampleSwap") or 0)
+    sample_rate_ksps = _optional_float(
+        data, "digOutSampleRate", "sampleRateKsps", "sample_rate_ksps"
+    )
+    frequency_slope_mhz_per_us = _optional_float(
+        data, "freqSlopeConst", "frequencySlopeMhzPerUs", "frequency_slope_mhz_per_us"
+    )
     channel_interleave_value = _optional_int(
         data, "channelInterleave", "ChannelInterleave", "chInterleave"
     )
@@ -727,6 +789,8 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         iq_swap=iq_swap,
         channel_interleave=channel_interleave,
         lvds_lanes=lvds_lanes,
+        sample_rate_ksps=sample_rate_ksps,
+        frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
     )
 
 
@@ -774,6 +838,8 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
     iq_swap = False
     channel_interleave = True
     lvds_lanes = 2
+    sample_rate_ksps: Optional[float] = None
+    frequency_slope_mhz_per_us: Optional[float] = None
 
     for raw_line in lines:
         line = raw_line.split("%", 1)[0].split("#", 1)[0].strip()
@@ -783,7 +849,9 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         tokens = line.split()
         command = tokens[0]
         if command == "profileCfg" and len(tokens) > 10:
+            frequency_slope_mhz_per_us = float(tokens[8])
             profile_adc_samples = int(float(tokens[10]))
+            sample_rate_ksps = float(tokens[11])
         elif command == "channelCfg" and len(tokens) > 1:
             rx_channel_mask = int(tokens[1], 0)
         elif command == "frameCfg" and len(tokens) > 3:
@@ -814,6 +882,8 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         iq_swap=iq_swap,
         channel_interleave=channel_interleave,
         lvds_lanes=lvds_lanes or 2,
+        sample_rate_ksps=sample_rate_ksps,
+        frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
     )
 
 
@@ -875,6 +945,11 @@ def _required_int(data: Any, *names: str) -> int:
 def _optional_int(data: Any, *names: str) -> Optional[int]:
     value = _optional_value(data, *names)
     return None if value is None else _to_int(value)
+
+
+def _optional_float(data: Any, *names: str) -> Optional[float]:
+    value = _optional_value(data, *names)
+    return None if value is None else float(value)
 
 
 def _optional_value(data: Any, *names: str) -> Any:
