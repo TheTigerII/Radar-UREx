@@ -251,7 +251,90 @@ class FrameBuffer:
         self.gap_markers = advanced_markers
 
 
-def process_complete_frame(frame: CapturedFrame, config: RadarCaptureConfig) -> None:
+class LiveDisplay:
+    def __init__(self, mode: str, update_every: int) -> None:
+        self.mode = mode
+        self.update_every = max(update_every, 1)
+        self.frame_count = 0
+        self.plt = None
+        self.figure = None
+        self.axis = None
+        self.line = None
+        self.image = None
+
+        if self.mode == "none":
+            return
+
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError as exc:
+            raise RuntimeError(
+                "Live display requires matplotlib. Install it or run with --display none."
+            ) from exc
+
+        self.plt = plt
+        self.plt.ion()
+        self.figure, self.axis = self.plt.subplots()
+
+        if self.mode == "range":
+            self.line = self.axis.plot([], [], lw=1.5)[0]
+            self.axis.set_title("Live Range Profile")
+            self.axis.set_xlabel("Range bin")
+            self.axis.set_ylabel("Magnitude")
+            self.axis.grid(True, alpha=0.3)
+        elif self.mode == "range-doppler":
+            self.image = self.axis.imshow(
+                np.zeros((1, 1)),
+                aspect="auto",
+                origin="lower",
+                interpolation="nearest",
+            )
+            self.figure.colorbar(self.image, ax=self.axis, label="Magnitude (dB)")
+            self.axis.set_title("Live Range-Doppler Heatmap")
+            self.axis.set_xlabel("Range bin")
+            self.axis.set_ylabel("Doppler bin")
+
+        self.figure.tight_layout()
+        self.plt.show(block=False)
+
+    def update(self, radar_cube: np.ndarray, range_fft: np.ndarray) -> None:
+        if self.mode == "none":
+            return
+
+        self.frame_count += 1
+        if self.frame_count % self.update_every != 0:
+            return
+
+        if self.mode == "range":
+            range_profile = compute_range_profile(range_fft)
+            self._update_range_profile(range_profile)
+        elif self.mode == "range-doppler":
+            heatmap = compute_range_doppler_heatmap(range_fft)
+            self._update_range_doppler(heatmap)
+
+        self.figure.canvas.draw_idle()
+        self.plt.pause(0.001)
+
+    def _update_range_profile(self, range_profile: np.ndarray) -> None:
+        bins = np.arange(range_profile.size)
+        self.line.set_data(bins, range_profile)
+        self.axis.set_xlim(0, max(range_profile.size - 1, 1))
+        profile_max = float(np.max(range_profile)) if range_profile.size else 1.0
+        self.axis.set_ylim(0, max(profile_max * 1.1, 1.0))
+
+    def _update_range_doppler(self, heatmap: np.ndarray) -> None:
+        self.image.set_data(heatmap)
+        self.image.set_extent((0, heatmap.shape[1] - 1, 0, heatmap.shape[0] - 1))
+        self.image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
+        self.axis.set_xlim(0, max(heatmap.shape[1] - 1, 1))
+        self.axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
+
+
+def process_complete_frame(
+    frame: CapturedFrame,
+    config: RadarCaptureConfig,
+    display: LiveDisplay,
+) -> None:
     if not frame.is_valid:
         emit(
             "Dropped frame: incomplete payload, "
@@ -260,7 +343,8 @@ def process_complete_frame(frame: CapturedFrame, config: RadarCaptureConfig) -> 
         return
 
     radar_cube = frame_bytes_to_radar_cube(frame.data, config)
-    range_profile = np.abs(np.fft.fft(radar_cube, axis=2)).mean(axis=(0, 1))
+    range_fft = compute_range_fft(radar_cube)
+    range_profile = compute_range_profile(range_fft)
     peak_range_bin = int(np.argmax(range_profile))
 
     emit(
@@ -269,6 +353,22 @@ def process_complete_frame(frame: CapturedFrame, config: RadarCaptureConfig) -> 
         f"peak_range_bin={peak_range_bin}, "
         f"peak_magnitude={range_profile[peak_range_bin]:.2f}"
     )
+    display.update(radar_cube, range_fft)
+
+
+def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
+    window = np.hanning(radar_cube.shape[2]).astype(np.float32)
+    return np.fft.fft(radar_cube * window, axis=2)
+
+
+def compute_range_profile(range_fft: np.ndarray) -> np.ndarray:
+    return np.abs(range_fft).mean(axis=(0, 1))
+
+
+def compute_range_doppler_heatmap(range_fft: np.ndarray) -> np.ndarray:
+    doppler_fft = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
+    magnitude = np.abs(doppler_fft).mean(axis=1)
+    return 20.0 * np.log10(magnitude + 1e-6)
 
 
 def frame_bytes_to_radar_cube(
@@ -330,6 +430,7 @@ def listen_for_frames(
     config: RadarCaptureConfig,
     buffer_size: int,
     socket_timeout_seconds: float,
+    display: LiveDisplay,
 ) -> None:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
@@ -364,7 +465,7 @@ def listen_for_frames(
 
             sequence_tracker.observe(header.sequence_number)
             for frame in frame_buffer.add_payload(header, payload):
-                process_complete_frame(frame, config)
+                process_complete_frame(frame, config, display)
 
             if stats.packets_received % 200 == 0:
                 emit(_format_stats(stats))
@@ -399,6 +500,18 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_LOG_PATH,
         help="Append terminal status output to this log file.",
+    )
+    parser.add_argument(
+        "--display",
+        choices=("none", "range", "range-doppler"),
+        default="none",
+        help="Optional live display mode.",
+    )
+    parser.add_argument(
+        "--display-update-every",
+        type=int,
+        default=1,
+        help="Update the live display every N valid frames.",
     )
     return parser.parse_args()
 
@@ -773,12 +886,14 @@ def main() -> None:
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
+        display = LiveDisplay(args.display, args.display_update_every)
         listen_for_frames(
             host_ip=args.host_ip,
             data_port=args.data_port,
             config=config,
             buffer_size=args.buffer_size,
             socket_timeout_seconds=args.socket_timeout,
+            display=display,
         )
     finally:
         close_terminal_log()
