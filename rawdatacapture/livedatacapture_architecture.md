@@ -18,6 +18,7 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 - Accumulates UDP payload bytes until a full radar frame is available.
 - Converts only complete frame bytes to a complex radar cube shaped `[chirp, rx, sample]`.
 - Runs a first-pass range FFT on each full cube and prints the strongest range bin.
+- Appends terminal status output to a log file for later review.
 
 That keeps packet capture separate from packet-sized processing. A live display still needs a proper UI loop, but FFT code now has a frame-sized input boundary instead of a single UDP packet boundary.
 
@@ -31,6 +32,18 @@ or:
 
 ```powershell
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml
+```
+
+By default, terminal status output is also appended to:
+
+```text
+rawdatacapture\livedatacapture.log
+```
+
+To choose a different log file:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --log-file .\rawdatacapture\capture_run.log
 ```
 
 ## Architecture Overview

@@ -4,7 +4,7 @@ import socket
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, TextIO
 
 import numpy as np
 
@@ -17,6 +17,8 @@ BUFFER_SIZE = 65535       # Max UDP packet payload allocation
 DCA1000_HEADER_SIZE = 10
 UINT32_MODULO = 2**32
 SOCKET_TIMEOUT_SECONDS = 0.5
+DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
+_LOG_FILE: Optional[TextIO] = None
 
 
 @dataclass(frozen=True)
@@ -211,7 +213,7 @@ def process_complete_frame(frame_bytes: bytes, config: RadarCaptureConfig) -> No
     range_profile = np.abs(np.fft.fft(radar_cube, axis=2)).mean(axis=(0, 1))
     peak_range_bin = int(np.argmax(range_profile))
 
-    print(
+    emit(
         "Complete frame "
         f"cube_shape={radar_cube.shape}, "
         f"peak_range_bin={peak_range_bin}, "
@@ -287,11 +289,11 @@ def listen_for_frames(
     sock.settimeout(socket_timeout_seconds)
     sock.bind((host_ip, data_port))
 
-    print(
+    emit(
         "Listening for live radar stream "
         f"on {host_ip}:{data_port}; bytes_per_frame={config.bytes_per_frame}"
     )
-    print("Trigger frames now. Press Ctrl+C to stop.")
+    emit("Trigger frames now. Press Ctrl+C to stop.")
 
     try:
         while True:
@@ -315,10 +317,10 @@ def listen_for_frames(
                 process_complete_frame(frame, config)
 
             if stats.packets_received % 200 == 0:
-                print(_format_stats(stats))
+                emit(_format_stats(stats))
     except KeyboardInterrupt:
-        print("Streaming stopped.")
-        print(_format_stats(stats))
+        emit("Streaming stopped.")
+        emit(_format_stats(stats))
     finally:
         sock.close()
 
@@ -341,6 +343,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=SOCKET_TIMEOUT_SECONDS,
         help="Seconds between socket polls so Ctrl+C can stop the receiver.",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=DEFAULT_LOG_PATH,
+        help="Append terminal status output to this log file.",
     )
     return parser.parse_args()
 
@@ -676,17 +684,49 @@ def _bit_count(mask: int) -> int:
     return int(mask).bit_count()
 
 
+def setup_terminal_log(log_path: Path) -> None:
+    global _LOG_FILE
+
+    resolved_path = log_path
+    if not resolved_path.is_absolute():
+        resolved_path = Path.cwd() / resolved_path
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+
+    _LOG_FILE = resolved_path.open("a", encoding="utf-8", buffering=1)
+    emit("")
+    emit(f"--- Live capture log started: {resolved_path} ---")
+
+
+def close_terminal_log() -> None:
+    global _LOG_FILE
+
+    if _LOG_FILE is not None:
+        emit("--- Live capture log ended ---")
+        _LOG_FILE.close()
+        _LOG_FILE = None
+
+
+def emit(message: str) -> None:
+    print(message)
+    if _LOG_FILE is not None:
+        _LOG_FILE.write(f"{message}\n")
+
+
 def main() -> None:
     args = parse_args()
-    config = RadarCaptureConfig.from_file(args.config)
-    print(f"Loaded radar config: {config}")
-    listen_for_frames(
-        host_ip=args.host_ip,
-        data_port=args.data_port,
-        config=config,
-        buffer_size=args.buffer_size,
-        socket_timeout_seconds=args.socket_timeout,
-    )
+    setup_terminal_log(args.log_file)
+    try:
+        config = RadarCaptureConfig.from_file(args.config)
+        emit(f"Loaded radar config: {config}")
+        listen_for_frames(
+            host_ip=args.host_ip,
+            data_port=args.data_port,
+            config=config,
+            buffer_size=args.buffer_size,
+            socket_timeout_seconds=args.socket_timeout,
+        )
+    finally:
+        close_terminal_log()
 
 
 if __name__ == "__main__":
