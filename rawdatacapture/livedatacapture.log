@@ -27,4 +27,33 @@
 [2026-07-01T15:36:30+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=56102.80
 [2026-07-01T15:36:34+08:00] Streaming stopped.
 [2026-07-01T15:36:34+08:00] stats: packets=2861, frames=8, invalid_frames=1, lost_packets=20, out_of_order=0, duplicates=0, byte_gaps=1/29120B, byte_overlaps=0/0B, malformed=0
-[2026-07-01T15:36:34+08:00] --- Live capture log ended at 2026-07-01T15:36:34+08:00 ---
+[2026-07-01T15:36:34+08:00] --- Live capture log ended at 2026-07-01T15:36:34+08:00 ---[2026-07-01T15:40:49+08:00] 
+[2026-07-01T15:40:49+08:00] --- Live capture log started at 2026-07-01T15:40:49+08:00: D:\Library\Documents\GitHub\Radar-UREx\rawdatacapture\livedatacapture.log ---
+[2026-07-01T15:40:49+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=128, bytes_per_frame=524288, iq_swap=False, channel_interleave=True, lvds_lanes=2)
+[2026-07-01T15:40:49+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+[2026-07-01T15:40:49+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-07-01T15:40:51+08:00] stats: packets=200, frames=0, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=55012.71
+[2026-07-01T15:40:51+08:00] stats: packets=400, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] stats: packets=600, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=54744.59
+[2026-07-01T15:40:51+08:00] stats: packets=800, frames=2, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] stats: packets=1000, frames=2, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=54498.68
+[2026-07-01T15:40:51+08:00] stats: packets=1200, frames=3, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] stats: packets=1400, frames=3, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=54228.90
+[2026-07-01T15:40:51+08:00] stats: packets=1600, frames=4, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] stats: packets=1800, frames=4, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=53988.69
+[2026-07-01T15:40:51+08:00] stats: packets=2000, frames=5, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=53470.61
+[2026-07-01T15:40:51+08:00] stats: packets=2200, frames=6, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] stats: packets=2400, frames=6, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=52912.95
+[2026-07-01T15:40:51+08:00] stats: packets=2600, frames=7, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:51+08:00] stats: packets=2800, frames=7, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=52887.30
+[2026-07-01T15:40:57+08:00] Streaming stopped.
+[2026-07-01T15:40:57+08:00] stats: packets=2881, frames=8, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:40:57+08:00] --- Live capture log ended at 2026-07-01T15:40:57+08:00 ---
