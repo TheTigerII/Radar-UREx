@@ -111,9 +111,11 @@ The local TI config examples use:
 - DCA1000 IP: `192.168.33.180`
 - DCA1000 config port: `4096`
 - DCA1000 data port: `4098`
-- Packet delay: `25 us`
+- Packet delay: keep at `200 us` for stable Python capture
 - Raw LVDS capture mode
 - Sequence number enabled
+
+The DCA1000 packet delay should stay at `200 us` unless a later throughput test proves a lower value is safe. Lower packet delays previously produced byte gaps and dropped frames; `200 us` produced clean runs with `lost_packets=0` and `byte_gaps=0/0B`.
 
 ## Data Plane
 
