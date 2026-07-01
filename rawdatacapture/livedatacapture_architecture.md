@@ -13,7 +13,7 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 - Parses the 10-byte DCA1000 inline packet header when sequence numbering is enabled.
 - Tracks packet sequence numbers and reports lost, duplicate, and out-of-order packets.
 - Uses the DCA1000 byte-count field to maintain a continuous payload byte stream.
-- Reads a radar `.cfg` or mmWave Studio JSON to derive frame dimensions.
+- Reads a radar `.cfg`, mmWave Studio XML, or mmWave Studio JSON to derive frame dimensions.
 - Accumulates UDP payload bytes until a full radar frame is available.
 - Converts only complete frame bytes to `np.int16`.
 
@@ -23,6 +23,12 @@ Example:
 
 ```powershell
 python rawdatacapture\livedatacapture.py --config path\to\radar.cfg
+```
+
+or:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config path\to\mmwave_setup.xml
 ```
 
 ## Architecture Overview
@@ -116,7 +122,7 @@ implemented:
   sequence tracking
   packet loss counters
   byte-count based payload stream
-  radar .cfg / mmWave Studio JSON dimension parsing
+  radar .cfg / mmWave Studio XML / JSON dimension parsing
   frame buffering
   complete-frame int16 conversion
 
@@ -223,7 +229,7 @@ capture/frame_builder.py
   Converts packet payload stream into complete frame byte arrays.
 
 radar/config.py
-  Parses radar .cfg or mmWave Studio JSON into derived dimensions.
+  Parses radar .cfg, mmWave Studio XML, or JSON into derived dimensions.
 
 radar/lvds.py
   Converts frame bytes into complex ADC cube:
@@ -295,7 +301,7 @@ radar:
   ramp_end_time
 ```
 
-These should come from the same `.cfg` or mmWave Studio JSON used to program the radar, not from hardcoded constants.
+These should come from the same `.cfg`, mmWave Studio XML, or mmWave Studio JSON used to program the radar, not from hardcoded constants.
 
 ## First Implementation Milestones
 

@@ -1,6 +1,7 @@
 import argparse
 import json
 import socket
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -125,6 +126,8 @@ class RadarCaptureConfig:
             return cls.from_mmwave_cfg(config_path)
         if suffix == ".json":
             return cls.from_mmwave_json(config_path)
+        if suffix == ".xml":
+            return cls.from_mmwave_xml(config_path)
         raise ValueError(f"Unsupported config file extension: {config_path.suffix}")
 
     @classmethod
@@ -139,47 +142,17 @@ class RadarCaptureConfig:
         if command_config is not None:
             return command_config
 
-        num_adc_samples = _required_int(
-            data, "num_adc_samples", "numAdcSamples", "NumOfAdcSamples"
-        )
+        return _config_from_mapping(data, source_name="JSON")
 
-        num_rx_channels = _optional_int(
-            data, "num_rx_channels", "numRxChannels", "NumOfRxChannels"
-        )
-        if num_rx_channels is None:
-            rx_channel_mask = _required_int(data, "rxChannelEn", "RxChannelEn")
-            num_rx_channels = _bit_count(rx_channel_mask)
+    @classmethod
+    def from_mmwave_xml(cls, config_path: Path) -> "RadarCaptureConfig":
+        data = _xml_to_config_data(config_path)
 
-        num_chirps_per_frame = _optional_int(
-            data, "num_chirps_per_frame", "numChirpsPerFrame", "NumOfChirpsPerFrame"
-        )
-        if num_chirps_per_frame is None:
-            chirp_start_idx = _required_int(data, "chirpStartIdx", "ChirpStartIdx")
-            chirp_end_idx = _required_int(data, "chirpEndIdx", "ChirpEndIdx")
-            num_loops = _required_int(data, "numLoops", "NumLoops")
-            num_chirps_per_frame = num_loops * (chirp_end_idx - chirp_start_idx + 1)
+        command_config = _config_from_json_command_lines(data)
+        if command_config is not None:
+            return command_config
 
-        iq_swap = bool(_optional_int(data, "iqSwap", "IQSwap", "sampleSwap") or 0)
-        channel_interleave_value = _optional_int(
-            data, "channelInterleave", "ChannelInterleave"
-        )
-        channel_interleave = (
-            True if channel_interleave_value is None else channel_interleave_value == 0
-        )
-
-        lvds_lanes = _optional_int(data, "lvds_lanes", "lvdsLanes", "NumOfLanes")
-        if lvds_lanes is None:
-            lane_mask = _optional_int(data, "laneEn", "LaneEn", "lvdsLaneEn")
-            lvds_lanes = _bit_count(lane_mask) if lane_mask is not None else 2
-
-        return cls.from_dimensions(
-            num_adc_samples=num_adc_samples,
-            num_rx_channels=num_rx_channels,
-            num_chirps_per_frame=num_chirps_per_frame,
-            iq_swap=iq_swap,
-            channel_interleave=channel_interleave,
-            lvds_lanes=lvds_lanes,
-        )
+        return _config_from_mapping(data, source_name="XML")
 
 
 class FrameBuffer:
@@ -296,7 +269,7 @@ def parse_args() -> argparse.Namespace:
         "--config",
         required=True,
         type=Path,
-        help="Radar .cfg or mmWave Studio JSON used to derive frame size.",
+        help="Radar .cfg, mmWave Studio XML, or JSON used to derive frame size.",
     )
     parser.add_argument("--host-ip", default=UDP_IP, help="Host Ethernet IP to bind.")
     parser.add_argument("--data-port", type=int, default=UDP_PORT)
@@ -327,6 +300,112 @@ def _config_from_json_command_lines(data: Any) -> Optional[RadarCaptureConfig]:
         return _config_from_cfg_lines(command_lines)
     except ValueError:
         return None
+
+
+def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
+    num_adc_samples = _required_int(
+        data,
+        "num_adc_samples",
+        "numAdcSamples",
+        "NumAdcSamples",
+        "NumOfAdcSamples",
+        "numADCSamples",
+        "adcSamples",
+    )
+
+    num_rx_channels = _optional_int(
+        data,
+        "num_rx_channels",
+        "numRxChannels",
+        "NumRxChannels",
+        "NumOfRxChannels",
+        "numRxAntennas",
+        "NumRxAntennas",
+    )
+    if num_rx_channels is None:
+        rx_channel_mask = _required_int(
+            data, "rxChannelEn", "RxChannelEn", "rxChannelEnable", "rxChanEn"
+        )
+        num_rx_channels = _bit_count(rx_channel_mask)
+
+    num_chirps_per_frame = _optional_int(
+        data,
+        "num_chirps_per_frame",
+        "numChirpsPerFrame",
+        "NumChirpsPerFrame",
+        "NumOfChirpsPerFrame",
+    )
+    if num_chirps_per_frame is None:
+        chirp_start_idx = _required_int(
+            data, "chirpStartIdx", "ChirpStartIdx", "chirpStartIndex"
+        )
+        chirp_end_idx = _required_int(
+            data, "chirpEndIdx", "ChirpEndIdx", "chirpEndIndex"
+        )
+        num_loops = _required_int(data, "numLoops", "NumLoops", "numOfLoops")
+        num_chirps_per_frame = num_loops * (chirp_end_idx - chirp_start_idx + 1)
+
+    iq_swap = bool(_optional_int(data, "iqSwap", "IQSwap", "sampleSwap") or 0)
+    channel_interleave_value = _optional_int(
+        data, "channelInterleave", "ChannelInterleave", "chInterleave"
+    )
+    channel_interleave = (
+        True if channel_interleave_value is None else channel_interleave_value == 0
+    )
+
+    lvds_lanes = _optional_int(
+        data, "lvds_lanes", "lvdsLanes", "NumOfLanes", "numLanes"
+    )
+    if lvds_lanes is None:
+        lane_mask = _optional_int(data, "laneEn", "LaneEn", "lvdsLaneEn", "laneEnable")
+        lvds_lanes = _bit_count(lane_mask) if lane_mask is not None else 2
+
+    if num_adc_samples <= 0 or num_rx_channels <= 0 or num_chirps_per_frame <= 0:
+        raise ValueError(f"{source_name} radar dimensions must be positive")
+
+    return RadarCaptureConfig.from_dimensions(
+        num_adc_samples=num_adc_samples,
+        num_rx_channels=num_rx_channels,
+        num_chirps_per_frame=num_chirps_per_frame,
+        iq_swap=iq_swap,
+        channel_interleave=channel_interleave,
+        lvds_lanes=lvds_lanes,
+    )
+
+
+def _xml_to_config_data(config_path: Path) -> dict[str, Any]:
+    root = ET.parse(config_path).getroot()
+    data: dict[str, Any] = {}
+    command_lines: list[str] = []
+
+    for element in root.iter():
+        tag = _local_xml_name(element.tag)
+        text = (element.text or "").strip()
+
+        if text:
+            data.setdefault(tag, text)
+            if _looks_like_mmwave_command(text):
+                command_lines.append(text)
+
+        for key, value in element.attrib.items():
+            clean_key = _local_xml_name(key)
+            clean_value = value.strip()
+            data.setdefault(clean_key, clean_value)
+            if _looks_like_mmwave_command(clean_value):
+                command_lines.append(clean_value)
+
+        name = _first_attribute(element, "name", "Name", "key", "Key", "id", "Id")
+        value = _first_attribute(element, "value", "Value", "val", "Val")
+        if name is not None and value is not None:
+            data.setdefault(name, value)
+
+        if value is not None:
+            data.setdefault(tag, value)
+
+    if command_lines:
+        data["commandLines"] = command_lines
+
+    return data
 
 
 def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
@@ -404,16 +483,41 @@ def _iter_json_command_lines(value: Any) -> Iterable[str]:
             yield from _iter_json_command_lines(item)
 
 
+def _looks_like_mmwave_command(value: str) -> bool:
+    known_commands = {
+        "profileCfg",
+        "channelCfg",
+        "frameCfg",
+        "adcbufCfg",
+        "lvdsLaneCfg",
+        "laneCfg",
+    }
+    stripped = value.strip()
+    return bool(stripped) and stripped.split(maxsplit=1)[0] in known_commands
+
+
+def _first_attribute(element: ET.Element, *names: str) -> Optional[str]:
+    normalized_names = {_normalize_key(name) for name in names}
+    for key, value in element.attrib.items():
+        if _normalize_key(key) in normalized_names:
+            return value.strip()
+    return None
+
+
+def _local_xml_name(value: str) -> str:
+    return value.rsplit("}", 1)[-1]
+
+
 def _required_int(data: Any, *names: str) -> int:
     value = _optional_value(data, *names)
     if value is None:
         raise ValueError(f"Missing required JSON field; tried: {', '.join(names)}")
-    return int(float(value))
+    return _to_int(value)
 
 
 def _optional_int(data: Any, *names: str) -> Optional[int]:
     value = _optional_value(data, *names)
-    return None if value is None else int(float(value))
+    return None if value is None else _to_int(value)
 
 
 def _optional_value(data: Any, *names: str) -> Any:
@@ -436,6 +540,21 @@ def _walk_json(value: Any) -> Iterable[tuple[str, Any]]:
 
 def _normalize_key(value: str) -> str:
     return "".join(character for character in value.lower() if character.isalnum())
+
+
+def _to_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+
+    text = str(value).strip()
+    try:
+        return int(text, 0)
+    except ValueError:
+        return int(float(text))
 
 
 def _bit_count(mask: int) -> int:
