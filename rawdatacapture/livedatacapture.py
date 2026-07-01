@@ -206,13 +206,67 @@ class FrameBuffer:
 
 
 def process_complete_frame(frame_bytes: bytes, config: RadarCaptureConfig) -> None:
-    adc_samples = np.frombuffer(frame_bytes, dtype="<i2")
+    radar_cube = frame_bytes_to_radar_cube(frame_bytes, config)
+    range_profile = np.abs(np.fft.fft(radar_cube, axis=2)).mean(axis=(0, 1))
+    peak_range_bin = int(np.argmax(range_profile))
+
     print(
         "Complete frame "
-        f"{len(adc_samples)} int16 samples "
-        f"({config.num_chirps_per_frame} chirps, "
-        f"{config.num_rx_channels} RX, "
-        f"{config.num_adc_samples} ADC samples)"
+        f"cube_shape={radar_cube.shape}, "
+        f"peak_range_bin={peak_range_bin}, "
+        f"peak_magnitude={range_profile[peak_range_bin]:.2f}"
+    )
+
+
+def frame_bytes_to_radar_cube(
+    frame_bytes: bytes, config: RadarCaptureConfig
+) -> np.ndarray:
+    """Convert one complete DCA1000 frame into [chirp, rx, sample] complex data."""
+    expected_int16_count = config.bytes_per_frame // np.dtype("<i2").itemsize
+    adc_samples = np.frombuffer(frame_bytes, dtype="<i2", count=expected_int16_count)
+
+    if adc_samples.size != expected_int16_count:
+        raise ValueError(
+            f"Frame has {adc_samples.size} int16 values; expected {expected_int16_count}"
+        )
+    if adc_samples.size % 4 != 0:
+        raise ValueError("Complex 2-lane LVDS data must contain int16 groups of 4")
+    if config.lvds_lanes != 2:
+        raise NotImplementedError(
+            f"LVDS reshape currently supports 2 lanes, got {config.lvds_lanes}"
+        )
+
+    grouped = adc_samples.reshape(-1, 4)
+    first = grouped[:, 0:2].reshape(-1).astype(np.float32)
+    second = grouped[:, 2:4].reshape(-1).astype(np.float32)
+
+    if config.iq_swap:
+        complex_samples = second + 1j * first
+    else:
+        complex_samples = first + 1j * second
+
+    expected_complex_count = (
+        config.num_chirps_per_frame
+        * config.num_rx_channels
+        * config.num_adc_samples
+    )
+    if complex_samples.size != expected_complex_count:
+        raise ValueError(
+            "Frame produced "
+            f"{complex_samples.size} complex samples; expected {expected_complex_count}"
+        )
+
+    if config.channel_interleave:
+        return complex_samples.reshape(
+            config.num_chirps_per_frame,
+            config.num_adc_samples,
+            config.num_rx_channels,
+        ).transpose(0, 2, 1)
+
+    return complex_samples.reshape(
+        config.num_chirps_per_frame,
+        config.num_rx_channels,
+        config.num_adc_samples,
     )
 
 

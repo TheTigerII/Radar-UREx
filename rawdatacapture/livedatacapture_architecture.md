@@ -15,9 +15,10 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 - Uses the DCA1000 byte-count field to maintain a continuous payload byte stream.
 - Reads a radar `.cfg`, mmWave Studio XML, or mmWave Studio JSON to derive frame dimensions.
 - Accumulates UDP payload bytes until a full radar frame is available.
-- Converts only complete frame bytes to `np.int16`.
+- Converts only complete frame bytes to a complex radar cube shaped `[chirp, rx, sample]`.
+- Runs a first-pass range FFT on each full cube and prints the strongest range bin.
 
-That keeps packet capture separate from signal processing. A live display still needs LVDS/IQ reshape and a processing/display loop, but FFT code now has a frame-sized input boundary instead of a single UDP packet boundary.
+That keeps packet capture separate from packet-sized processing. A live display still needs a proper UI loop, but FFT code now has a frame-sized input boundary instead of a single UDP packet boundary.
 
 Example:
 
@@ -125,11 +126,12 @@ implemented:
   radar .cfg / mmWave Studio XML / JSON dimension parsing
   frame buffering
   complete-frame int16 conversion
+  LVDS/IQ reshape to [chirp, rx, sample]
+  first-pass range FFT peak-bin reporting
 
 missing:
   packet reordering beyond duplicate/overlap trimming
-  LVDS/IQ reshape
-  range/Doppler processing
+  full range/Doppler processing
   live display
 ```
 
@@ -181,7 +183,7 @@ Then it reshapes the stream into:
 [num_chirps_per_frame, num_rx_channels, num_adc_samples]
 ```
 
-For the Python implementation, keep this as a dedicated module so changes in lane mode, IQ swap, channel interleave, or profile config do not leak into the signal processing code.
+The first Python implementation keeps this in `livedatacapture.py` as `frame_bytes_to_radar_cube(...)`. As the project grows, this should move into a dedicated module so changes in lane mode, IQ swap, channel interleave, or profile config do not leak into the signal processing code.
 
 ## Processing Pipeline
 
