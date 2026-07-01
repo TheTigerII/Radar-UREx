@@ -77,6 +77,14 @@ To show a simple live range profile:
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range
 ```
 
+The live range X-axis shows `0` to `20 m` by default. To change it:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range --max-range-m 10
+```
+
+Use `--max-range-m 0` to show the full computed range axis.
+
 Plot axes:
 
 ```text

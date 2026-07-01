@@ -56,6 +56,8 @@ To show a simple live range profile:
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range
 ```
 
+The live range X-axis is limited to `20 m` by default. Use `--max-range-m N` to change it, or `--max-range-m 0` to show the full computed axis.
+
 To show a first-pass range-Doppler heatmap:
 
 ```powershell

@@ -22,6 +22,7 @@ UINT32_MODULO = 2**32
 SOCKET_TIMEOUT_SECONDS = 0.5
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
+DEFAULT_MAX_RANGE_M = 20.0
 _LOG_FILE: Optional[TextIO] = None
 
 
@@ -278,10 +279,17 @@ class FrameBuffer:
 
 
 class LiveDisplay:
-    def __init__(self, mode: str, update_every: int, pause_seconds: float) -> None:
+    def __init__(
+        self,
+        mode: str,
+        update_every: int,
+        pause_seconds: float,
+        max_range_m: float,
+    ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
         self.pause_seconds = max(pause_seconds, 0.001)
+        self.max_range_m = max(max_range_m, 0.0)
         self.frame_count = 0
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
@@ -294,7 +302,13 @@ class LiveDisplay:
         self.payload_queue = mp.Queue(maxsize=1)
         self.process = mp.Process(
             target=_run_display_process,
-            args=(self.mode, self.pause_seconds, self.payload_queue, self.stop_event),
+            args=(
+                self.mode,
+                self.pause_seconds,
+                self.max_range_m,
+                self.payload_queue,
+                self.stop_event,
+            ),
             name="RadarLiveDisplay",
             daemon=True,
         )
@@ -353,6 +367,7 @@ class LiveDisplay:
 def _run_display_process(
     mode: str,
     pause_seconds: float,
+    max_range_m: float,
     payload_queue: mp.Queue,
     stop_event: mp.Event,
 ) -> None:
@@ -399,10 +414,16 @@ def _run_display_process(
 
             if mode == "range" and line is not None:
                 range_axis_m, range_profile = payload
-                _draw_range_profile(axis, line, range_axis_m, range_profile)
+                _draw_range_profile(
+                    axis,
+                    line,
+                    range_axis_m,
+                    range_profile,
+                    max_range_m,
+                )
             elif mode == "range-doppler" and image is not None:
                 range_axis_m, heatmap = payload
-                _draw_range_doppler(axis, image, range_axis_m, heatmap)
+                _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
 
             figure.canvas.draw_idle()
         except queue.Empty:
@@ -418,10 +439,11 @@ def _draw_range_profile(
     line: Any,
     range_axis_m: Optional[np.ndarray],
     range_profile: np.ndarray,
+    max_range_m: float,
 ) -> None:
     x_axis = _range_plot_axis(range_axis_m, range_profile.size)
     line.set_data(x_axis, range_profile)
-    axis.set_xlim(float(x_axis[0]), float(max(x_axis[-1], x_axis[0] + 1.0)))
+    axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
     profile_max = float(np.max(range_profile)) if range_profile.size else 1.0
     axis.set_ylim(0, max(profile_max * 1.1, 1.0))
 
@@ -431,12 +453,13 @@ def _draw_range_doppler(
     image: Any,
     range_axis_m: Optional[np.ndarray],
     heatmap: np.ndarray,
+    max_range_m: float,
 ) -> None:
     x_axis = _range_plot_axis(range_axis_m, heatmap.shape[1])
     image.set_data(heatmap)
     image.set_extent((float(x_axis[0]), float(x_axis[-1]), 0, heatmap.shape[0] - 1))
     image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
-    axis.set_xlim(float(x_axis[0]), float(max(x_axis[-1], x_axis[0] + 1.0)))
+    axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
     axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
 
 
@@ -447,6 +470,12 @@ def _range_plot_axis(
     if range_axis_m is not None and range_axis_m.size == fallback_size:
         return range_axis_m
     return np.arange(fallback_size, dtype=np.float32)
+
+
+def _range_plot_xmax(x_axis: np.ndarray, max_range_m: float) -> float:
+    if max_range_m > 0:
+        return max(max_range_m, float(x_axis[0] + 1.0))
+    return float(max(x_axis[-1], x_axis[0] + 1.0))
 
 
 def process_complete_frame(
@@ -648,6 +677,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.03,
         help="Seconds to yield to the GUI event loop when display is enabled.",
+    )
+    parser.add_argument(
+        "--max-range-m",
+        type=float,
+        default=DEFAULT_MAX_RANGE_M,
+        help="Maximum X-axis range in meters for live range displays. Use 0 for full axis.",
     )
     return parser.parse_args()
 
@@ -1045,6 +1080,7 @@ def main() -> None:
             args.display,
             args.display_update_every,
             args.display_pause,
+            args.max_range_m,
         )
         listen_for_frames(
             host_ip=args.host_ip,
