@@ -18,7 +18,8 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 - Accumulates UDP payload bytes until a full radar frame is available.
 - Marks frames touched by byte gaps as invalid and skips FFT on those frames.
 - Converts only complete frame bytes to a complex radar cube shaped `[chirp, rx, sample]`.
-- Runs a first-pass range FFT on each full cube and prints the strongest range bin.
+- Runs a first-pass range FFT across the ADC sample axis and prints the strongest range bin.
+- Optionally shows a live range profile or range-Doppler heatmap.
 - Appends terminal status output to a log file for later review.
 
 That keeps packet capture separate from packet-sized processing. A live display still needs a proper UI loop, but FFT code now has a frame-sized input boundary instead of a single UDP packet boundary.
@@ -48,6 +49,20 @@ To choose a different log file:
 ```powershell
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --log-file .\rawdatacapture\capture_run.log
 ```
+
+To show a simple live range profile:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range
+```
+
+To show a first-pass range-Doppler heatmap:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range-doppler
+```
+
+The display runs in the same process as capture, so use `--display none` for packet-loss testing and `--display-update-every N` if plotting causes packet gaps.
 
 ## Architecture Overview
 
@@ -111,9 +126,11 @@ The local TI config examples use:
 - DCA1000 IP: `192.168.33.180`
 - DCA1000 config port: `4096`
 - DCA1000 data port: `4098`
-- Packet delay: `25 us`
+- Packet delay: keep at `200 us` for stable Python capture
 - Raw LVDS capture mode
 - Sequence number enabled
+
+The DCA1000 packet delay should stay at `200 us` unless a later throughput test proves a lower value is safe. Lower packet delays previously produced byte gaps and dropped frames; `200 us` produced clean runs with `lost_packets=0` and `byte_gaps=0/0B`.
 
 ## Data Plane
 
@@ -148,11 +165,12 @@ implemented:
   complete-frame int16 conversion
   LVDS/IQ reshape to [chirp, rx, sample]
   first-pass range FFT peak-bin reporting
+  optional live range-profile display
+  optional live range-Doppler heatmap display
 
 missing:
   packet reordering beyond duplicate/overlap trimming
-  full range/Doppler processing
-  live display
+  full calibrated range/Doppler processing
 ```
 
 ### Frame Builder
