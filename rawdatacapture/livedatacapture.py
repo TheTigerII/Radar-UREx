@@ -121,6 +121,7 @@ class RadarCaptureConfig:
 
     @classmethod
     def from_file(cls, config_path: Path) -> "RadarCaptureConfig":
+        config_path = _resolve_config_path(config_path)
         suffix = config_path.suffix.lower()
         if suffix == ".cfg":
             return cls.from_mmwave_cfg(config_path)
@@ -291,6 +292,22 @@ def _format_stats(stats: CaptureStats) -> str:
     )
 
 
+def _resolve_config_path(config_path: Path) -> Path:
+    if config_path.exists():
+        return config_path
+
+    if not config_path.is_absolute():
+        script_relative_path = Path(__file__).resolve().parent / config_path.name
+        if script_relative_path.exists():
+            return script_relative_path
+
+    raise FileNotFoundError(
+        "Config file not found: "
+        f"{config_path}. Current directory is {Path.cwd()}. "
+        "Pass the full path, or place the file beside livedatacapture.py."
+    )
+
+
 def _config_from_json_command_lines(data: Any) -> Optional[RadarCaptureConfig]:
     command_lines = list(_iter_json_command_lines(data))
     if not command_lines:
@@ -323,10 +340,14 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         "NumRxAntennas",
     )
     if num_rx_channels is None:
-        rx_channel_mask = _required_int(
+        rx_channel_mask = _optional_int(
             data, "rxChannelEn", "RxChannelEn", "rxChannelEnable", "rxChanEn"
         )
-        num_rx_channels = _bit_count(rx_channel_mask)
+        num_rx_channels = (
+            _bit_count(rx_channel_mask)
+            if rx_channel_mask is not None
+            else _enabled_count(data, "rx0En", "rx1En", "rx2En", "rx3En")
+        )
 
     num_chirps_per_frame = _optional_int(
         data,
@@ -337,12 +358,24 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
     )
     if num_chirps_per_frame is None:
         chirp_start_idx = _required_int(
-            data, "chirpStartIdx", "ChirpStartIdx", "chirpStartIndex"
+            data,
+            "fchirpStartIdx",
+            "frameChirpStartIdx",
+            "chirpStartIdx",
+            "ChirpStartIdx",
+            "chirpStartIndex",
         )
         chirp_end_idx = _required_int(
-            data, "chirpEndIdx", "ChirpEndIdx", "chirpEndIndex"
+            data,
+            "fchirpEndIdx",
+            "frameChirpEndIdx",
+            "chirpEndIdx",
+            "ChirpEndIdx",
+            "chirpEndIndex",
         )
-        num_loops = _required_int(data, "numLoops", "NumLoops", "numOfLoops")
+        num_loops = _required_int(
+            data, "numLoops", "NumLoops", "numOfLoops", "loopCount"
+        )
         num_chirps_per_frame = num_loops * (chirp_end_idx - chirp_start_idx + 1)
 
     iq_swap = bool(_optional_int(data, "iqSwap", "IQSwap", "sampleSwap") or 0)
@@ -358,7 +391,12 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
     )
     if lvds_lanes is None:
         lane_mask = _optional_int(data, "laneEn", "LaneEn", "lvdsLaneEn", "laneEnable")
-        lvds_lanes = _bit_count(lane_mask) if lane_mask is not None else 2
+        if lane_mask is not None:
+            lvds_lanes = _bit_count(lane_mask)
+        else:
+            lvds_lanes = _enabled_count(
+                data, "lane1En", "lane2En", "lane3En", "lane4En", default=2
+            )
 
     if num_adc_samples <= 0 or num_rx_channels <= 0 or num_chirps_per_frame <= 0:
         raise ValueError(f"{source_name} radar dimensions must be positive")
@@ -526,6 +564,16 @@ def _optional_value(data: Any, *names: str) -> Any:
         if _normalize_key(key) in normalized_names:
             return value
     return None
+
+
+def _enabled_count(data: Any, *names: str, default: Optional[int] = None) -> int:
+    values = [_optional_int(data, name) for name in names]
+    present_values = [value for value in values if value is not None]
+    if not present_values:
+        if default is not None:
+            return default
+        raise ValueError(f"Missing enable fields; tried: {', '.join(names)}")
+    return sum(1 for value in present_values if value != 0)
 
 
 def _walk_json(value: Any) -> Iterable[tuple[str, Any]]:
