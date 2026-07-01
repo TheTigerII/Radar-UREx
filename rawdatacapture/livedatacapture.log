@@ -147,3 +147,354 @@
 [2026-07-01T15:57:39+08:00] Streaming stopped.
 [2026-07-01T15:57:39+08:00] stats: packets=14339, frames=40, invalid_frames=1, lost_packets=65, out_of_order=0, duplicates=0, byte_gaps=1/94640B, byte_overlaps=0/0B, malformed=0
 [2026-07-01T15:57:39+08:00] --- Live capture log ended at 2026-07-01T15:57:39+08:00 ---
+[2026-07-01T15:58:23+08:00] 
+[2026-07-01T15:58:23+08:00] --- Live capture log started at 2026-07-01T15:58:23+08:00: D:\Library\Documents\GitHub\Radar-UREx\rawdatacapture\livedatacapture.log ---
+[2026-07-01T15:58:23+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=128, bytes_per_frame=524288, iq_swap=False, channel_interleave=True, lvds_lanes=2)
+[2026-07-01T15:58:23+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+[2026-07-01T15:58:23+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-07-01T15:58:24+08:00] stats: packets=200, frames=0, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:24+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=33216.92
+[2026-07-01T15:58:24+08:00] stats: packets=400, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:24+08:00] stats: packets=600, frames=1, invalid_frames=0, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:24+08:00] Dropped frame: incomplete payload, gap_bytes=119392, bytes_per_frame=524288
+[2026-07-01T15:58:24+08:00] stats: packets=800, frames=2, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:24+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=32955.48
+[2026-07-01T15:58:24+08:00] stats: packets=1000, frames=3, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:24+08:00] stats: packets=1200, frames=3, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=33279.74
+[2026-07-01T15:58:25+08:00] stats: packets=1400, frames=4, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=1600, frames=4, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=33303.70
+[2026-07-01T15:58:25+08:00] stats: packets=1800, frames=5, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=2000, frames=5, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32310.60
+[2026-07-01T15:58:25+08:00] stats: packets=2200, frames=6, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=2400, frames=6, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32570.97
+[2026-07-01T15:58:25+08:00] stats: packets=2600, frames=7, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32602.02
+[2026-07-01T15:58:25+08:00] stats: packets=2800, frames=8, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=3000, frames=8, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32778.05
+[2026-07-01T15:58:25+08:00] stats: packets=3200, frames=9, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=3400, frames=9, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32809.85
+[2026-07-01T15:58:25+08:00] stats: packets=3600, frames=10, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=3800, frames=10, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32616.59
+[2026-07-01T15:58:25+08:00] stats: packets=4000, frames=11, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=4200, frames=11, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32736.86
+[2026-07-01T15:58:25+08:00] stats: packets=4400, frames=12, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32597.08
+[2026-07-01T15:58:25+08:00] stats: packets=4600, frames=13, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=4800, frames=13, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32091.66
+[2026-07-01T15:58:25+08:00] stats: packets=5000, frames=14, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=5200, frames=14, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32574.13
+[2026-07-01T15:58:25+08:00] stats: packets=5400, frames=15, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] stats: packets=5600, frames=15, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:25+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32830.94
+[2026-07-01T15:58:25+08:00] stats: packets=5800, frames=16, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=6000, frames=16, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32700.55
+[2026-07-01T15:58:26+08:00] stats: packets=6200, frames=17, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32698.85
+[2026-07-01T15:58:26+08:00] stats: packets=6400, frames=18, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=6600, frames=18, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32650.73
+[2026-07-01T15:58:26+08:00] stats: packets=6800, frames=19, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=7000, frames=19, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32540.64
+[2026-07-01T15:58:26+08:00] stats: packets=7200, frames=20, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=7400, frames=20, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32491.86
+[2026-07-01T15:58:26+08:00] stats: packets=7600, frames=21, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=7800, frames=21, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33069.88
+[2026-07-01T15:58:26+08:00] stats: packets=8000, frames=22, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=8200, frames=22, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32535.35
+[2026-07-01T15:58:26+08:00] stats: packets=8400, frames=23, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32475.23
+[2026-07-01T15:58:26+08:00] stats: packets=8600, frames=24, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=8800, frames=24, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33068.85
+[2026-07-01T15:58:26+08:00] stats: packets=9000, frames=25, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=9200, frames=25, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33101.42
+[2026-07-01T15:58:26+08:00] stats: packets=9400, frames=26, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=9600, frames=26, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33177.02
+[2026-07-01T15:58:26+08:00] stats: packets=9800, frames=27, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=10000, frames=27, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33053.02
+[2026-07-01T15:58:26+08:00] stats: packets=10200, frames=28, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32804.26
+[2026-07-01T15:58:26+08:00] stats: packets=10400, frames=29, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:26+08:00] stats: packets=10600, frames=29, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32716.26
+[2026-07-01T15:58:27+08:00] stats: packets=10800, frames=30, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=11000, frames=30, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32691.13
+[2026-07-01T15:58:27+08:00] stats: packets=11200, frames=31, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=11400, frames=31, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32559.81
+[2026-07-01T15:58:27+08:00] stats: packets=11600, frames=32, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=11800, frames=32, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32496.89
+[2026-07-01T15:58:27+08:00] stats: packets=12000, frames=33, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32507.47
+[2026-07-01T15:58:27+08:00] stats: packets=12200, frames=34, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=12400, frames=34, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32625.81
+[2026-07-01T15:58:27+08:00] stats: packets=12600, frames=35, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=12800, frames=35, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32688.86
+[2026-07-01T15:58:27+08:00] stats: packets=13000, frames=36, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=13200, frames=36, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32636.25
+[2026-07-01T15:58:27+08:00] stats: packets=13400, frames=37, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=13600, frames=37, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32681.80
+[2026-07-01T15:58:27+08:00] stats: packets=13800, frames=38, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32626.25
+[2026-07-01T15:58:27+08:00] stats: packets=14000, frames=39, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:27+08:00] stats: packets=14200, frames=39, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:29+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32449.99
+[2026-07-01T15:58:32+08:00] Streaming stopped.
+[2026-07-01T15:58:32+08:00] stats: packets=14322, frames=40, invalid_frames=1, lost_packets=82, out_of_order=0, duplicates=0, byte_gaps=1/119392B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:58:32+08:00] --- Live capture log ended at 2026-07-01T15:58:32+08:00 ---
+[2026-07-01T15:59:03+08:00] 
+[2026-07-01T15:59:03+08:00] --- Live capture log started at 2026-07-01T15:59:03+08:00: D:\Library\Documents\GitHub\Radar-UREx\rawdatacapture\livedatacapture.log ---
+[2026-07-01T15:59:03+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=128, bytes_per_frame=524288, iq_swap=False, channel_interleave=True, lvds_lanes=2)
+[2026-07-01T15:59:03+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+[2026-07-01T15:59:03+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-07-01T15:59:06+08:00] stats: packets=200, frames=0, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=32783.93
+[2026-07-01T15:59:06+08:00] stats: packets=400, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=600, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=33620.56
+[2026-07-01T15:59:06+08:00] stats: packets=800, frames=2, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=1000, frames=2, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=32759.00
+[2026-07-01T15:59:06+08:00] stats: packets=1200, frames=3, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=1400, frames=3, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=31985.61
+[2026-07-01T15:59:06+08:00] stats: packets=1600, frames=4, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=1800, frames=4, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32073.21
+[2026-07-01T15:59:06+08:00] stats: packets=2000, frames=5, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32358.83
+[2026-07-01T15:59:06+08:00] stats: packets=2200, frames=6, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=2400, frames=6, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=33266.05
+[2026-07-01T15:59:06+08:00] stats: packets=2600, frames=7, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=2800, frames=7, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32607.33
+[2026-07-01T15:59:06+08:00] stats: packets=3000, frames=8, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=3200, frames=8, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33406.25
+[2026-07-01T15:59:06+08:00] stats: packets=3400, frames=9, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] stats: packets=3600, frames=9, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:06+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32565.79
+[2026-07-01T15:59:06+08:00] stats: packets=3800, frames=10, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32628.76
+[2026-07-01T15:59:07+08:00] stats: packets=4000, frames=11, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=4200, frames=11, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32777.20
+[2026-07-01T15:59:07+08:00] stats: packets=4400, frames=12, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=4600, frames=12, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32925.52
+[2026-07-01T15:59:07+08:00] stats: packets=4800, frames=13, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=5000, frames=13, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32698.89
+[2026-07-01T15:59:07+08:00] stats: packets=5200, frames=14, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=5400, frames=14, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32691.06
+[2026-07-01T15:59:07+08:00] stats: packets=5600, frames=15, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32667.38
+[2026-07-01T15:59:07+08:00] stats: packets=5800, frames=16, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=6000, frames=16, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32504.90
+[2026-07-01T15:59:07+08:00] stats: packets=6200, frames=17, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=6400, frames=17, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32546.84
+[2026-07-01T15:59:07+08:00] stats: packets=6600, frames=18, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=6800, frames=18, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32677.29
+[2026-07-01T15:59:07+08:00] stats: packets=7000, frames=19, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=7200, frames=19, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32441.52
+[2026-07-01T15:59:07+08:00] stats: packets=7400, frames=20, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32510.03
+[2026-07-01T15:59:07+08:00] stats: packets=7600, frames=21, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=7800, frames=21, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32549.39
+[2026-07-01T15:59:07+08:00] stats: packets=8000, frames=22, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] stats: packets=8200, frames=22, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:07+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32500.64
+[2026-07-01T15:59:07+08:00] stats: packets=8400, frames=23, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=8600, frames=23, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=31836.91
+[2026-07-01T15:59:08+08:00] stats: packets=8800, frames=24, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=9000, frames=24, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32082.03
+[2026-07-01T15:59:08+08:00] stats: packets=9200, frames=25, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32105.88
+[2026-07-01T15:59:08+08:00] stats: packets=9400, frames=26, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=9600, frames=26, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32631.92
+[2026-07-01T15:59:08+08:00] stats: packets=9800, frames=27, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=10000, frames=27, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32863.28
+[2026-07-01T15:59:08+08:00] stats: packets=10200, frames=28, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=10400, frames=28, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=31839.89
+[2026-07-01T15:59:08+08:00] stats: packets=10600, frames=29, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=10800, frames=29, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32648.97
+[2026-07-01T15:59:08+08:00] stats: packets=11000, frames=30, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32538.20
+[2026-07-01T15:59:08+08:00] stats: packets=11200, frames=31, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=11400, frames=31, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32613.06
+[2026-07-01T15:59:08+08:00] stats: packets=11600, frames=32, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=11800, frames=32, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32558.10
+[2026-07-01T15:59:08+08:00] stats: packets=12000, frames=33, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=12200, frames=33, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32714.87
+[2026-07-01T15:59:08+08:00] stats: packets=12400, frames=34, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=12600, frames=34, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33150.50
+[2026-07-01T15:59:08+08:00] stats: packets=12800, frames=35, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32810.38
+[2026-07-01T15:59:08+08:00] stats: packets=13000, frames=36, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:08+08:00] stats: packets=13200, frames=36, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32710.62
+[2026-07-01T15:59:09+08:00] stats: packets=13400, frames=37, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=13600, frames=37, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32864.41
+[2026-07-01T15:59:09+08:00] stats: packets=13800, frames=38, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=14000, frames=38, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33060.42
+[2026-07-01T15:59:09+08:00] stats: packets=14200, frames=39, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=14400, frames=39, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32888.62
+[2026-07-01T15:59:09+08:00] stats: packets=14600, frames=40, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33003.16
+[2026-07-01T15:59:09+08:00] stats: packets=14800, frames=41, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=15000, frames=41, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33232.76
+[2026-07-01T15:59:09+08:00] stats: packets=15200, frames=42, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=15400, frames=42, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32921.11
+[2026-07-01T15:59:09+08:00] stats: packets=15600, frames=43, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=15800, frames=43, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32760.10
+[2026-07-01T15:59:09+08:00] stats: packets=16000, frames=44, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=16200, frames=44, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33017.38
+[2026-07-01T15:59:09+08:00] stats: packets=16400, frames=45, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33304.47
+[2026-07-01T15:59:09+08:00] stats: packets=16600, frames=46, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=16800, frames=46, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33238.91
+[2026-07-01T15:59:09+08:00] stats: packets=17000, frames=47, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=17200, frames=47, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32731.46
+[2026-07-01T15:59:09+08:00] stats: packets=17400, frames=48, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=17600, frames=48, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32653.85
+[2026-07-01T15:59:09+08:00] stats: packets=17800, frames=49, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:09+08:00] stats: packets=18000, frames=49, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32884.52
+[2026-07-01T15:59:10+08:00] stats: packets=18200, frames=50, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32998.29
+[2026-07-01T15:59:10+08:00] stats: packets=18400, frames=51, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=18600, frames=51, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33188.11
+[2026-07-01T15:59:10+08:00] stats: packets=18800, frames=52, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=19000, frames=52, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=33068.19
+[2026-07-01T15:59:10+08:00] stats: packets=19200, frames=53, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=19400, frames=53, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32880.26
+[2026-07-01T15:59:10+08:00] stats: packets=19600, frames=54, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=19800, frames=54, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32788.41
+[2026-07-01T15:59:10+08:00] stats: packets=20000, frames=55, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32745.25
+[2026-07-01T15:59:10+08:00] stats: packets=20200, frames=56, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=20400, frames=56, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32682.95
+[2026-07-01T15:59:10+08:00] stats: packets=20600, frames=57, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=20800, frames=57, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32559.17
+[2026-07-01T15:59:10+08:00] stats: packets=21000, frames=58, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=21200, frames=58, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32577.73
+[2026-07-01T15:59:10+08:00] stats: packets=21400, frames=59, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=21600, frames=59, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32816.86
+[2026-07-01T15:59:10+08:00] stats: packets=21800, frames=60, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32987.22
+[2026-07-01T15:59:10+08:00] stats: packets=22000, frames=61, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=22200, frames=61, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32915.74
+[2026-07-01T15:59:10+08:00] stats: packets=22400, frames=62, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] stats: packets=22600, frames=62, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:10+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32890.92
+[2026-07-01T15:59:11+08:00] stats: packets=22800, frames=63, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=23000, frames=63, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32807.71
+[2026-07-01T15:59:11+08:00] stats: packets=23200, frames=64, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=23400, frames=64, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32799.37
+[2026-07-01T15:59:11+08:00] stats: packets=23600, frames=65, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32846.23
+[2026-07-01T15:59:11+08:00] stats: packets=23800, frames=66, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=24000, frames=66, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32663.17
+[2026-07-01T15:59:11+08:00] stats: packets=24200, frames=67, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=24400, frames=67, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32618.66
+[2026-07-01T15:59:11+08:00] stats: packets=24600, frames=68, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=24800, frames=68, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32680.90
+[2026-07-01T15:59:11+08:00] stats: packets=25000, frames=69, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=25200, frames=69, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32785.30
+[2026-07-01T15:59:11+08:00] stats: packets=25400, frames=70, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32712.50
+[2026-07-01T15:59:11+08:00] stats: packets=25600, frames=71, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=25800, frames=71, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32508.28
+[2026-07-01T15:59:11+08:00] stats: packets=26000, frames=72, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=26200, frames=72, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32551.92
+[2026-07-01T15:59:11+08:00] stats: packets=26400, frames=73, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=26600, frames=73, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32676.27
+[2026-07-01T15:59:11+08:00] stats: packets=26800, frames=74, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] stats: packets=27000, frames=74, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32642.80
+[2026-07-01T15:59:11+08:00] stats: packets=27200, frames=75, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:11+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32404.90
+[2026-07-01T15:59:11+08:00] stats: packets=27400, frames=76, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:12+08:00] stats: packets=27600, frames=76, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:12+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32364.69
+[2026-07-01T15:59:12+08:00] stats: packets=27800, frames=77, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:12+08:00] stats: packets=28000, frames=77, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:12+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32312.93
+[2026-07-01T15:59:12+08:00] stats: packets=28200, frames=78, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:12+08:00] stats: packets=28400, frames=78, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:12+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=32473.09
+[2026-07-01T15:59:12+08:00] stats: packets=28600, frames=79, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:12+08:00] stats: packets=28800, frames=79, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:14+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=32394.39
+[2026-07-01T15:59:17+08:00] Streaming stopped.
+[2026-07-01T15:59:17+08:00] stats: packets=28808, frames=80, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+[2026-07-01T15:59:17+08:00] --- Live capture log ended at 2026-07-01T15:59:17+08:00 ---

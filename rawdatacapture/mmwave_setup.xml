@@ -19,8 +19,8 @@
 		<param name="lpAdcMode" value="0" />
 	</apiname_lp_cfg>
 	<apiname_freqlimit_cfg>
-		<param name="freqLimitHigh" value="64" />
 		<param name="freqLimitLow" value="60" />
+		<param name="freqLimitHigh" value="64" />
 	</apiname_freqlimit_cfg>
 	<apiname_rfldobypass_cfg>
 		<param name="RFLdoByPass" value="0" />
@@ -40,15 +40,15 @@
 		<param name="freqLimitHighTx1" value="64" />
 	</apiname_calmonfreqtxpowlimit_cfg>
 	<apiname_datapath_cfg>
-		<param name="pkt0VChannelNo" value="0" />
-		<param name="dataCfgFmt1" value="0" />
-		<param name="dataCfgFmt0" value="0" />
 		<param name="dataPathCfgPath" value="1" />
+		<param name="dataCfgFmt1" value="0" />
+		<param name="pkt0VChannelNo" value="0" />
 		<param name="pkt1VChannelNo" value="0" />
+		<param name="dataCfgFmt0" value="0" />
 	</apiname_datapath_cfg>
 	<apiname_clock_cfg>
-		<param name="laneClock" value="1" />
 		<param name="dataRate" value="1" />
+		<param name="laneClock" value="1" />
 	</apiname_clock_cfg>
 	<apiname_lvdslane_cfg>
 		<param name="lane4En" value="0" />
@@ -174,7 +174,7 @@
 		<param name="chirpStartIdx" value="0" />
 	</apiname_chirp_cfg>
 	<apiname_frame_cfg>
-		<param name="frameCount" value="8" />
+		<param name="frameCount" value="80" />
 		<param name="testSourceEn" value="0" />
 		<param name="triggerSelect" value="0" />
 		<param name="periodicity" value="40" />
@@ -295,8 +295,8 @@
 		<param name="internalPMCLKLOSignalsMonEna" value="0" />
 	</apiname_analogmonenable_cfg>
 	<apiname_tx0ballbreak_cfg>
-		<param name="tx0BallBreakMonReportingMode" value="0" />
 		<param name="tx0ReflCoeffMagThreshold" value="-9" />
+		<param name="tx0BallBreakMonReportingMode" value="0" />
 	</apiname_tx0ballbreak_cfg>
 	<apiname_tx1ballbreak_cfg>
 		<param name="tx1BallBreakMonReportingMode" value="0" />
@@ -477,18 +477,18 @@
 		<param name="rxNoiseMonProfileIndex" value="0" />
 	</apiname_rxnoisefiguremon_cfg>
 	<apiname_rxifstagemon_cfg>
-		<param name="rxIFStageHPFCuttoffFreqErrThreshold" value="0" />
 		<param name="rxIFStageReportingMode" value="0" />
 		<param name="rxIFStageMonProfileIndex" value="0" />
 		<param name="rxIFStageLPFCuttoffFreqErrThreshold" value="0" />
+		<param name="rxIFStageHPFCuttoffFreqErrThreshold" value="0" />
 		<param name="rxIFStageIFAGainErrThreshold" value="0" />
 	</apiname_rxifstagemon_cfg>
 	<apiname_rxsaturationdetectormon_cfg>
+		<param name="rxSatDetectorMonSatMonNumSlice" value="63" />
+		<param name="rxSatDetectorSatMonSelect" value="1" />
 		<param name="rxSatDetectorMonSatMonRxChannelMask" value="0" />
 		<param name="rxSatDetectorMonPriTimeSliceDuration" value="0.8" />
 		<param name="rxSatDetectorMonProfileIndex" value="0" />
-		<param name="rxSatDetectorSatMonSelect" value="1" />
-		<param name="rxSatDetectorMonSatMonNumSlice" value="63" />
 	</apiname_rxsaturationdetectormon_cfg>
 	<apiname_rxsignalandimagemon_cfg>
 		<param name="sigImgMonNumSlice" value="63" />
@@ -555,8 +555,8 @@
 		<param name="tx0IntAnalogSigMonProfileIndex" value="0" />
 	</apiname_tx0intanalogsignalmon_cfg>
 	<apiname_tx1intanalogsignalmon_cfg>
-		<param name="tx1IntAnalogSigMonProfileIndex" value="0" />
 		<param name="tx1IntAnalogSigMonReportingMode" value="0" />
+		<param name="tx1IntAnalogSigMonProfileIndex" value="0" />
 	</apiname_tx1intanalogsignalmon_cfg>
 	<apiname_tx2intanalogsignalmon_cfg>
 		<param name="tx2IntAnalogSigMonReportingMode" value="0" />
@@ -567,8 +567,8 @@
 		<param name="rxIntAnalogSigMonReportingMode" value="0" />
 	</apiname_rxintanalogsignalmon_cfg>
 	<apiname_pmclklointanalogsignalmon_cfg>
-		<param name="pmCLKLOIntAnalogSigMonProfileIndex" value="0" />
 		<param name="pmCLKLOIntAnalogSigMonReportingMode" value="0" />
+		<param name="pmCLKLOIntAnalogSigMonProfileIndex" value="0" />
 	</apiname_pmclklointanalogsignalmon_cfg>
 	<apiname_gpadcintanalogsignalmon_cfg>
 		<param name="gpadcIntAnalogSigMonReportingMode" value="0" />
