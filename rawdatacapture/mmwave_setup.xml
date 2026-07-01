@@ -174,7 +174,7 @@
 		<param name="chirpStartIdx" value="0" />
 	</apiname_chirp_cfg>
 	<apiname_frame_cfg>
-		<param name="frameCount" value="160" />
+		<param name="frameCount" value="320" />
 		<param name="testSourceEn" value="0" />
 		<param name="triggerSelect" value="0" />
 		<param name="periodicity" value="40" />
