@@ -16,6 +16,7 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 - Uses the DCA1000 byte-count field to maintain a continuous payload byte stream.
 - Reads a radar `.cfg`, mmWave Studio XML, or mmWave Studio JSON to derive frame dimensions.
 - Accumulates UDP payload bytes until a full radar frame is available.
+- Marks frames touched by byte gaps as invalid and skips FFT on those frames.
 - Converts only complete frame bytes to a complex radar cube shaped `[chirp, rx, sample]`.
 - Runs a first-pass range FFT on each full cube and prints the strongest range bin.
 - Appends terminal status output to a log file for later review.
@@ -140,6 +141,8 @@ implemented:
   byte-count based payload stream
   radar .cfg / mmWave Studio XML / JSON dimension parsing
   frame buffering
+  invalid-frame tracking for packet gaps
+  skip FFT for incomplete frames
   complete-frame int16 conversion
   LVDS/IQ reshape to [chirp, rx, sample]
   first-pass range FFT peak-bin reporting

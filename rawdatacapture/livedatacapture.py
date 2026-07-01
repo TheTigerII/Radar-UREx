@@ -54,6 +54,17 @@ class CaptureStats:
     byte_gap_bytes: int = 0
     byte_overlaps: int = 0
     byte_overlap_bytes: int = 0
+    invalid_frames: int = 0
+
+
+@dataclass(frozen=True)
+class CapturedFrame:
+    data: bytes
+    gap_bytes: int
+
+    @property
+    def is_valid(self) -> bool:
+        return self.gap_bytes == 0
 
 
 class SequenceTracker:
@@ -166,10 +177,11 @@ class FrameBuffer:
         self.base_byte_count: Optional[int] = None
         self.next_stream_offset = 0
         self.buffer = bytearray()
+        self.gap_markers: list[tuple[int, int]] = []
 
     def add_payload(
         self, header: DCA1000PacketHeader, payload: bytes
-    ) -> list[bytes]:
+    ) -> list[CapturedFrame]:
         if self.base_byte_count is None:
             self.base_byte_count = header.byte_count
 
@@ -185,7 +197,9 @@ class FrameBuffer:
 
         if payload_start > self.next_stream_offset:
             gap = payload_start - self.next_stream_offset
+            gap_start = len(self.buffer)
             self.buffer.extend(b"\x00" * gap)
+            self.gap_markers.append((gap_start, gap_start + gap))
             self.next_stream_offset += gap
             self.stats.byte_gaps += 1
             self.stats.byte_gap_bytes += gap
@@ -199,17 +213,52 @@ class FrameBuffer:
         self.buffer.extend(payload)
         self.next_stream_offset += len(payload)
 
-        frames: list[bytes] = []
+        frames: list[CapturedFrame] = []
         while len(self.buffer) >= self.bytes_per_frame:
-            frames.append(bytes(self.buffer[: self.bytes_per_frame]))
+            gap_bytes = self._gap_bytes_in_next_frame()
+            frames.append(
+                CapturedFrame(
+                    data=bytes(self.buffer[: self.bytes_per_frame]),
+                    gap_bytes=gap_bytes,
+                )
+            )
+            if gap_bytes:
+                self.stats.invalid_frames += 1
             del self.buffer[: self.bytes_per_frame]
+            self._advance_gap_markers(self.bytes_per_frame)
             self.stats.frames_emitted += 1
 
         return frames
 
+    def _gap_bytes_in_next_frame(self) -> int:
+        frame_end = self.bytes_per_frame
+        total = 0
+        for start, end in self.gap_markers:
+            overlap_start = max(start, 0)
+            overlap_end = min(end, frame_end)
+            if overlap_end > overlap_start:
+                total += overlap_end - overlap_start
+        return total
 
-def process_complete_frame(frame_bytes: bytes, config: RadarCaptureConfig) -> None:
-    radar_cube = frame_bytes_to_radar_cube(frame_bytes, config)
+    def _advance_gap_markers(self, consumed_bytes: int) -> None:
+        advanced_markers = []
+        for start, end in self.gap_markers:
+            start -= consumed_bytes
+            end -= consumed_bytes
+            if end > 0:
+                advanced_markers.append((max(start, 0), end))
+        self.gap_markers = advanced_markers
+
+
+def process_complete_frame(frame: CapturedFrame, config: RadarCaptureConfig) -> None:
+    if not frame.is_valid:
+        emit(
+            "Dropped frame: incomplete payload, "
+            f"gap_bytes={frame.gap_bytes}, bytes_per_frame={config.bytes_per_frame}"
+        )
+        return
+
+    radar_cube = frame_bytes_to_radar_cube(frame.data, config)
     range_profile = np.abs(np.fft.fft(radar_cube, axis=2)).mean(axis=(0, 1))
     peak_range_bin = int(np.argmax(range_profile))
 
@@ -358,6 +407,7 @@ def _format_stats(stats: CaptureStats) -> str:
         "stats: "
         f"packets={stats.packets_received}, "
         f"frames={stats.frames_emitted}, "
+        f"invalid_frames={stats.invalid_frames}, "
         f"lost_packets={stats.lost_packets}, "
         f"out_of_order={stats.out_of_order_packets}, "
         f"duplicates={stats.duplicate_packets}, "
