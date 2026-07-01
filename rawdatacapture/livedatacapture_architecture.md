@@ -28,7 +28,7 @@ python rawdatacapture\livedatacapture.py --config path\to\radar.cfg
 or:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config path\to\mmwave_setup.xml
+python rawdatacapture\livedatacapture.py --config .\mmwave_setup.xml
 ```
 
 ## Architecture Overview
