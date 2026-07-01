@@ -1,8 +1,8 @@
 import argparse
 import json
+import multiprocessing as mp
 import queue
 import socket
-import threading
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
@@ -259,19 +259,22 @@ class LiveDisplay:
         self.update_every = max(update_every, 1)
         self.pause_seconds = max(pause_seconds, 0.001)
         self.frame_count = 0
-        self.stop_event = threading.Event()
-        self.payload_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=1)
-        self.thread: Optional[threading.Thread] = None
+        self.stop_event: Optional[mp.Event] = None
+        self.payload_queue: Optional[mp.Queue] = None
+        self.process: Optional[mp.Process] = None
 
         if self.mode == "none":
             return
 
-        self.thread = threading.Thread(
-            target=self._run_display_loop,
+        self.stop_event = mp.Event()
+        self.payload_queue = mp.Queue(maxsize=1)
+        self.process = mp.Process(
+            target=_run_display_process,
+            args=(self.mode, self.pause_seconds, self.payload_queue, self.stop_event),
             name="RadarLiveDisplay",
             daemon=True,
         )
-        self.thread.start()
+        self.process.start()
 
     def update(self, range_fft: np.ndarray) -> None:
         if self.mode == "none":
@@ -291,11 +294,21 @@ class LiveDisplay:
         self._put_latest(payload)
 
     def close(self) -> None:
-        self.stop_event.set()
-        if self.thread is not None:
-            self.thread.join(timeout=2.0)
+        if self.stop_event is not None:
+            self.stop_event.set()
+        if self.process is not None:
+            self.process.join(timeout=2.0)
+            if self.process.is_alive():
+                self.process.terminate()
+                self.process.join(timeout=1.0)
+        if self.payload_queue is not None:
+            self.payload_queue.close()
+            self.payload_queue.join_thread()
 
     def _put_latest(self, payload: np.ndarray) -> None:
+        if self.payload_queue is None:
+            return
+
         try:
             self.payload_queue.put_nowait(payload)
             return
@@ -312,60 +325,66 @@ class LiveDisplay:
         except queue.Full:
             pass
 
-    def _run_display_loop(self) -> None:
+
+def _run_display_process(
+    mode: str,
+    pause_seconds: float,
+    payload_queue: mp.Queue,
+    stop_event: mp.Event,
+) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("Live display disabled: matplotlib is not installed.")
+        return
+
+    plt.ion()
+    figure, axis = plt.subplots()
+    line = None
+    image = None
+
+    if mode == "range":
+        line = axis.plot([], [], lw=1.5)[0]
+        axis.set_title("Live Range Profile")
+        axis.set_xlabel("Range bin")
+        axis.set_ylabel("Magnitude")
+        axis.grid(True, alpha=0.3)
+    elif mode == "range-doppler":
+        image = axis.imshow(
+            np.zeros((1, 1)),
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+        )
+        figure.colorbar(image, ax=axis, label="Magnitude (dB)")
+        axis.set_title("Live Range-Doppler Heatmap")
+        axis.set_xlabel("Range bin")
+        axis.set_ylabel("Doppler bin")
+
+    figure.tight_layout()
+    plt.show(block=False)
+
+    while not stop_event.is_set():
         try:
-            import matplotlib.pyplot as plt
-        except ImportError:
-            emit("Live display disabled: matplotlib is not installed.")
-            return
+            payload = payload_queue.get(timeout=pause_seconds)
+            while True:
+                try:
+                    payload = payload_queue.get_nowait()
+                except queue.Empty:
+                    break
 
-        plt.ion()
-        figure, axis = plt.subplots()
-        line = None
-        image = None
+            if mode == "range" and line is not None:
+                _draw_range_profile(axis, line, payload)
+            elif mode == "range-doppler" and image is not None:
+                _draw_range_doppler(axis, image, payload)
 
-        if self.mode == "range":
-            line = axis.plot([], [], lw=1.5)[0]
-            axis.set_title("Live Range Profile")
-            axis.set_xlabel("Range bin")
-            axis.set_ylabel("Magnitude")
-            axis.grid(True, alpha=0.3)
-        elif self.mode == "range-doppler":
-            image = axis.imshow(
-                np.zeros((1, 1)),
-                aspect="auto",
-                origin="lower",
-                interpolation="nearest",
-            )
-            figure.colorbar(image, ax=axis, label="Magnitude (dB)")
-            axis.set_title("Live Range-Doppler Heatmap")
-            axis.set_xlabel("Range bin")
-            axis.set_ylabel("Doppler bin")
+            figure.canvas.draw_idle()
+        except queue.Empty:
+            pass
 
-        figure.tight_layout()
-        plt.show(block=False)
+        plt.pause(pause_seconds)
 
-        while not self.stop_event.is_set():
-            try:
-                payload = self.payload_queue.get(timeout=self.pause_seconds)
-                while True:
-                    try:
-                        payload = self.payload_queue.get_nowait()
-                    except queue.Empty:
-                        break
-
-                if self.mode == "range" and line is not None:
-                    _draw_range_profile(axis, line, payload)
-                elif self.mode == "range-doppler" and image is not None:
-                    _draw_range_doppler(axis, image, payload)
-
-                figure.canvas.draw_idle()
-            except queue.Empty:
-                pass
-
-            plt.pause(self.pause_seconds)
-
-        plt.close(figure)
+    plt.close(figure)
 
 
 def _draw_range_profile(axis: Any, line: Any, range_profile: np.ndarray) -> None:

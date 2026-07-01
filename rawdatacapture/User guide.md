@@ -98,7 +98,7 @@ This is an early diagnostic view, not yet a fully calibrated radar processing pr
 
 ## Display Responsiveness
 
-Matplotlib runs in a separate display thread with a one-item latest-frame queue. If plotting still feels sluggish, reduce update rate:
+Matplotlib runs in a separate display process with a one-item latest-frame queue. If plotting still feels sluggish, reduce update rate:
 
 ```powershell
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range --display-update-every 2 --display-pause 0.05
@@ -158,4 +158,3 @@ Run with faster Ctrl+C polling:
 ```powershell
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --socket-timeout 0.1
 ```
-
