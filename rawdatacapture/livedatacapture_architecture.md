@@ -62,7 +62,11 @@ To show a first-pass range-Doppler heatmap:
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range-doppler
 ```
 
-The display runs in the same process as capture, so use `--display none` for packet-loss testing and `--display-update-every N` if plotting causes packet gaps.
+The Matplotlib display runs in a separate thread with a one-item latest-frame queue. The capture loop never waits for plotting; if the UI falls behind, old display payloads are discarded and only the newest range profile or heatmap is shown. Use `--display none` for packet-loss testing and `--display-update-every N` if plotting still causes packet gaps. If the Matplotlib window looks unresponsive, give the GUI more event-loop time:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range --display-update-every 2 --display-pause 0.05
+```
 
 ## Architecture Overview
 
@@ -303,6 +307,8 @@ processing thread
 
 display/UI thread
 ```
+
+Current implementation note: `livedatacapture.py` still performs UDP receive, frame assembly, and FFT in the main capture thread, but Matplotlib rendering is split into a separate `LiveDisplay` thread fed by a one-item latest-frame queue.
 
 Policy:
 

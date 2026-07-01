@@ -1,6 +1,8 @@
 import argparse
 import json
+import queue
 import socket
+import threading
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
@@ -252,52 +254,26 @@ class FrameBuffer:
 
 
 class LiveDisplay:
-    def __init__(self, mode: str, update_every: int) -> None:
+    def __init__(self, mode: str, update_every: int, pause_seconds: float) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
+        self.pause_seconds = max(pause_seconds, 0.001)
         self.frame_count = 0
-        self.plt = None
-        self.figure = None
-        self.axis = None
-        self.line = None
-        self.image = None
+        self.stop_event = threading.Event()
+        self.payload_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=1)
+        self.thread: Optional[threading.Thread] = None
 
         if self.mode == "none":
             return
 
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError as exc:
-            raise RuntimeError(
-                "Live display requires matplotlib. Install it or run with --display none."
-            ) from exc
+        self.thread = threading.Thread(
+            target=self._run_display_loop,
+            name="RadarLiveDisplay",
+            daemon=True,
+        )
+        self.thread.start()
 
-        self.plt = plt
-        self.plt.ion()
-        self.figure, self.axis = self.plt.subplots()
-
-        if self.mode == "range":
-            self.line = self.axis.plot([], [], lw=1.5)[0]
-            self.axis.set_title("Live Range Profile")
-            self.axis.set_xlabel("Range bin")
-            self.axis.set_ylabel("Magnitude")
-            self.axis.grid(True, alpha=0.3)
-        elif self.mode == "range-doppler":
-            self.image = self.axis.imshow(
-                np.zeros((1, 1)),
-                aspect="auto",
-                origin="lower",
-                interpolation="nearest",
-            )
-            self.figure.colorbar(self.image, ax=self.axis, label="Magnitude (dB)")
-            self.axis.set_title("Live Range-Doppler Heatmap")
-            self.axis.set_xlabel("Range bin")
-            self.axis.set_ylabel("Doppler bin")
-
-        self.figure.tight_layout()
-        self.plt.show(block=False)
-
-    def update(self, radar_cube: np.ndarray, range_fft: np.ndarray) -> None:
+    def update(self, range_fft: np.ndarray) -> None:
         if self.mode == "none":
             return
 
@@ -306,28 +282,106 @@ class LiveDisplay:
             return
 
         if self.mode == "range":
-            range_profile = compute_range_profile(range_fft)
-            self._update_range_profile(range_profile)
+            payload = compute_range_profile(range_fft)
         elif self.mode == "range-doppler":
-            heatmap = compute_range_doppler_heatmap(range_fft)
-            self._update_range_doppler(heatmap)
+            payload = compute_range_doppler_heatmap(range_fft)
+        else:
+            return
 
-        self.figure.canvas.draw_idle()
-        self.plt.pause(0.001)
+        self._put_latest(payload)
 
-    def _update_range_profile(self, range_profile: np.ndarray) -> None:
-        bins = np.arange(range_profile.size)
-        self.line.set_data(bins, range_profile)
-        self.axis.set_xlim(0, max(range_profile.size - 1, 1))
-        profile_max = float(np.max(range_profile)) if range_profile.size else 1.0
-        self.axis.set_ylim(0, max(profile_max * 1.1, 1.0))
+    def close(self) -> None:
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=2.0)
 
-    def _update_range_doppler(self, heatmap: np.ndarray) -> None:
-        self.image.set_data(heatmap)
-        self.image.set_extent((0, heatmap.shape[1] - 1, 0, heatmap.shape[0] - 1))
-        self.image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
-        self.axis.set_xlim(0, max(heatmap.shape[1] - 1, 1))
-        self.axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
+    def _put_latest(self, payload: np.ndarray) -> None:
+        try:
+            self.payload_queue.put_nowait(payload)
+            return
+        except queue.Full:
+            pass
+
+        try:
+            self.payload_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        try:
+            self.payload_queue.put_nowait(payload)
+        except queue.Full:
+            pass
+
+    def _run_display_loop(self) -> None:
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            emit("Live display disabled: matplotlib is not installed.")
+            return
+
+        plt.ion()
+        figure, axis = plt.subplots()
+        line = None
+        image = None
+
+        if self.mode == "range":
+            line = axis.plot([], [], lw=1.5)[0]
+            axis.set_title("Live Range Profile")
+            axis.set_xlabel("Range bin")
+            axis.set_ylabel("Magnitude")
+            axis.grid(True, alpha=0.3)
+        elif self.mode == "range-doppler":
+            image = axis.imshow(
+                np.zeros((1, 1)),
+                aspect="auto",
+                origin="lower",
+                interpolation="nearest",
+            )
+            figure.colorbar(image, ax=axis, label="Magnitude (dB)")
+            axis.set_title("Live Range-Doppler Heatmap")
+            axis.set_xlabel("Range bin")
+            axis.set_ylabel("Doppler bin")
+
+        figure.tight_layout()
+        plt.show(block=False)
+
+        while not self.stop_event.is_set():
+            try:
+                payload = self.payload_queue.get(timeout=self.pause_seconds)
+                while True:
+                    try:
+                        payload = self.payload_queue.get_nowait()
+                    except queue.Empty:
+                        break
+
+                if self.mode == "range" and line is not None:
+                    _draw_range_profile(axis, line, payload)
+                elif self.mode == "range-doppler" and image is not None:
+                    _draw_range_doppler(axis, image, payload)
+
+                figure.canvas.draw_idle()
+            except queue.Empty:
+                pass
+
+            plt.pause(self.pause_seconds)
+
+        plt.close(figure)
+
+
+def _draw_range_profile(axis: Any, line: Any, range_profile: np.ndarray) -> None:
+    bins = np.arange(range_profile.size)
+    line.set_data(bins, range_profile)
+    axis.set_xlim(0, max(range_profile.size - 1, 1))
+    profile_max = float(np.max(range_profile)) if range_profile.size else 1.0
+    axis.set_ylim(0, max(profile_max * 1.1, 1.0))
+
+
+def _draw_range_doppler(axis: Any, image: Any, heatmap: np.ndarray) -> None:
+    image.set_data(heatmap)
+    image.set_extent((0, heatmap.shape[1] - 1, 0, heatmap.shape[0] - 1))
+    image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
+    axis.set_xlim(0, max(heatmap.shape[1] - 1, 1))
+    axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
 
 
 def process_complete_frame(
@@ -353,7 +407,7 @@ def process_complete_frame(
         f"peak_range_bin={peak_range_bin}, "
         f"peak_magnitude={range_profile[peak_range_bin]:.2f}"
     )
-    display.update(radar_cube, range_fft)
+    display.update(range_fft)
 
 
 def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
@@ -474,6 +528,7 @@ def listen_for_frames(
         emit(_format_stats(stats))
     finally:
         sock.close()
+        display.close()
 
 
 def parse_args() -> argparse.Namespace:
@@ -512,6 +567,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Update the live display every N valid frames.",
+    )
+    parser.add_argument(
+        "--display-pause",
+        type=float,
+        default=0.03,
+        help="Seconds to yield to the GUI event loop when display is enabled.",
     )
     return parser.parse_args()
 
@@ -886,7 +947,11 @@ def main() -> None:
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
-        display = LiveDisplay(args.display, args.display_update_every)
+        display = LiveDisplay(
+            args.display,
+            args.display_update_every,
+            args.display_pause,
+        )
         listen_for_frames(
             host_ip=args.host_ip,
             data_port=args.data_port,
