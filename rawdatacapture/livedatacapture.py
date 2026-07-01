@@ -3,6 +3,7 @@ import json
 import socket
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Optional, TextIO
 
@@ -744,14 +745,14 @@ def setup_terminal_log(log_path: Path) -> None:
 
     _LOG_FILE = resolved_path.open("a", encoding="utf-8", buffering=1)
     emit("")
-    emit(f"--- Live capture log started: {resolved_path} ---")
+    emit(f"--- Live capture log started at {_timestamp()}: {resolved_path} ---")
 
 
 def close_terminal_log() -> None:
     global _LOG_FILE
 
     if _LOG_FILE is not None:
-        emit("--- Live capture log ended ---")
+        emit(f"--- Live capture log ended at {_timestamp()} ---")
         _LOG_FILE.close()
         _LOG_FILE = None
 
@@ -759,7 +760,11 @@ def close_terminal_log() -> None:
 def emit(message: str) -> None:
     print(message)
     if _LOG_FILE is not None:
-        _LOG_FILE.write(f"{message}\n")
+        _LOG_FILE.write(f"[{_timestamp()}] {message}\n")
+
+
+def _timestamp() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def main() -> None:

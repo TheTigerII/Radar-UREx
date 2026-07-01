@@ -41,6 +41,8 @@ By default, terminal status output is also appended to:
 rawdatacapture\livedatacapture.log
 ```
 
+Each log line includes a local timestamp, and each run includes an explicit start/end marker.
+
 To choose a different log file:
 
 ```powershell
