@@ -1,0 +1,15 @@
+
+--- Live capture log started: D:\Library\Documents\GitHub\Radar-UREx\rawdatacapture\livedatacapture.log ---
+Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=128, bytes_per_frame=524288, iq_swap=False, channel_interleave=True, lvds_lanes=2)
+Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+Trigger frames now. Press Ctrl+C to stop.
+stats: packets=200, frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=65223.52
+stats: packets=400, frames=1, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=30, peak_magnitude=8491.47
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=0, peak_magnitude=0.00
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=0, peak_magnitude=0.00
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=0, peak_magnitude=0.00
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=0, peak_magnitude=0.00
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=0, peak_magnitude=0.00
+Complete frame cube_shape=(128, 4, 256), peak_range_bin=31, peak_magnitude=180.71
