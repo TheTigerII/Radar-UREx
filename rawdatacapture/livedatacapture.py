@@ -325,6 +325,7 @@ class LiveDisplay:
         self.frame_count = 0
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
+        self.latency_queue: Optional[mp.Queue] = None
         self.process: Optional[mp.Process] = None
 
         if self.mode == "none":
@@ -332,6 +333,7 @@ class LiveDisplay:
 
         self.stop_event = mp.Event()
         self.payload_queue = mp.Queue(maxsize=1)
+        self.latency_queue = mp.Queue(maxsize=100)
         self.process = mp.Process(
             target=_run_display_process,
             args=(
@@ -339,6 +341,7 @@ class LiveDisplay:
                 self.pause_seconds,
                 self.max_range_m,
                 self.payload_queue,
+                self.latency_queue,
                 self.stop_event,
             ),
             name="RadarLiveDisplay",
@@ -377,6 +380,7 @@ class LiveDisplay:
         self._put_latest(payload)
 
     def close(self) -> None:
+        self.emit_latency_messages()
         if self.stop_event is not None:
             self.stop_event.set()
         if self.process is not None:
@@ -384,9 +388,23 @@ class LiveDisplay:
             if self.process.is_alive():
                 self.process.terminate()
                 self.process.join(timeout=1.0)
+        self.emit_latency_messages()
         if self.payload_queue is not None:
             self.payload_queue.close()
             self.payload_queue.join_thread()
+        if self.latency_queue is not None:
+            self.latency_queue.close()
+            self.latency_queue.join_thread()
+
+    def emit_latency_messages(self) -> None:
+        if self.latency_queue is None:
+            return
+
+        while True:
+            try:
+                emit(self.latency_queue.get_nowait())
+            except queue.Empty:
+                return
 
     def _put_latest(self, payload: Any) -> None:
         if self.payload_queue is None:
@@ -513,6 +531,7 @@ def _run_display_process(
     pause_seconds: float,
     max_range_m: float,
     payload_queue: mp.Queue,
+    latency_queue: mp.Queue,
     stop_event: mp.Event,
 ) -> None:
     try:
@@ -576,11 +595,14 @@ def _run_display_process(
                 display_latency_ms = (
                     time.perf_counter() - frame_first_byte_at_s
                 ) * 1000.0
-                print(
+                latency_message = (
                     "display latency: "
-                    f"frame_first_byte_to_canvas_draw_ms={display_latency_ms:.1f}",
-                    flush=True,
+                    f"frame_first_byte_to_canvas_draw_ms={display_latency_ms:.1f}"
                 )
+                try:
+                    latency_queue.put_nowait(latency_message)
+                except queue.Full:
+                    pass
         except queue.Empty:
             pass
 
@@ -769,6 +791,7 @@ def listen_for_frames(
                 packet, _addr = sock.recvfrom(buffer_size)
                 packet_received_at_s = time.perf_counter()
             except socket.timeout:
+                display.emit_latency_messages()
                 continue
 
             try:
@@ -790,8 +813,10 @@ def listen_for_frames(
                 process_complete_frame(frame, config, display, raw_writer)
 
             if stats.packets_received % 200 == 0:
+                display.emit_latency_messages()
                 emit(_format_stats(stats))
     except KeyboardInterrupt:
+        display.emit_latency_messages()
         emit("Streaming stopped.")
         emit(_format_stats(stats))
     finally:

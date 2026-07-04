@@ -110,7 +110,7 @@ Y-axis: average FFT magnitude across chirps and RX channels
 
 The script derives range in meters from `digOutSampleRate` and `freqSlopeConst` in the radar config. The terminal still prints `peak_range_bin` for debugging, but `peak_range_m` is the physical range estimate.
 
-When a live display is enabled, the display process also prints display latency:
+When a live display is enabled, the script also prints and logs display latency:
 
 ```text
 display latency: frame_first_byte_to_canvas_draw_ms=...
