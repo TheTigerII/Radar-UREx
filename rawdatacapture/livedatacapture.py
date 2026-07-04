@@ -29,6 +29,10 @@ _LOG_FILE: Optional[TextIO] = None
 EmitFunc = Callable[[str], None]
 
 
+class CaptureStartupError(RuntimeError):
+    """Raised for expected startup failures that should not print a traceback."""
+
+
 @dataclass(frozen=True)
 class DCA1000PacketHeader:
     """DCA1000 inline packet header: uint32 sequence + uint48 byte count."""
@@ -592,6 +596,13 @@ def _run_display_process(
     stop_event: mp.Event,
 ) -> None:
     try:
+        import signal
+
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except Exception:
+        pass
+
+    try:
         import matplotlib.pyplot as plt
     except ImportError:
         print("Live display disabled: matplotlib is not installed.")
@@ -623,49 +634,55 @@ def _run_display_process(
     figure.tight_layout()
     plt.show(block=False)
 
-    while not stop_event.is_set():
-        try:
-            payload = payload_queue.get(timeout=pause_seconds)
-            while True:
-                try:
-                    payload = payload_queue.get_nowait()
-                except queue.Empty:
-                    break
+    try:
+        while not stop_event.is_set():
+            try:
+                payload = payload_queue.get(timeout=pause_seconds)
+                while True:
+                    try:
+                        payload = payload_queue.get_nowait()
+                    except queue.Empty:
+                        break
 
-            if mode == "range" and line is not None:
-                frame_first_byte_at_s, range_axis_m, range_profile = payload
-                _draw_range_profile(
-                    axis,
-                    line,
-                    range_axis_m,
-                    range_profile,
-                    max_range_m,
-                )
-            elif mode == "range-doppler" and image is not None:
-                frame_first_byte_at_s, range_axis_m, heatmap = payload
-                _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
-            else:
-                frame_first_byte_at_s = None
+                if mode == "range" and line is not None:
+                    frame_first_byte_at_s, range_axis_m, range_profile = payload
+                    _draw_range_profile(
+                        axis,
+                        line,
+                        range_axis_m,
+                        range_profile,
+                        max_range_m,
+                    )
+                elif mode == "range-doppler" and image is not None:
+                    frame_first_byte_at_s, range_axis_m, heatmap = payload
+                    _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
+                else:
+                    frame_first_byte_at_s = None
 
-            figure.canvas.draw()
-            if frame_first_byte_at_s is not None:
-                display_latency_ms = (
-                    time.perf_counter() - frame_first_byte_at_s
-                ) * 1000.0
-                latency_message = (
-                    "display latency: "
-                    f"frame_first_byte_to_canvas_draw_ms={display_latency_ms:.1f}"
-                )
-                try:
-                    latency_queue.put_nowait(latency_message)
-                except queue.Full:
-                    pass
-        except queue.Empty:
-            pass
+                figure.canvas.draw()
+                if frame_first_byte_at_s is not None:
+                    display_latency_ms = (
+                        time.perf_counter() - frame_first_byte_at_s
+                    ) * 1000.0
+                    latency_message = (
+                        "display latency: "
+                        f"frame_first_byte_to_canvas_draw_ms={display_latency_ms:.1f}"
+                    )
+                    try:
+                        latency_queue.put_nowait(latency_message)
+                    except queue.Full:
+                        pass
+            except queue.Empty:
+                pass
+            except KeyboardInterrupt:
+                break
 
-        plt.pause(pause_seconds)
-
-    plt.close(figure)
+            try:
+                plt.pause(pause_seconds)
+            except KeyboardInterrupt:
+                break
+    finally:
+        plt.close(figure)
 
 
 def _draw_range_profile(
@@ -906,7 +923,16 @@ def listen_for_frames(
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(socket_timeout_seconds)
-    sock.bind((host_ip, data_port))
+    try:
+        sock.bind((host_ip, data_port))
+    except OSError as exc:
+        sock.close()
+        raise CaptureStartupError(
+            "Could not bind UDP data socket to "
+            f"{host_ip}:{data_port}: {exc}. "
+            "Check that this IP address is assigned to your PC Ethernet adapter, "
+            "or pass the correct adapter IP with --host-ip."
+        ) from exc
 
     emit(
         "Listening for live radar stream "
@@ -1489,6 +1515,8 @@ def main() -> None:
             log_queue=log_queue,
             display=display,
         )
+    except CaptureStartupError as exc:
+        emit(f"Capture startup failed: {exc}")
     finally:
         emit("Shutting down capture pipeline...")
         if frame_queue is not None:
