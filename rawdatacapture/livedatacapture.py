@@ -25,6 +25,7 @@ DEFAULT_PROCESSING_QUEUE_SIZE = 4
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 DEFAULT_MAX_RANGE_M = 20.0
+DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
 _LOG_FILE: Optional[TextIO] = None
 EmitFunc = Callable[[str], None]
 
@@ -912,6 +913,7 @@ def listen_for_frames(
     data_port: int,
     config: RadarCaptureConfig,
     buffer_size: int,
+    socket_recv_buffer_bytes: int,
     socket_timeout_seconds: float,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
@@ -922,6 +924,20 @@ def listen_for_frames(
     frame_buffer = FrameBuffer(config.bytes_per_frame, stats)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if socket_recv_buffer_bytes > 0:
+        try:
+            sock.setsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_RCVBUF,
+                socket_recv_buffer_bytes,
+            )
+        except OSError as exc:
+            emit(
+                "Could not set UDP receive buffer to "
+                f"{socket_recv_buffer_bytes} bytes: {exc}"
+            )
+
+    actual_recv_buffer_bytes = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
     sock.settimeout(socket_timeout_seconds)
     try:
         sock.bind((host_ip, data_port))
@@ -937,6 +953,10 @@ def listen_for_frames(
     emit(
         "Listening for live radar stream "
         f"on {host_ip}:{data_port}; bytes_per_frame={config.bytes_per_frame}"
+    )
+    emit(
+        "UDP socket receive buffer: "
+        f"requested={socket_recv_buffer_bytes}B, actual={actual_recv_buffer_bytes}B"
     )
     emit("Trigger frames now. Press Ctrl+C to stop.")
 
@@ -1012,6 +1032,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host-ip", default=UDP_IP, help="Host Ethernet IP to bind.")
     parser.add_argument("--data-port", type=int, default=UDP_PORT)
     parser.add_argument("--buffer-size", type=int, default=BUFFER_SIZE)
+    parser.add_argument(
+        "--socket-recv-buffer",
+        type=int,
+        default=DEFAULT_SOCKET_RECV_BUFFER_BYTES,
+        help=(
+            "Requested UDP socket receive buffer size in bytes. "
+            "Use 0 to keep the Windows default. The actual granted size is logged."
+        ),
+    )
     parser.add_argument(
         "--processing-queue-size",
         type=int,
@@ -1510,6 +1539,7 @@ def main() -> None:
             data_port=args.data_port,
             config=config,
             buffer_size=args.buffer_size,
+            socket_recv_buffer_bytes=args.socket_recv_buffer,
             socket_timeout_seconds=args.socket_timeout,
             frame_queue=frame_queue,
             log_queue=log_queue,

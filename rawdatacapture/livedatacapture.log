@@ -1,0 +1,1069 @@
+
+[2026-07-04T16:45:41+08:00] --- Live capture log started at 2026-07-04T16:45:41+08:00: C:\Users\eliwe\Desktop\Radar-UREx\rawdatacapture\livedatacapture.log ---
+[2026-07-04T16:45:41+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=128, bytes_per_frame=524288, iq_swap=False, channel_interleave=False, lvds_lanes=2, sample_rate_ksps=10000.0, frequency_slope_mhz_per_us=29.982)
+[2026-07-04T16:45:41+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+[2026-07-04T16:45:41+08:00] UDP socket receive buffer: requested=4194304B, actual=4194304B
+[2026-07-04T16:45:41+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-07-04T16:45:47+08:00] stats: packets=200, frames=0, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=400, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=19016.29
+[2026-07-04T16:45:47+08:00] stats: packets=600, frames=1, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=800, frames=2, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=19270.17
+[2026-07-04T16:45:47+08:00] stats: packets=1000, frames=2, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=19159.27
+[2026-07-04T16:45:47+08:00] stats: packets=1200, frames=3, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=1400, frames=3, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18900.90
+[2026-07-04T16:45:47+08:00] stats: packets=1600, frames=4, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=158.8
+[2026-07-04T16:45:47+08:00] stats: packets=1800, frames=4, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=19140.71
+[2026-07-04T16:45:47+08:00] stats: packets=2000, frames=5, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=2200, frames=6, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=19156.28
+[2026-07-04T16:45:47+08:00] stats: packets=2400, frames=6, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=113.3
+[2026-07-04T16:45:47+08:00] stats: packets=2600, frames=7, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18808.07
+[2026-07-04T16:45:47+08:00] stats: packets=2800, frames=7, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18963.83
+[2026-07-04T16:45:47+08:00] stats: packets=3000, frames=8, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=3200, frames=8, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=122.1
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=19111.76
+[2026-07-04T16:45:47+08:00] stats: packets=3400, frames=9, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=3600, frames=9, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18898.04
+[2026-07-04T16:45:47+08:00] stats: packets=3800, frames=10, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=4000, frames=11, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18811.68
+[2026-07-04T16:45:47+08:00] stats: packets=4200, frames=11, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.5
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18967.55
+[2026-07-04T16:45:47+08:00] stats: packets=4400, frames=12, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=4600, frames=12, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18979.67
+[2026-07-04T16:45:47+08:00] stats: packets=4800, frames=13, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=5000, frames=13, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=129.6
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18806.21
+[2026-07-04T16:45:47+08:00] stats: packets=5200, frames=14, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=5400, frames=14, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18871.12
+[2026-07-04T16:45:47+08:00] stats: packets=5600, frames=15, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=5800, frames=16, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=98.2
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=19052.96
+[2026-07-04T16:45:47+08:00] stats: packets=6000, frames=16, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18903.21
+[2026-07-04T16:45:47+08:00] stats: packets=6200, frames=17, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=6400, frames=17, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18967.51
+[2026-07-04T16:45:47+08:00] stats: packets=6600, frames=18, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=6800, frames=18, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=116.8
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18878.03
+[2026-07-04T16:45:47+08:00] stats: packets=7000, frames=19, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=7200, frames=19, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=18053.78
+[2026-07-04T16:45:47+08:00] stats: packets=7400, frames=20, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=7600, frames=21, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] display latency: frame_first_byte_to_canvas_draw_ms=143.8
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17951.26
+[2026-07-04T16:45:47+08:00] stats: packets=7800, frames=21, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=18565.90
+[2026-07-04T16:45:47+08:00] stats: packets=8000, frames=22, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=8200, frames=22, invalid_frames=0, lost_packets=0, out_of_order=0, duplicates=0, byte_gaps=0/0B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] stats: packets=8400, frames=23, invalid_frames=0, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:47+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=18074.82
+[2026-07-04T16:45:47+08:00] stats: packets=8600, frames=23, invalid_frames=0, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Dropped frame: incomplete payload, gap_bytes=21840, bytes_per_frame=524288
+[2026-07-04T16:45:48+08:00] stats: packets=8800, frames=24, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=9000, frames=25, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=9200, frames=25, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17893.49
+[2026-07-04T16:45:48+08:00] stats: packets=9400, frames=26, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=207.5
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=18063.64
+[2026-07-04T16:45:48+08:00] stats: packets=9600, frames=26, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17694.42
+[2026-07-04T16:45:48+08:00] stats: packets=9800, frames=27, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=10000, frames=27, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17708.50
+[2026-07-04T16:45:48+08:00] stats: packets=10200, frames=28, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=97.8
+[2026-07-04T16:45:48+08:00] stats: packets=10400, frames=28, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17932.23
+[2026-07-04T16:45:48+08:00] stats: packets=10600, frames=29, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=79.4
+[2026-07-04T16:45:48+08:00] stats: packets=10800, frames=30, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17689.79
+[2026-07-04T16:45:48+08:00] stats: packets=11000, frames=30, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=11200, frames=31, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17609.30
+[2026-07-04T16:45:48+08:00] stats: packets=11400, frames=31, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17871.26
+[2026-07-04T16:45:48+08:00] stats: packets=11600, frames=32, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=92.1
+[2026-07-04T16:45:48+08:00] stats: packets=11800, frames=32, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=137.4
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17738.51
+[2026-07-04T16:45:48+08:00] stats: packets=12000, frames=33, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=12200, frames=33, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=12400, frames=34, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17551.54
+[2026-07-04T16:45:48+08:00] stats: packets=12600, frames=35, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17794.45
+[2026-07-04T16:45:48+08:00] stats: packets=12800, frames=35, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=13000, frames=36, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=57.8
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17770.72
+[2026-07-04T16:45:48+08:00] stats: packets=13200, frames=36, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=13400, frames=37, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17571.52
+[2026-07-04T16:45:48+08:00] stats: packets=13600, frames=37, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=115.7
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17723.15
+[2026-07-04T16:45:48+08:00] stats: packets=13800, frames=38, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=14000, frames=38, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17763.24
+[2026-07-04T16:45:48+08:00] stats: packets=14200, frames=39, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=103.5
+[2026-07-04T16:45:48+08:00] stats: packets=14400, frames=40, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17604.77
+[2026-07-04T16:45:48+08:00] stats: packets=14600, frames=40, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=14800, frames=41, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=90.1
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17619.44
+[2026-07-04T16:45:48+08:00] stats: packets=15000, frames=41, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=15200, frames=42, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17753.61
+[2026-07-04T16:45:48+08:00] stats: packets=15400, frames=42, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=115.6
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17656.24
+[2026-07-04T16:45:48+08:00] stats: packets=15600, frames=43, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=15800, frames=43, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17563.09
+[2026-07-04T16:45:48+08:00] stats: packets=16000, frames=44, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.5
+[2026-07-04T16:45:48+08:00] stats: packets=16200, frames=45, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17697.68
+[2026-07-04T16:45:48+08:00] stats: packets=16400, frames=45, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=84.4
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17660.36
+[2026-07-04T16:45:48+08:00] stats: packets=16600, frames=46, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=16800, frames=46, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17551.01
+[2026-07-04T16:45:48+08:00] stats: packets=17000, frames=47, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=17200, frames=47, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] display latency: frame_first_byte_to_canvas_draw_ms=106.6
+[2026-07-04T16:45:48+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17638.17
+[2026-07-04T16:45:48+08:00] stats: packets=17400, frames=48, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:48+08:00] stats: packets=17600, frames=48, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=87.4
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17684.45
+[2026-07-04T16:45:49+08:00] stats: packets=17800, frames=49, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=18000, frames=50, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17568.52
+[2026-07-04T16:45:49+08:00] stats: packets=18200, frames=50, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=107.8
+[2026-07-04T16:45:49+08:00] stats: packets=18400, frames=51, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17587.30
+[2026-07-04T16:45:49+08:00] stats: packets=18600, frames=51, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17692.19
+[2026-07-04T16:45:49+08:00] stats: packets=18800, frames=52, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=97.8
+[2026-07-04T16:45:49+08:00] stats: packets=19000, frames=52, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17590.35
+[2026-07-04T16:45:49+08:00] stats: packets=19200, frames=53, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=19400, frames=53, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=81.3
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17533.07
+[2026-07-04T16:45:49+08:00] stats: packets=19600, frames=54, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=19800, frames=55, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=102.0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=116.2
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17657.05
+[2026-07-04T16:45:49+08:00] stats: packets=20000, frames=55, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=20200, frames=56, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17594.59
+[2026-07-04T16:45:49+08:00] stats: packets=20400, frames=56, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=183.9
+[2026-07-04T16:45:49+08:00] stats: packets=20600, frames=57, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17510.24
+[2026-07-04T16:45:49+08:00] stats: packets=20800, frames=57, invalid_frames=1, lost_packets=15, out_of_order=0, duplicates=0, byte_gaps=1/21840B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=21000, frames=58, invalid_frames=1, lost_packets=73, out_of_order=0, duplicates=0, byte_gaps=3/106288B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=84448, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=109.5
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17640.28
+[2026-07-04T16:45:49+08:00] stats: packets=21200, frames=59, invalid_frames=2, lost_packets=73, out_of_order=0, duplicates=0, byte_gaps=3/106288B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=21400, frames=59, invalid_frames=2, lost_packets=146, out_of_order=0, duplicates=0, byte_gaps=5/212576B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=115024, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=21600, frames=60, invalid_frames=3, lost_packets=152, out_of_order=0, duplicates=0, byte_gaps=6/221312B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=46592, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=21800, frames=61, invalid_frames=4, lost_packets=184, out_of_order=0, duplicates=0, byte_gaps=7/267904B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=22000, frames=61, invalid_frames=4, lost_packets=212, out_of_order=0, duplicates=0, byte_gaps=8/308672B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=40768, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=22200, frames=62, invalid_frames=5, lost_packets=212, out_of_order=0, duplicates=0, byte_gaps=8/308672B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=110.1
+[2026-07-04T16:45:49+08:00] stats: packets=22400, frames=62, invalid_frames=5, lost_packets=212, out_of_order=0, duplicates=0, byte_gaps=8/308672B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17512.85
+[2026-07-04T16:45:49+08:00] stats: packets=22600, frames=63, invalid_frames=5, lost_packets=212, out_of_order=0, duplicates=0, byte_gaps=8/308672B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=139232, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=82.2
+[2026-07-04T16:45:49+08:00] stats: packets=22800, frames=64, invalid_frames=6, lost_packets=340, out_of_order=0, duplicates=0, byte_gaps=10/495040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=23000, frames=64, invalid_frames=6, lost_packets=359, out_of_order=0, duplicates=0, byte_gaps=11/522704B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=74800, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=23200, frames=65, invalid_frames=7, lost_packets=359, out_of_order=0, duplicates=0, byte_gaps=11/522704B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=23400, frames=65, invalid_frames=7, lost_packets=359, out_of_order=0, duplicates=0, byte_gaps=11/522704B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17517.03
+[2026-07-04T16:45:49+08:00] stats: packets=23600, frames=66, invalid_frames=7, lost_packets=359, out_of_order=0, duplicates=0, byte_gaps=11/522704B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=28960, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=23800, frames=67, invalid_frames=8, lost_packets=380, out_of_order=0, duplicates=0, byte_gaps=12/553280B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=24000, frames=67, invalid_frames=8, lost_packets=410, out_of_order=0, duplicates=0, byte_gaps=15/596960B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=45296, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=24200, frames=68, invalid_frames=9, lost_packets=453, out_of_order=0, duplicates=0, byte_gaps=17/659568B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=62608, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=24400, frames=69, invalid_frames=10, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=24600, frames=69, invalid_frames=10, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Dropped frame: incomplete payload, gap_bytes=2912, bytes_per_frame=524288
+[2026-07-04T16:45:49+08:00] stats: packets=24800, frames=70, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=74.8
+[2026-07-04T16:45:49+08:00] stats: packets=25000, frames=70, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17673.94
+[2026-07-04T16:45:49+08:00] stats: packets=25200, frames=71, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=25400, frames=71, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=74.6
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17565.36
+[2026-07-04T16:45:49+08:00] stats: packets=25600, frames=72, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] stats: packets=25800, frames=72, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:49+08:00] display latency: frame_first_byte_to_canvas_draw_ms=95.3
+[2026-07-04T16:45:49+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17438.01
+[2026-07-04T16:45:49+08:00] stats: packets=26000, frames=73, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=26200, frames=74, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17670.52
+[2026-07-04T16:45:50+08:00] stats: packets=26400, frames=74, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=75.3
+[2026-07-04T16:45:50+08:00] stats: packets=26600, frames=75, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17588.57
+[2026-07-04T16:45:50+08:00] stats: packets=26800, frames=75, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17454.95
+[2026-07-04T16:45:50+08:00] stats: packets=27000, frames=76, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=98.7
+[2026-07-04T16:45:50+08:00] stats: packets=27200, frames=76, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17632.56
+[2026-07-04T16:45:50+08:00] stats: packets=27400, frames=77, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=118.2
+[2026-07-04T16:45:50+08:00] stats: packets=27600, frames=77, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17587.20
+[2026-07-04T16:45:50+08:00] stats: packets=27800, frames=78, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=28000, frames=79, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=97.4
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17466.52
+[2026-07-04T16:45:50+08:00] stats: packets=28200, frames=79, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=28400, frames=80, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17616.70
+[2026-07-04T16:45:50+08:00] stats: packets=28600, frames=80, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=118.5
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17600.34
+[2026-07-04T16:45:50+08:00] stats: packets=28800, frames=81, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=29000, frames=81, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17465.16
+[2026-07-04T16:45:50+08:00] stats: packets=29200, frames=82, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=100.4
+[2026-07-04T16:45:50+08:00] stats: packets=29400, frames=82, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17604.96
+[2026-07-04T16:45:50+08:00] stats: packets=29600, frames=83, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=29800, frames=84, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=85.6
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17579.98
+[2026-07-04T16:45:50+08:00] stats: packets=30000, frames=84, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=30200, frames=85, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=108.2
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17458.13
+[2026-07-04T16:45:50+08:00] stats: packets=30400, frames=85, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=30600, frames=86, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17588.27
+[2026-07-04T16:45:50+08:00] stats: packets=30800, frames=86, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=84.7
+[2026-07-04T16:45:50+08:00] stats: packets=31000, frames=87, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17540.81
+[2026-07-04T16:45:50+08:00] stats: packets=31200, frames=87, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=31400, frames=88, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=180.0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17569.09
+[2026-07-04T16:45:50+08:00] stats: packets=31600, frames=89, invalid_frames=11, lost_packets=455, out_of_order=0, duplicates=0, byte_gaps=18/662480B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=17519.00
+[2026-07-04T16:45:50+08:00] stats: packets=31800, frames=89, invalid_frames=11, lost_packets=457, out_of_order=0, duplicates=0, byte_gaps=19/665392B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Dropped frame: incomplete payload, gap_bytes=2912, bytes_per_frame=524288
+[2026-07-04T16:45:50+08:00] stats: packets=32000, frames=90, invalid_frames=12, lost_packets=457, out_of_order=0, duplicates=0, byte_gaps=19/665392B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=32200, frames=90, invalid_frames=12, lost_packets=553, out_of_order=0, duplicates=0, byte_gaps=21/805168B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Dropped frame: incomplete payload, gap_bytes=139776, bytes_per_frame=524288
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=105.8
+[2026-07-04T16:45:50+08:00] stats: packets=32400, frames=91, invalid_frames=13, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Dropped frame: incomplete payload, gap_bytes=66976, bytes_per_frame=524288
+[2026-07-04T16:45:50+08:00] stats: packets=32600, frames=92, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=32800, frames=92, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=22197.02
+[2026-07-04T16:45:50+08:00] stats: packets=33000, frames=93, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=137.5
+[2026-07-04T16:45:50+08:00] stats: packets=33200, frames=93, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21465.27
+[2026-07-04T16:45:50+08:00] stats: packets=33400, frames=94, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=107.0
+[2026-07-04T16:45:50+08:00] stats: packets=33600, frames=94, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21643.20
+[2026-07-04T16:45:50+08:00] stats: packets=33800, frames=95, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] display latency: frame_first_byte_to_canvas_draw_ms=85.5
+[2026-07-04T16:45:50+08:00] stats: packets=34000, frames=96, invalid_frames=14, lost_packets=599, out_of_order=0, duplicates=0, byte_gaps=23/872144B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:50+08:00] stats: packets=34200, frames=96, invalid_frames=14, lost_packets=638, out_of_order=0, duplicates=0, byte_gaps=24/928928B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Dropped frame: incomplete payload, gap_bytes=56784, bytes_per_frame=524288
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21500.14
+[2026-07-04T16:45:51+08:00] stats: packets=34400, frames=97, invalid_frames=15, lost_packets=638, out_of_order=0, duplicates=0, byte_gaps=24/928928B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=180.6
+[2026-07-04T16:45:51+08:00] stats: packets=34600, frames=97, invalid_frames=15, lost_packets=638, out_of_order=0, duplicates=0, byte_gaps=24/928928B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21416.33
+[2026-07-04T16:45:51+08:00] stats: packets=34800, frames=98, invalid_frames=15, lost_packets=638, out_of_order=0, duplicates=0, byte_gaps=24/928928B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=35000, frames=98, invalid_frames=15, lost_packets=638, out_of_order=0, duplicates=0, byte_gaps=24/928928B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21414.47
+[2026-07-04T16:45:51+08:00] stats: packets=35200, frames=99, invalid_frames=15, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Dropped frame: incomplete payload, gap_bytes=55328, bytes_per_frame=524288
+[2026-07-04T16:45:51+08:00] stats: packets=35400, frames=100, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=107.1
+[2026-07-04T16:45:51+08:00] stats: packets=35600, frames=100, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=35800, frames=101, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21416.28
+[2026-07-04T16:45:51+08:00] stats: packets=36000, frames=101, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=50.3
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21530.27
+[2026-07-04T16:45:51+08:00] stats: packets=36200, frames=102, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=36400, frames=102, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21312.39
+[2026-07-04T16:45:51+08:00] stats: packets=36600, frames=103, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=90.8
+[2026-07-04T16:45:51+08:00] stats: packets=36800, frames=104, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21345.89
+[2026-07-04T16:45:51+08:00] stats: packets=37000, frames=104, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=73.3
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21581.52
+[2026-07-04T16:45:51+08:00] stats: packets=37200, frames=105, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=37400, frames=105, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=85.1
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21442.65
+[2026-07-04T16:45:51+08:00] stats: packets=37600, frames=106, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=37800, frames=106, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21423.19
+[2026-07-04T16:45:51+08:00] stats: packets=38000, frames=107, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=100.2
+[2026-07-04T16:45:51+08:00] stats: packets=38200, frames=107, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21485.11
+[2026-07-04T16:45:51+08:00] stats: packets=38400, frames=108, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=73.1
+[2026-07-04T16:45:51+08:00] stats: packets=38600, frames=109, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21335.50
+[2026-07-04T16:45:51+08:00] stats: packets=38800, frames=109, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21406.58
+[2026-07-04T16:45:51+08:00] stats: packets=39000, frames=110, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=86.1
+[2026-07-04T16:45:51+08:00] stats: packets=39200, frames=110, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21564.11
+[2026-07-04T16:45:51+08:00] stats: packets=39400, frames=111, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=102.6
+[2026-07-04T16:45:51+08:00] stats: packets=39600, frames=111, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21393.64
+[2026-07-04T16:45:51+08:00] stats: packets=39800, frames=112, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=40000, frames=112, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=77.9
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21362.34
+[2026-07-04T16:45:51+08:00] stats: packets=40200, frames=113, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=40400, frames=114, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=95.4
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21488.18
+[2026-07-04T16:45:51+08:00] stats: packets=40600, frames=114, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21423.22
+[2026-07-04T16:45:51+08:00] stats: packets=40800, frames=115, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=41000, frames=115, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=108.0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21345.25
+[2026-07-04T16:45:51+08:00] stats: packets=41200, frames=116, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=41400, frames=116, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=82.7
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21529.87
+[2026-07-04T16:45:51+08:00] stats: packets=41600, frames=117, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=41800, frames=117, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=99.6
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21495.38
+[2026-07-04T16:45:51+08:00] stats: packets=42000, frames=118, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=42200, frames=119, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21369.31
+[2026-07-04T16:45:51+08:00] stats: packets=42400, frames=119, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=110.7
+[2026-07-04T16:45:51+08:00] stats: packets=42600, frames=120, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21469.65
+[2026-07-04T16:45:51+08:00] stats: packets=42800, frames=120, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=83.5
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21423.51
+[2026-07-04T16:45:51+08:00] stats: packets=43000, frames=121, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] stats: packets=43200, frames=121, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21251.02
+[2026-07-04T16:45:51+08:00] stats: packets=43400, frames=122, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:51+08:00] display latency: frame_first_byte_to_canvas_draw_ms=96.0
+[2026-07-04T16:45:51+08:00] stats: packets=43600, frames=122, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21211.58
+[2026-07-04T16:45:52+08:00] stats: packets=43800, frames=123, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=75.2
+[2026-07-04T16:45:52+08:00] stats: packets=44000, frames=124, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21372.38
+[2026-07-04T16:45:52+08:00] stats: packets=44200, frames=124, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=44400, frames=125, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=93.8
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21270.39
+[2026-07-04T16:45:52+08:00] stats: packets=44600, frames=125, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21252.21
+[2026-07-04T16:45:52+08:00] stats: packets=44800, frames=126, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=45000, frames=126, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=114.9
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21342.62
+[2026-07-04T16:45:52+08:00] stats: packets=45200, frames=127, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=45400, frames=127, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=89.4
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21255.12
+[2026-07-04T16:45:52+08:00] stats: packets=45600, frames=128, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=45800, frames=129, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.2
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21270.79
+[2026-07-04T16:45:52+08:00] stats: packets=46000, frames=129, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21348.07
+[2026-07-04T16:45:52+08:00] stats: packets=46200, frames=130, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=46400, frames=130, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=79.6
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21274.10
+[2026-07-04T16:45:52+08:00] stats: packets=46600, frames=131, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=46800, frames=131, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=92.4
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21177.79
+[2026-07-04T16:45:52+08:00] stats: packets=47000, frames=132, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=47200, frames=132, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21368.32
+[2026-07-04T16:45:52+08:00] stats: packets=47400, frames=133, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=105.1
+[2026-07-04T16:45:52+08:00] stats: packets=47600, frames=134, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21350.74
+[2026-07-04T16:45:52+08:00] stats: packets=47800, frames=134, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=80.1
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21194.68
+[2026-07-04T16:45:52+08:00] stats: packets=48000, frames=135, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=48200, frames=135, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21348.15
+[2026-07-04T16:45:52+08:00] stats: packets=48400, frames=136, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=90.3
+[2026-07-04T16:45:52+08:00] stats: packets=48600, frames=136, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21357.10
+[2026-07-04T16:45:52+08:00] stats: packets=48800, frames=137, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=108.9
+[2026-07-04T16:45:52+08:00] stats: packets=49000, frames=137, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=49200, frames=138, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=124.1
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21233.14
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21229.89
+[2026-07-04T16:45:52+08:00] stats: packets=49400, frames=139, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=49600, frames=139, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=49800, frames=140, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=105.9
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21448.86
+[2026-07-04T16:45:52+08:00] stats: packets=50000, frames=140, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21254.24
+[2026-07-04T16:45:52+08:00] stats: packets=50200, frames=141, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=50400, frames=141, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=63.8
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21247.43
+[2026-07-04T16:45:52+08:00] stats: packets=50600, frames=142, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=50800, frames=142, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=95.1
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21197.74
+[2026-07-04T16:45:52+08:00] stats: packets=51000, frames=143, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=51200, frames=144, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.7
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21342.92
+[2026-07-04T16:45:52+08:00] stats: packets=51400, frames=144, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=51600, frames=145, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21542.59
+[2026-07-04T16:45:52+08:00] stats: packets=51800, frames=145, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=78.9
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21380.21
+[2026-07-04T16:45:52+08:00] stats: packets=52000, frames=146, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] stats: packets=52200, frames=146, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21007.27
+[2026-07-04T16:45:52+08:00] stats: packets=52400, frames=147, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:52+08:00] display latency: frame_first_byte_to_canvas_draw_ms=94.0
+[2026-07-04T16:45:52+08:00] stats: packets=52600, frames=147, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21136.72
+[2026-07-04T16:45:53+08:00] stats: packets=52800, frames=148, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=114.5
+[2026-07-04T16:45:53+08:00] stats: packets=53000, frames=149, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20896.34
+[2026-07-04T16:45:53+08:00] stats: packets=53200, frames=149, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=53400, frames=150, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=97.2
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21618.04
+[2026-07-04T16:45:53+08:00] stats: packets=53600, frames=150, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.562, peak_range_bin=8, peak_magnitude=25431.86
+[2026-07-04T16:45:53+08:00] stats: packets=53800, frames=151, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=113.2
+[2026-07-04T16:45:53+08:00] stats: packets=54000, frames=151, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=23219.21
+[2026-07-04T16:45:53+08:00] stats: packets=54200, frames=152, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=54400, frames=152, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=88.6
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20324.58
+[2026-07-04T16:45:53+08:00] stats: packets=54600, frames=153, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=54800, frames=154, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=106.9
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21907.82
+[2026-07-04T16:45:53+08:00] stats: packets=55000, frames=154, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=55200, frames=155, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=21259.79
+[2026-07-04T16:45:53+08:00] stats: packets=55400, frames=155, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=80.5
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21452.88
+[2026-07-04T16:45:53+08:00] stats: packets=55600, frames=156, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=55800, frames=156, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=96.6
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=24104.49
+[2026-07-04T16:45:53+08:00] stats: packets=56000, frames=157, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=56200, frames=157, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=22957.33
+[2026-07-04T16:45:53+08:00] stats: packets=56400, frames=158, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=81.5
+[2026-07-04T16:45:53+08:00] stats: packets=56600, frames=159, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20243.55
+[2026-07-04T16:45:53+08:00] stats: packets=56800, frames=159, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=57000, frames=160, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=109.0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20646.95
+[2026-07-04T16:45:53+08:00] stats: packets=57200, frames=160, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20619.29
+[2026-07-04T16:45:53+08:00] stats: packets=57400, frames=161, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=57600, frames=161, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=86.0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=22835.86
+[2026-07-04T16:45:53+08:00] stats: packets=57800, frames=162, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=58000, frames=162, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=23496.50
+[2026-07-04T16:45:53+08:00] stats: packets=58200, frames=163, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=107.7
+[2026-07-04T16:45:53+08:00] stats: packets=58400, frames=164, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=24213.99
+[2026-07-04T16:45:53+08:00] stats: packets=58600, frames=164, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=22327.06
+[2026-07-04T16:45:53+08:00] stats: packets=58800, frames=165, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=91.4
+[2026-07-04T16:45:53+08:00] stats: packets=59000, frames=165, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21039.78
+[2026-07-04T16:45:53+08:00] stats: packets=59200, frames=166, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=111.7
+[2026-07-04T16:45:53+08:00] stats: packets=59400, frames=166, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20952.66
+[2026-07-04T16:45:53+08:00] stats: packets=59600, frames=167, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=59800, frames=167, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=86.3
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20694.18
+[2026-07-04T16:45:53+08:00] stats: packets=60000, frames=168, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=60200, frames=169, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=100.9
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21761.76
+[2026-07-04T16:45:53+08:00] stats: packets=60400, frames=169, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20798.19
+[2026-07-04T16:45:53+08:00] stats: packets=60600, frames=170, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] stats: packets=60800, frames=170, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=83.7
+[2026-07-04T16:45:53+08:00] stats: packets=61000, frames=171, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21016.94
+[2026-07-04T16:45:53+08:00] stats: packets=61200, frames=171, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.562, peak_range_bin=8, peak_magnitude=25613.45
+[2026-07-04T16:45:53+08:00] stats: packets=61400, frames=172, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:53+08:00] display latency: frame_first_byte_to_canvas_draw_ms=101.3
+[2026-07-04T16:45:53+08:00] stats: packets=61600, frames=172, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20840.19
+[2026-07-04T16:45:54+08:00] stats: packets=61800, frames=173, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=113.8
+[2026-07-04T16:45:54+08:00] stats: packets=62000, frames=174, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20618.49
+[2026-07-04T16:45:54+08:00] stats: packets=62200, frames=174, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20926.46
+[2026-07-04T16:45:54+08:00] stats: packets=62400, frames=175, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=89.3
+[2026-07-04T16:45:54+08:00] stats: packets=62600, frames=175, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21205.20
+[2026-07-04T16:45:54+08:00] stats: packets=62800, frames=176, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=102.5
+[2026-07-04T16:45:54+08:00] stats: packets=63000, frames=176, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20796.10
+[2026-07-04T16:45:54+08:00] stats: packets=63200, frames=177, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=63400, frames=177, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=78.3
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20938.56
+[2026-07-04T16:45:54+08:00] stats: packets=63600, frames=178, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=63800, frames=179, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=89.0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21251.53
+[2026-07-04T16:45:54+08:00] stats: packets=64000, frames=179, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20712.25
+[2026-07-04T16:45:54+08:00] stats: packets=64200, frames=180, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=100.9
+[2026-07-04T16:45:54+08:00] stats: packets=64400, frames=180, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20718.31
+[2026-07-04T16:45:54+08:00] stats: packets=64600, frames=181, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=64800, frames=181, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=77.7
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21280.39
+[2026-07-04T16:45:54+08:00] stats: packets=65000, frames=182, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=65200, frames=182, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=65400, frames=183, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20868.99
+[2026-07-04T16:45:54+08:00] stats: packets=65600, frames=184, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=128.8
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20539.97
+[2026-07-04T16:45:54+08:00] stats: packets=65800, frames=184, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=66000, frames=185, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=91.2
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21212.58
+[2026-07-04T16:45:54+08:00] stats: packets=66200, frames=185, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21038.61
+[2026-07-04T16:45:54+08:00] stats: packets=66400, frames=186, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=66600, frames=186, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=80.4
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20333.66
+[2026-07-04T16:45:54+08:00] stats: packets=66800, frames=187, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=67000, frames=187, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=94.3
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21028.80
+[2026-07-04T16:45:54+08:00] stats: packets=67200, frames=188, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=67400, frames=189, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21173.09
+[2026-07-04T16:45:54+08:00] stats: packets=67600, frames=189, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=71.0
+[2026-07-04T16:45:54+08:00] stats: packets=67800, frames=190, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20415.49
+[2026-07-04T16:45:54+08:00] stats: packets=68000, frames=190, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=90.0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20897.55
+[2026-07-04T16:45:54+08:00] stats: packets=68200, frames=191, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=68400, frames=191, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21169.36
+[2026-07-04T16:45:54+08:00] stats: packets=68600, frames=192, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.9
+[2026-07-04T16:45:54+08:00] stats: packets=68800, frames=192, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20489.10
+[2026-07-04T16:45:54+08:00] stats: packets=69000, frames=193, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=69200, frames=194, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=82.8
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20617.33
+[2026-07-04T16:45:54+08:00] stats: packets=69400, frames=194, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=69600, frames=195, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=101.6
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21263.54
+[2026-07-04T16:45:54+08:00] stats: packets=69800, frames=195, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20657.26
+[2026-07-04T16:45:54+08:00] stats: packets=70000, frames=196, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] stats: packets=70200, frames=196, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:54+08:00] display latency: frame_first_byte_to_canvas_draw_ms=83.4
+[2026-07-04T16:45:54+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20775.25
+[2026-07-04T16:45:54+08:00] stats: packets=70400, frames=197, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=70600, frames=197, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21365.83
+[2026-07-04T16:45:55+08:00] stats: packets=70800, frames=198, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=106.1
+[2026-07-04T16:45:55+08:00] stats: packets=71000, frames=199, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21014.51
+[2026-07-04T16:45:55+08:00] stats: packets=71200, frames=199, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=71400, frames=200, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=88.8
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20659.62
+[2026-07-04T16:45:55+08:00] stats: packets=71600, frames=200, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21017.32
+[2026-07-04T16:45:55+08:00] stats: packets=71800, frames=201, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=110.4
+[2026-07-04T16:45:55+08:00] stats: packets=72000, frames=201, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21074.70
+[2026-07-04T16:45:55+08:00] stats: packets=72200, frames=202, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=72400, frames=202, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=96.1
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20497.40
+[2026-07-04T16:45:55+08:00] stats: packets=72600, frames=203, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=72800, frames=204, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20988.35
+[2026-07-04T16:45:55+08:00] stats: packets=73000, frames=204, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=108.8
+[2026-07-04T16:45:55+08:00] stats: packets=73200, frames=205, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21124.90
+[2026-07-04T16:45:55+08:00] stats: packets=73400, frames=205, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20727.70
+[2026-07-04T16:45:55+08:00] stats: packets=73600, frames=206, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=92.6
+[2026-07-04T16:45:55+08:00] stats: packets=73800, frames=206, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20915.62
+[2026-07-04T16:45:55+08:00] stats: packets=74000, frames=207, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=106.9
+[2026-07-04T16:45:55+08:00] stats: packets=74200, frames=207, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21077.72
+[2026-07-04T16:45:55+08:00] stats: packets=74400, frames=208, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=74600, frames=209, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=81.8
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20749.35
+[2026-07-04T16:45:55+08:00] stats: packets=74800, frames=209, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=75000, frames=210, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=101.5
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20842.84
+[2026-07-04T16:45:55+08:00] stats: packets=75200, frames=210, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20999.76
+[2026-07-04T16:45:55+08:00] stats: packets=75400, frames=211, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=75600, frames=211, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=79.2
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20719.00
+[2026-07-04T16:45:55+08:00] stats: packets=75800, frames=212, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=76000, frames=212, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20884.61
+[2026-07-04T16:45:55+08:00] stats: packets=76200, frames=213, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.0
+[2026-07-04T16:45:55+08:00] stats: packets=76400, frames=214, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20930.47
+[2026-07-04T16:45:55+08:00] stats: packets=76600, frames=214, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=76800, frames=215, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=88.3
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20809.48
+[2026-07-04T16:45:55+08:00] stats: packets=77000, frames=215, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20817.19
+[2026-07-04T16:45:55+08:00] stats: packets=77200, frames=216, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=77400, frames=216, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=113.1
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20979.27
+[2026-07-04T16:45:55+08:00] stats: packets=77600, frames=217, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=77800, frames=217, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20713.95
+[2026-07-04T16:45:55+08:00] stats: packets=78000, frames=218, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=102.3
+[2026-07-04T16:45:55+08:00] stats: packets=78200, frames=219, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21137.14
+[2026-07-04T16:45:55+08:00] stats: packets=78400, frames=219, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=78600, frames=220, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=91.6
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21432.15
+[2026-07-04T16:45:55+08:00] stats: packets=78800, frames=220, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] stats: packets=79000, frames=221, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20496.99
+[2026-07-04T16:45:55+08:00] stats: packets=79200, frames=221, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:55+08:00] display latency: frame_first_byte_to_canvas_draw_ms=127.4
+[2026-07-04T16:45:55+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20462.80
+[2026-07-04T16:45:55+08:00] stats: packets=79400, frames=222, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=79600, frames=222, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=22039.63
+[2026-07-04T16:45:56+08:00] stats: packets=79800, frames=223, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=80000, frames=224, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=122.4
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20679.69
+[2026-07-04T16:45:56+08:00] stats: packets=80200, frames=224, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=80400, frames=225, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20182.72
+[2026-07-04T16:45:56+08:00] stats: packets=80600, frames=225, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=122.7
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=18222.48
+[2026-07-04T16:45:56+08:00] stats: packets=80800, frames=226, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=81000, frames=226, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=22202.50
+[2026-07-04T16:45:56+08:00] stats: packets=81200, frames=227, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=81400, frames=227, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=127.9
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=19557.15
+[2026-07-04T16:45:56+08:00] stats: packets=81600, frames=228, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=81800, frames=229, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=22779.84
+[2026-07-04T16:45:56+08:00] stats: packets=82000, frames=229, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=82200, frames=230, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=97.1
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=22531.10
+[2026-07-04T16:45:56+08:00] stats: packets=82400, frames=230, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=15029.49
+[2026-07-04T16:45:56+08:00] stats: packets=82600, frames=231, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=82800, frames=231, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20779.74
+[2026-07-04T16:45:56+08:00] stats: packets=83000, frames=232, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=113.9
+[2026-07-04T16:45:56+08:00] stats: packets=83200, frames=232, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20671.50
+[2026-07-04T16:45:56+08:00] stats: packets=83400, frames=233, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=83600, frames=234, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=20028.10
+[2026-07-04T16:45:56+08:00] stats: packets=83800, frames=234, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=84000, frames=235, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=128.4
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=24834.94
+[2026-07-04T16:45:56+08:00] stats: packets=84200, frames=235, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20445.77
+[2026-07-04T16:45:56+08:00] stats: packets=84400, frames=236, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=84600, frames=236, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21342.16
+[2026-07-04T16:45:56+08:00] stats: packets=84800, frames=237, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=107.1
+[2026-07-04T16:45:56+08:00] stats: packets=85000, frames=237, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.391, peak_range_bin=2, peak_magnitude=24065.29
+[2026-07-04T16:45:56+08:00] stats: packets=85200, frames=238, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=85400, frames=239, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=18281.26
+[2026-07-04T16:45:56+08:00] stats: packets=85600, frames=239, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=85800, frames=240, invalid_frames=16, lost_packets=676, out_of_order=0, duplicates=0, byte_gaps=25/984256B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=109.1
+[2026-07-04T16:45:56+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=15151.21
+[2026-07-04T16:45:56+08:00] stats: packets=86000, frames=240, invalid_frames=16, lost_packets=711, out_of_order=0, duplicates=0, byte_gaps=26/1035216B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Dropped frame: incomplete payload, gap_bytes=56784, bytes_per_frame=524288
+[2026-07-04T16:45:56+08:00] display latency: frame_first_byte_to_canvas_draw_ms=165.8
+[2026-07-04T16:45:56+08:00] stats: packets=86200, frames=241, invalid_frames=17, lost_packets=717, out_of_order=0, duplicates=0, byte_gaps=28/1043952B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] stats: packets=86400, frames=241, invalid_frames=17, lost_packets=717, out_of_order=0, duplicates=0, byte_gaps=28/1043952B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:56+08:00] Dropped frame: incomplete payload, gap_bytes=2912, bytes_per_frame=524288
+[2026-07-04T16:45:56+08:00] stats: packets=86600, frames=242, invalid_frames=18, lost_packets=717, out_of_order=0, duplicates=0, byte_gaps=28/1043952B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=86800, frames=243, invalid_frames=18, lost_packets=717, out_of_order=0, duplicates=0, byte_gaps=28/1043952B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21039.02
+[2026-07-04T16:45:57+08:00] stats: packets=87000, frames=243, invalid_frames=18, lost_packets=717, out_of_order=0, duplicates=0, byte_gaps=28/1043952B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Dropped frame: incomplete payload, gap_bytes=13104, bytes_per_frame=524288
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=227.2
+[2026-07-04T16:45:57+08:00] stats: packets=87200, frames=244, invalid_frames=19, lost_packets=733, out_of_order=0, duplicates=0, byte_gaps=30/1067248B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=87400, frames=244, invalid_frames=19, lost_packets=737, out_of_order=0, duplicates=0, byte_gaps=31/1073072B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Dropped frame: incomplete payload, gap_bytes=16016, bytes_per_frame=524288
+[2026-07-04T16:45:57+08:00] stats: packets=87600, frames=245, invalid_frames=20, lost_packets=737, out_of_order=0, duplicates=0, byte_gaps=31/1073072B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=87800, frames=245, invalid_frames=20, lost_packets=737, out_of_order=0, duplicates=0, byte_gaps=31/1073072B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=88000, frames=246, invalid_frames=20, lost_packets=737, out_of_order=0, duplicates=0, byte_gaps=31/1073072B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=88200, frames=246, invalid_frames=20, lost_packets=737, out_of_order=0, duplicates=0, byte_gaps=31/1073072B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=29082.45
+[2026-07-04T16:45:57+08:00] stats: packets=88400, frames=247, invalid_frames=20, lost_packets=737, out_of_order=0, duplicates=0, byte_gaps=31/1073072B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=88600, frames=248, invalid_frames=20, lost_packets=737, out_of_order=0, duplicates=0, byte_gaps=31/1073072B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=25054.43
+[2026-07-04T16:45:57+08:00] stats: packets=88800, frames=248, invalid_frames=20, lost_packets=815, out_of_order=0, duplicates=0, byte_gaps=33/1186640B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Dropped frame: incomplete payload, gap_bytes=141072, bytes_per_frame=524288
+[2026-07-04T16:45:57+08:00] stats: packets=89000, frames=249, invalid_frames=21, lost_packets=1004, out_of_order=0, duplicates=0, byte_gaps=36/1461824B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Dropped frame: incomplete payload, gap_bytes=247680, bytes_per_frame=524288
+[2026-07-04T16:45:57+08:00] Dropped frame: incomplete payload, gap_bytes=283920, bytes_per_frame=524288
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=22379.85
+[2026-07-04T16:45:57+08:00] stats: packets=89200, frames=251, invalid_frames=23, lost_packets=1199, out_of_order=0, duplicates=0, byte_gaps=37/1745744B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=89400, frames=251, invalid_frames=23, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Dropped frame: incomplete payload, gap_bytes=16016, bytes_per_frame=524288
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=78.6
+[2026-07-04T16:45:57+08:00] stats: packets=89600, frames=252, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=89800, frames=252, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=90000, frames=253, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17262.91
+[2026-07-04T16:45:57+08:00] stats: packets=90200, frames=253, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17481.24
+[2026-07-04T16:45:57+08:00] stats: packets=90400, frames=254, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=90600, frames=254, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=18207.71
+[2026-07-04T16:45:57+08:00] stats: packets=90800, frames=255, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=103.8
+[2026-07-04T16:45:57+08:00] stats: packets=91000, frames=256, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=18071.42
+[2026-07-04T16:45:57+08:00] stats: packets=91200, frames=256, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=91400, frames=257, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20412.48
+[2026-07-04T16:45:57+08:00] stats: packets=91600, frames=257, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=91800, frames=258, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=109.2
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=24245.28
+[2026-07-04T16:45:57+08:00] stats: packets=92000, frames=258, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20104.27
+[2026-07-04T16:45:57+08:00] stats: packets=92200, frames=259, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=92400, frames=259, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=17411.35
+[2026-07-04T16:45:57+08:00] stats: packets=92600, frames=260, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=92800, frames=261, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20334.65
+[2026-07-04T16:45:57+08:00] stats: packets=93000, frames=261, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.6
+[2026-07-04T16:45:57+08:00] stats: packets=93200, frames=262, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=26438.38
+[2026-07-04T16:45:57+08:00] stats: packets=93400, frames=262, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=93600, frames=263, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=24418.34
+[2026-07-04T16:45:57+08:00] stats: packets=93800, frames=263, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=133.2
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=19098.54
+[2026-07-04T16:45:57+08:00] stats: packets=94000, frames=264, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=94200, frames=264, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=24416.88
+[2026-07-04T16:45:57+08:00] stats: packets=94400, frames=265, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=94600, frames=266, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=19610.86
+[2026-07-04T16:45:57+08:00] stats: packets=94800, frames=266, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=122.6
+[2026-07-04T16:45:57+08:00] stats: packets=95000, frames=267, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20992.89
+[2026-07-04T16:45:57+08:00] stats: packets=95200, frames=267, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=95400, frames=268, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.367, peak_range_bin=7, peak_magnitude=22027.78
+[2026-07-04T16:45:57+08:00] stats: packets=95600, frames=268, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20858.70
+[2026-07-04T16:45:57+08:00] stats: packets=95800, frames=269, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] display latency: frame_first_byte_to_canvas_draw_ms=115.8
+[2026-07-04T16:45:57+08:00] stats: packets=96000, frames=269, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20116.60
+[2026-07-04T16:45:57+08:00] stats: packets=96200, frames=270, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] stats: packets=96400, frames=271, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:57+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20941.75
+[2026-07-04T16:45:57+08:00] stats: packets=96600, frames=271, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=96800, frames=272, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=145.5
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21311.34
+[2026-07-04T16:45:58+08:00] stats: packets=97000, frames=272, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=97200, frames=273, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20833.70
+[2026-07-04T16:45:58+08:00] stats: packets=97400, frames=273, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20609.18
+[2026-07-04T16:45:58+08:00] stats: packets=97600, frames=274, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=97800, frames=274, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=127.4
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21214.82
+[2026-07-04T16:45:58+08:00] stats: packets=98000, frames=275, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=98200, frames=276, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21116.24
+[2026-07-04T16:45:58+08:00] stats: packets=98400, frames=276, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=98600, frames=277, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20448.62
+[2026-07-04T16:45:58+08:00] stats: packets=98800, frames=277, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=104.9
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21126.63
+[2026-07-04T16:45:58+08:00] stats: packets=99000, frames=278, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=99200, frames=278, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21161.84
+[2026-07-04T16:45:58+08:00] stats: packets=99400, frames=279, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=99600, frames=279, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=133.9
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20476.13
+[2026-07-04T16:45:58+08:00] stats: packets=99800, frames=280, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=100000, frames=281, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20741.68
+[2026-07-04T16:45:58+08:00] stats: packets=100200, frames=281, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=100400, frames=282, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21216.77
+[2026-07-04T16:45:58+08:00] stats: packets=100600, frames=282, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=116.0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20672.71
+[2026-07-04T16:45:58+08:00] stats: packets=100800, frames=283, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=101000, frames=283, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20707.04
+[2026-07-04T16:45:58+08:00] stats: packets=101200, frames=284, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=101400, frames=284, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=134.3
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21237.69
+[2026-07-04T16:45:58+08:00] stats: packets=101600, frames=285, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=101800, frames=286, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20939.95
+[2026-07-04T16:45:58+08:00] stats: packets=102000, frames=286, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=102200, frames=287, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20694.23
+[2026-07-04T16:45:58+08:00] stats: packets=102400, frames=287, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=112.7
+[2026-07-04T16:45:58+08:00] stats: packets=102600, frames=288, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21191.44
+[2026-07-04T16:45:58+08:00] stats: packets=102800, frames=288, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21112.35
+[2026-07-04T16:45:58+08:00] stats: packets=103000, frames=289, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=103200, frames=289, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] display latency: frame_first_byte_to_canvas_draw_ms=138.8
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20770.60
+[2026-07-04T16:45:58+08:00] stats: packets=103400, frames=290, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=103600, frames=291, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] stats: packets=103800, frames=291, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:58+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21043.27
+[2026-07-04T16:45:58+08:00] stats: packets=104000, frames=292, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=162.4
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=221.7
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=277.2
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21113.42
+[2026-07-04T16:45:59+08:00] stats: packets=104200, frames=292, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=104400, frames=293, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=104600, frames=293, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20839.48
+[2026-07-04T16:45:59+08:00] stats: packets=104800, frames=294, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=105000, frames=294, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20951.30
+[2026-07-04T16:45:59+08:00] stats: packets=105200, frames=295, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=105400, frames=296, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=359.6
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21069.03
+[2026-07-04T16:45:59+08:00] stats: packets=105600, frames=296, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=105800, frames=297, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20868.55
+[2026-07-04T16:45:59+08:00] stats: packets=106000, frames=297, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20903.01
+[2026-07-04T16:45:59+08:00] stats: packets=106200, frames=298, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=119.3
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21027.75
+[2026-07-04T16:45:59+08:00] stats: packets=106400, frames=298, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=106600, frames=299, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20946.82
+[2026-07-04T16:45:59+08:00] stats: packets=106800, frames=299, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=179.1
+[2026-07-04T16:45:59+08:00] stats: packets=107000, frames=300, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20903.39
+[2026-07-04T16:45:59+08:00] stats: packets=107200, frames=301, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=107400, frames=301, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21009.33
+[2026-07-04T16:45:59+08:00] stats: packets=107600, frames=302, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] stats: packets=107800, frames=302, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20974.23
+[2026-07-04T16:45:59+08:00] stats: packets=108000, frames=303, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20923.65
+[2026-07-04T16:45:59+08:00] stats: packets=108200, frames=303, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=110.7
+[2026-07-04T16:45:59+08:00] stats: packets=108400, frames=304, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21000.17
+[2026-07-04T16:45:59+08:00] stats: packets=108600, frames=304, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=149.4
+[2026-07-04T16:45:59+08:00] stats: packets=108800, frames=305, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20960.61
+[2026-07-04T16:45:59+08:00] stats: packets=109000, frames=306, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20966.98
+[2026-07-04T16:45:59+08:00] stats: packets=109200, frames=306, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=202.5
+[2026-07-04T16:45:59+08:00] stats: packets=109400, frames=307, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=20965.53
+[2026-07-04T16:45:59+08:00] stats: packets=109600, frames=307, invalid_frames=24, lost_packets=1210, out_of_order=0, duplicates=0, byte_gaps=38/1761760B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] Dropped frame: incomplete payload, gap_bytes=7280, bytes_per_frame=524288
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=219.1
+[2026-07-04T16:45:59+08:00] stats: packets=109800, frames=308, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:45:59+08:00] display latency: frame_first_byte_to_canvas_draw_ms=248.0
+[2026-07-04T16:45:59+08:00] stats: packets=110000, frames=308, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] stats: packets=110200, frames=309, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=1.562, peak_range_bin=8, peak_magnitude=23051.42
+[2026-07-04T16:46:00+08:00] stats: packets=110400, frames=309, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] stats: packets=110600, frames=310, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] display latency: frame_first_byte_to_canvas_draw_ms=315.3
+[2026-07-04T16:46:00+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21569.38
+[2026-07-04T16:46:00+08:00] stats: packets=110800, frames=311, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] stats: packets=111000, frames=311, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21231.27
+[2026-07-04T16:46:00+08:00] stats: packets=111200, frames=312, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] stats: packets=111400, frames=312, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21530.38
+[2026-07-04T16:46:00+08:00] stats: packets=111600, frames=313, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] stats: packets=111800, frames=313, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=19168.91
+[2026-07-04T16:46:00+08:00] stats: packets=112000, frames=314, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=21305.83
+[2026-07-04T16:46:00+08:00] stats: packets=112200, frames=314, invalid_frames=25, lost_packets=1215, out_of_order=0, duplicates=0, byte_gaps=39/1769040B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] display latency: frame_first_byte_to_canvas_draw_ms=137.0
+[2026-07-04T16:46:00+08:00] Complete frame cube_shape=(128, 4, 256), peak_range_m=0.195, peak_range_bin=1, peak_magnitude=24516.80
+[2026-07-04T16:46:00+08:00] stats: packets=112400, frames=315, invalid_frames=25, lost_packets=1336, out_of_order=0, duplicates=0, byte_gaps=41/1945216B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] Dropped frame: incomplete payload, gap_bytes=176176, bytes_per_frame=524288
+[2026-07-04T16:46:00+08:00] display latency: frame_first_byte_to_canvas_draw_ms=131.2
+[2026-07-04T16:46:00+08:00] stats: packets=112600, frames=316, invalid_frames=26, lost_packets=1472, out_of_order=0, duplicates=0, byte_gaps=47/2143232B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:00+08:00] Dropped frame: incomplete payload, gap_bytes=218208, bytes_per_frame=524288
+[2026-07-04T16:46:00+08:00] Dropped frame: incomplete payload, gap_bytes=524288, bytes_per_frame=524288
+[2026-07-04T16:46:00+08:00] display latency: frame_first_byte_to_canvas_draw_ms=218.7
+[2026-07-04T16:46:01+08:00] Dropped frame: incomplete payload, gap_bytes=419456, bytes_per_frame=524288
+[2026-07-04T16:46:01+08:00] Dropped frame: incomplete payload, gap_bytes=524096, bytes_per_frame=524288
+[2026-07-04T16:46:26+08:00] Streaming stopped.
+[2026-07-04T16:46:26+08:00] stats: packets=112735, frames=320, invalid_frames=30, lost_packets=2494, out_of_order=0, duplicates=0, byte_gaps=49/3631264B, byte_overlaps=0/0B, malformed=0, processing_drops=0
+[2026-07-04T16:46:26+08:00] Shutting down capture pipeline...
+[2026-07-04T16:46:26+08:00] Live display closed.
+[2026-07-04T16:46:26+08:00] Capture pipeline shutdown complete.
+[2026-07-04T16:46:26+08:00] --- Live capture log ended at 2026-07-04T16:46:26+08:00 ---
