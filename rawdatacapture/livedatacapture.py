@@ -120,7 +120,7 @@ class RadarCaptureConfig:
         num_rx_channels: int,
         num_chirps_per_frame: int,
         iq_swap: bool = False,
-        channel_interleave: bool = True,
+        channel_interleave: bool = False,
         lvds_lanes: int = 2,
         sample_rate_ksps: Optional[float] = None,
         frequency_slope_mhz_per_us: Optional[float] = None,
@@ -799,7 +799,7 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         data, "channelInterleave", "ChannelInterleave", "chInterleave"
     )
     channel_interleave = (
-        True if channel_interleave_value is None else channel_interleave_value == 0
+        False if channel_interleave_value is None else channel_interleave_value == 0
     )
 
     lvds_lanes = _optional_int(
@@ -871,7 +871,7 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
     chirp_end_idx: Optional[int] = None
     num_loops: Optional[int] = None
     iq_swap = False
-    channel_interleave = True
+    channel_interleave = False
     lvds_lanes = 2
     sample_rate_ksps: Optional[float] = None
     frequency_slope_mhz_per_us: Optional[float] = None

@@ -193,6 +193,20 @@ For xWR68xx/IWR6843 raw capture, the local TI MATLAB reader assumes:
 - 2 LVDS lanes for xWR16xx/xWR18xx/xWR68xx.
 - RX channel count from the radar config.
 
+The current `mmwave_setup.xml` uses 16-bit complex ADC output:
+
+```text
+bitsVal = 2      -> 16-bit ADC samples
+formatVal = 1    -> complex ADC samples
+IQSwap = 0       -> normal I/Q order
+```
+
+That means each complex radar sample is one 16-bit I value plus one 16-bit Q value:
+
+```text
+bytes_per_complex_sample = 2 bytes I + 2 bytes Q = 4 bytes
+```
+
 Frame size should be computed from the radar profile/chirp/frame config:
 
 ```text
@@ -225,6 +239,12 @@ Then it reshapes the stream into:
 
 ```text
 [num_chirps_per_frame, num_rx_channels, num_adc_samples]
+```
+
+For the current `mmwave_setup.xml`, the capture path assumes non-interleaved RX channels:
+
+```text
+channel_interleave = False
 ```
 
 The first Python implementation keeps this in `livedatacapture.py` as `frame_bytes_to_radar_cube(...)`. As the project grows, this should move into a dedicated module so changes in lane mode, IQ swap, channel interleave, or profile config do not leak into the signal processing code.
