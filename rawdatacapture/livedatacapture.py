@@ -3,6 +3,7 @@ import json
 import multiprocessing as mp
 import queue
 import socket
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
@@ -66,6 +67,7 @@ class CaptureStats:
 class CapturedFrame:
     data: bytes
     gap_bytes: int
+    first_byte_at_s: float
 
     @property
     def is_valid(self) -> bool:
@@ -206,9 +208,13 @@ class FrameBuffer:
         self.next_stream_offset = 0
         self.buffer = bytearray()
         self.gap_markers: list[tuple[int, int]] = []
+        self.arrival_markers: list[tuple[int, int, float]] = []
 
     def add_payload(
-        self, header: DCA1000PacketHeader, payload: bytes
+        self,
+        header: DCA1000PacketHeader,
+        payload: bytes,
+        payload_received_at_s: float,
     ) -> list[CapturedFrame]:
         if self.base_byte_count is None:
             self.base_byte_count = header.byte_count
@@ -238,22 +244,33 @@ class FrameBuffer:
             self.stats.byte_overlaps += 1
             self.stats.byte_overlap_bytes += overlap
 
-        self.buffer.extend(payload)
-        self.next_stream_offset += len(payload)
+        if payload:
+            payload_buffer_start = len(self.buffer)
+            self.buffer.extend(payload)
+            self.arrival_markers.append(
+                (
+                    payload_buffer_start,
+                    payload_buffer_start + len(payload),
+                    payload_received_at_s,
+                )
+            )
+            self.next_stream_offset += len(payload)
 
         frames: list[CapturedFrame] = []
         while len(self.buffer) >= self.bytes_per_frame:
             gap_bytes = self._gap_bytes_in_next_frame()
+            first_byte_at_s = self._first_byte_time_in_next_frame()
             frames.append(
                 CapturedFrame(
                     data=bytes(self.buffer[: self.bytes_per_frame]),
                     gap_bytes=gap_bytes,
+                    first_byte_at_s=first_byte_at_s,
                 )
             )
             if gap_bytes:
                 self.stats.invalid_frames += 1
             del self.buffer[: self.bytes_per_frame]
-            self._advance_gap_markers(self.bytes_per_frame)
+            self._advance_frame_markers(self.bytes_per_frame)
             self.stats.frames_emitted += 1
 
         return frames
@@ -268,7 +285,14 @@ class FrameBuffer:
                 total += overlap_end - overlap_start
         return total
 
-    def _advance_gap_markers(self, consumed_bytes: int) -> None:
+    def _first_byte_time_in_next_frame(self) -> float:
+        frame_end = self.bytes_per_frame
+        for start, end, received_at_s in self.arrival_markers:
+            if end > 0 and start < frame_end:
+                return received_at_s
+        return time.perf_counter()
+
+    def _advance_frame_markers(self, consumed_bytes: int) -> None:
         advanced_markers = []
         for start, end in self.gap_markers:
             start -= consumed_bytes
@@ -276,6 +300,14 @@ class FrameBuffer:
             if end > 0:
                 advanced_markers.append((max(start, 0), end))
         self.gap_markers = advanced_markers
+
+        advanced_arrival_markers = []
+        for start, end, received_at_s in self.arrival_markers:
+            start -= consumed_bytes
+            end -= consumed_bytes
+            if end > 0:
+                advanced_arrival_markers.append((max(start, 0), end, received_at_s))
+        self.arrival_markers = advanced_arrival_markers
 
 
 class LiveDisplay:
@@ -314,7 +346,12 @@ class LiveDisplay:
         )
         self.process.start()
 
-    def update(self, range_fft: np.ndarray, range_axis_m: Optional[np.ndarray]) -> None:
+    def update(
+        self,
+        range_fft: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+        frame_first_byte_at_s: float,
+    ) -> None:
         if self.mode == "none":
             return
 
@@ -323,9 +360,17 @@ class LiveDisplay:
             return
 
         if self.mode == "range":
-            payload = (range_axis_m, compute_range_profile(range_fft))
+            payload = (
+                frame_first_byte_at_s,
+                range_axis_m,
+                compute_range_profile(range_fft),
+            )
         elif self.mode == "range-doppler":
-            payload = (range_axis_m, compute_range_doppler_heatmap(range_fft))
+            payload = (
+                frame_first_byte_at_s,
+                range_axis_m,
+                compute_range_doppler_heatmap(range_fft),
+            )
         else:
             return
 
@@ -343,7 +388,7 @@ class LiveDisplay:
             self.payload_queue.close()
             self.payload_queue.join_thread()
 
-    def _put_latest(self, payload: np.ndarray) -> None:
+    def _put_latest(self, payload: Any) -> None:
         if self.payload_queue is None:
             return
 
@@ -512,7 +557,7 @@ def _run_display_process(
                     break
 
             if mode == "range" and line is not None:
-                range_axis_m, range_profile = payload
+                frame_first_byte_at_s, range_axis_m, range_profile = payload
                 _draw_range_profile(
                     axis,
                     line,
@@ -521,10 +566,21 @@ def _run_display_process(
                     max_range_m,
                 )
             elif mode == "range-doppler" and image is not None:
-                range_axis_m, heatmap = payload
+                frame_first_byte_at_s, range_axis_m, heatmap = payload
                 _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
+            else:
+                frame_first_byte_at_s = None
 
-            figure.canvas.draw_idle()
+            figure.canvas.draw()
+            if frame_first_byte_at_s is not None:
+                display_latency_ms = (
+                    time.perf_counter() - frame_first_byte_at_s
+                ) * 1000.0
+                print(
+                    "display latency: "
+                    f"frame_first_byte_to_canvas_draw_ms={display_latency_ms:.1f}",
+                    flush=True,
+                )
         except queue.Empty:
             pass
 
@@ -613,7 +669,7 @@ def process_complete_frame(
         f"peak_range_bin={peak_range_bin}, "
         f"peak_magnitude={range_profile[peak_range_bin]:.2f}"
     )
-    display.update(range_fft, range_axis_m)
+    display.update(range_fft, range_axis_m, frame.first_byte_at_s)
 
 
 def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
@@ -711,6 +767,7 @@ def listen_for_frames(
         while True:
             try:
                 packet, _addr = sock.recvfrom(buffer_size)
+                packet_received_at_s = time.perf_counter()
             except socket.timeout:
                 continue
 
@@ -725,7 +782,11 @@ def listen_for_frames(
             stats.payload_bytes_received += len(payload)
 
             sequence_tracker.observe(header.sequence_number)
-            for frame in frame_buffer.add_payload(header, payload):
+            for frame in frame_buffer.add_payload(
+                header,
+                payload,
+                packet_received_at_s,
+            ):
                 process_complete_frame(frame, config, display, raw_writer)
 
             if stats.packets_received % 200 == 0:
