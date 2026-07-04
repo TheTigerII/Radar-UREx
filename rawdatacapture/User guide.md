@@ -130,7 +130,9 @@ This is an early diagnostic view, not yet a fully calibrated radar processing pr
 
 ## Display Responsiveness
 
-Matplotlib runs in a separate display process with a one-item latest-frame queue. If plotting still feels sluggish, reduce update rate:
+UDP packet receiving is split from FFT/display processing. The receive loop assembles complete frames and hands valid frames to a processing worker. Matplotlib then runs behind that worker in a separate display process with a one-item latest-frame queue.
+
+If plotting still feels sluggish, reduce update rate:
 
 ```powershell
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range --display-update-every 2 --display-pause 0.05
@@ -158,6 +160,7 @@ Healthy stats look like:
 lost_packets=0
 byte_gaps=0/0B
 invalid_frames=0
+processing_drops=0
 ```
 
 If packets are lost, you may see:
@@ -167,6 +170,8 @@ Dropped frame: incomplete payload, gap_bytes=..., bytes_per_frame=524288
 ```
 
 That is expected behavior. Frames touched by byte gaps are skipped so FFT is not run on zero-filled corrupted data.
+
+If `processing_drops` increases while `lost_packets` stays low, packet receive is keeping up but FFT/display processing is falling behind. Increase `--processing-queue-size`, reduce display updates, or run with `--display none`.
 
 ## Common Mitigations For Byte Gaps
 

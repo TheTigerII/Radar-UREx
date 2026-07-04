@@ -152,6 +152,7 @@ Responsibilities:
 - Track sequence numbers to detect lost or out-of-order packets.
 - Use byte-count metadata to place payloads into a continuous raw byte stream.
 - Push validated payload bytes into a frame buffer.
+- Send complete valid frames to a separate processing worker so FFT/display work does not block UDP receive.
 
 Current script status:
 
@@ -166,6 +167,7 @@ implemented:
   byte-count based payload stream
   radar .cfg / mmWave Studio XML / JSON dimension parsing
   frame buffering
+  separate frame-processing worker
   invalid-frame tracking for packet gaps
   skip FFT for incomplete frames
   complete-frame int16 conversion

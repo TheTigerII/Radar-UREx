@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Iterable, Optional, TextIO
+from typing import Any, BinaryIO, Callable, Iterable, Optional, TextIO
 
 import numpy as np
 
@@ -21,10 +21,12 @@ BUFFER_SIZE = 65535       # Max UDP packet payload allocation
 DCA1000_HEADER_SIZE = 10
 UINT32_MODULO = 2**32
 SOCKET_TIMEOUT_SECONDS = 0.5
+DEFAULT_PROCESSING_QUEUE_SIZE = 4
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 DEFAULT_MAX_RANGE_M = 20.0
 _LOG_FILE: Optional[TextIO] = None
+EmitFunc = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,7 @@ class CaptureStats:
     byte_overlaps: int = 0
     byte_overlap_bytes: int = 0
     invalid_frames: int = 0
+    processing_frames_dropped: int = 0
 
 
 @dataclass(frozen=True)
@@ -317,11 +320,13 @@ class LiveDisplay:
         update_every: int,
         pause_seconds: float,
         max_range_m: float,
+        emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
         self.pause_seconds = max(pause_seconds, 0.001)
         self.max_range_m = max(max_range_m, 0.0)
+        self.emit = emit_func or emit
         self.frame_count = 0
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
@@ -402,7 +407,7 @@ class LiveDisplay:
 
         while True:
             try:
-                emit(self.latency_queue.get_nowait())
+                self.emit(self.latency_queue.get_nowait())
             except queue.Empty:
                 return
 
@@ -433,8 +438,10 @@ class RawFrameWriter:
         output_path: Optional[Path],
         metadata_path: Optional[Path],
         config: RadarCaptureConfig,
+        emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.config = config
+        self.emit = emit_func or emit
         self.output_path = _resolve_output_path(output_path) if output_path else None
         self.metadata_path = (
             _resolve_output_path(metadata_path)
@@ -453,9 +460,9 @@ class RawFrameWriter:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.file = self.output_path.open("wb")
         self.started_at = _timestamp()
-        emit(f"Saving valid raw frames to {self.output_path}")
+        self.emit(f"Saving valid raw frames to {self.output_path}")
         if self.metadata_path is not None:
-            emit(f"Raw capture metadata will be written to {self.metadata_path}")
+            self.emit(f"Raw capture metadata will be written to {self.metadata_path}")
 
     @property
     def enabled(self) -> bool:
@@ -479,7 +486,7 @@ class RawFrameWriter:
 
         self.file.close()
         self.file = None
-        emit(
+        self.emit(
             "Raw capture saved "
             f"frames={self.frames_saved}, bytes={self.bytes_saved}"
         )
@@ -523,7 +530,7 @@ class RawFrameWriter:
             json.dumps(metadata, indent=2) + "\n",
             encoding="utf-8",
         )
-        emit(f"Raw capture metadata saved to {self.metadata_path}")
+        self.emit(f"Raw capture metadata saved to {self.metadata_path}")
 
 
 def _run_display_process(
@@ -660,10 +667,12 @@ def process_complete_frame(
     config: RadarCaptureConfig,
     display: LiveDisplay,
     raw_writer: RawFrameWriter,
+    emit_func: Optional[EmitFunc] = None,
 ) -> None:
+    emit_func = emit_func or emit
     if not frame.is_valid:
         raw_writer.write_frame(frame)
-        emit(
+        emit_func(
             "Dropped frame: incomplete payload, "
             f"gap_bytes={frame.gap_bytes}, bytes_per_frame={config.bytes_per_frame}"
         )
@@ -684,7 +693,7 @@ def process_complete_frame(
         else f"peak_range_bin={peak_range_bin}"
     )
 
-    emit(
+    emit_func(
         "Complete frame "
         f"cube_shape={radar_cube.shape}, "
         f"{peak_range_text}, "
@@ -761,6 +770,61 @@ def frame_bytes_to_radar_cube(
     )
 
 
+def _queue_emit(log_queue: mp.Queue, message: str) -> None:
+    try:
+        log_queue.put_nowait(message)
+    except queue.Full:
+        pass
+
+
+def _drain_log_queue(log_queue: mp.Queue) -> None:
+    while True:
+        try:
+            emit(log_queue.get_nowait())
+        except queue.Empty:
+            return
+
+
+def _run_frame_processor(
+    config: RadarCaptureConfig,
+    frame_queue: mp.Queue,
+    log_queue: mp.Queue,
+    raw_output: Optional[Path],
+    raw_metadata: Optional[Path],
+    display_mode: str,
+    display_update_every: int,
+    display_pause: float,
+    max_range_m: float,
+) -> None:
+    def worker_emit(message: str) -> None:
+        _queue_emit(log_queue, message)
+
+    raw_writer = RawFrameWriter(raw_output, raw_metadata, config, worker_emit)
+    display = LiveDisplay(
+        display_mode,
+        display_update_every,
+        display_pause,
+        max_range_m,
+        worker_emit,
+    )
+
+    try:
+        while True:
+            frame = frame_queue.get()
+            if frame is None:
+                break
+
+            process_complete_frame(frame, config, display, raw_writer, worker_emit)
+            display.emit_latency_messages()
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        worker_emit(f"Frame processor stopped after error: {exc!r}")
+    finally:
+        display.close()
+        raw_writer.close()
+
+
 def listen_for_frames(
     *,
     host_ip: str,
@@ -768,8 +832,8 @@ def listen_for_frames(
     config: RadarCaptureConfig,
     buffer_size: int,
     socket_timeout_seconds: float,
-    display: LiveDisplay,
-    raw_writer: RawFrameWriter,
+    frame_queue: mp.Queue,
+    log_queue: mp.Queue,
 ) -> None:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
@@ -791,7 +855,7 @@ def listen_for_frames(
                 packet, _addr = sock.recvfrom(buffer_size)
                 packet_received_at_s = time.perf_counter()
             except socket.timeout:
-                display.emit_latency_messages()
+                _drain_log_queue(log_queue)
                 continue
 
             try:
@@ -810,18 +874,33 @@ def listen_for_frames(
                 payload,
                 packet_received_at_s,
             ):
-                process_complete_frame(frame, config, display, raw_writer)
+                if not frame.is_valid:
+                    emit(
+                        "Dropped frame: incomplete payload, "
+                        f"gap_bytes={frame.gap_bytes}, "
+                        f"bytes_per_frame={config.bytes_per_frame}"
+                    )
+                    continue
+
+                try:
+                    frame_queue.put_nowait(frame)
+                except queue.Full:
+                    stats.processing_frames_dropped += 1
+                    emit(
+                        "Dropped frame: processing queue full, "
+                        f"bytes_per_frame={config.bytes_per_frame}"
+                    )
 
             if stats.packets_received % 200 == 0:
-                display.emit_latency_messages()
+                _drain_log_queue(log_queue)
                 emit(_format_stats(stats))
     except KeyboardInterrupt:
-        display.emit_latency_messages()
+        _drain_log_queue(log_queue)
         emit("Streaming stopped.")
         emit(_format_stats(stats))
     finally:
         sock.close()
-        display.close()
+        _drain_log_queue(log_queue)
 
 
 def parse_args() -> argparse.Namespace:
@@ -837,6 +916,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host-ip", default=UDP_IP, help="Host Ethernet IP to bind.")
     parser.add_argument("--data-port", type=int, default=UDP_PORT)
     parser.add_argument("--buffer-size", type=int, default=BUFFER_SIZE)
+    parser.add_argument(
+        "--processing-queue-size",
+        type=int,
+        default=DEFAULT_PROCESSING_QUEUE_SIZE,
+        help=(
+            "Maximum complete valid frames waiting for FFT/display processing. "
+            "If this fills, frames are dropped instead of blocking UDP receive."
+        ),
+    )
     parser.add_argument(
         "--socket-timeout",
         type=float,
@@ -903,7 +991,8 @@ def _format_stats(stats: CaptureStats) -> str:
         f"duplicates={stats.duplicate_packets}, "
         f"byte_gaps={stats.byte_gaps}/{stats.byte_gap_bytes}B, "
         f"byte_overlaps={stats.byte_overlaps}/{stats.byte_overlap_bytes}B, "
-        f"malformed={stats.malformed_packets}"
+        f"malformed={stats.malformed_packets}, "
+        f"processing_drops={stats.processing_frames_dropped}"
     )
 
 
@@ -1290,29 +1379,62 @@ def _timestamp() -> str:
 def main() -> None:
     args = parse_args()
     setup_terminal_log(args.log_file)
-    raw_writer: Optional[RawFrameWriter] = None
+    frame_queue: Optional[mp.Queue] = None
+    log_queue: Optional[mp.Queue] = None
+    processor: Optional[mp.Process] = None
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
-        raw_writer = RawFrameWriter(args.raw_output, args.raw_metadata, config)
-        display = LiveDisplay(
-            args.display,
-            args.display_update_every,
-            args.display_pause,
-            args.max_range_m,
+        frame_queue = mp.Queue(maxsize=max(args.processing_queue_size, 1))
+        log_queue = mp.Queue(maxsize=1000)
+        processor = mp.Process(
+            target=_run_frame_processor,
+            args=(
+                config,
+                frame_queue,
+                log_queue,
+                args.raw_output,
+                args.raw_metadata,
+                args.display,
+                args.display_update_every,
+                args.display_pause,
+                args.max_range_m,
+            ),
+            name="RadarFrameProcessor",
         )
+        processor.start()
         listen_for_frames(
             host_ip=args.host_ip,
             data_port=args.data_port,
             config=config,
             buffer_size=args.buffer_size,
             socket_timeout_seconds=args.socket_timeout,
-            display=display,
-            raw_writer=raw_writer,
+            frame_queue=frame_queue,
+            log_queue=log_queue,
         )
     finally:
-        if raw_writer is not None:
-            raw_writer.close()
+        if frame_queue is not None:
+            try:
+                frame_queue.put(None, timeout=2.0)
+            except queue.Full:
+                pass
+
+        if processor is not None:
+            processor.join(timeout=5.0)
+            if processor.is_alive():
+                processor.terminate()
+                processor.join(timeout=1.0)
+
+        if log_queue is not None:
+            _drain_log_queue(log_queue)
+
+        if frame_queue is not None:
+            frame_queue.close()
+            frame_queue.join_thread()
+        if log_queue is not None:
+            log_queue.close()
+            log_queue.join_thread()
+
         close_terminal_log()
 
 
