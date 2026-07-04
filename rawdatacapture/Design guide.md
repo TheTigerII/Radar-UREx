@@ -132,11 +132,11 @@ The local TI config examples use:
 - DCA1000 IP: `192.168.33.180`
 - DCA1000 config port: `4096`
 - DCA1000 data port: `4098`
-- Packet delay: keep at `200 us` for stable Python capture
+- Packet delay: use `100 us` for the current 25 FPS, 16-bit complex, 4-RX frame size
 - Raw LVDS capture mode
 - Sequence number enabled
 
-The DCA1000 packet delay should stay at `200 us` unless a later throughput test proves a lower value is safe. Lower packet delays previously produced byte gaps and dropped frames; `200 us` produced clean runs with `lost_packets=0` and `byte_gaps=0/0B`.
+The DCA1000 packet delay should be set to `100 us` for the current 25 FPS target. With 256 ADC samples, 4 RX channels, 128 chirps per frame, and 16-bit complex samples, each frame is 524,288 bytes. At 25 FPS this needs about 9,000 DCA1000 payload packets per second, so a 200 us packet delay throttles the stream to roughly half the required rate. After changing to `100 us`, validate the run by checking that `lost_packets`, `byte_gaps`, and `invalid_frames` stay low.
 
 ## Data Plane
 

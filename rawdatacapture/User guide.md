@@ -15,10 +15,10 @@ This guide is for running `livedatacapture.py` with the IWR6843ISK-ODS and DCA10
 - Keep the DCA1000 packet delay at:
 
 ```text
-200 us
+100 us
 ```
 
-Lower packet delays previously caused byte gaps and dropped frames. `200 us` produced clean runs with:
+The current 25 FPS, 16-bit complex, 4-RX setup needs roughly 9,000 DCA1000 payload packets per second. A `200 us` packet delay throttles the stream to roughly half the required rate, so use `100 us` and validate the result with:
 
 ```text
 lost_packets=0
@@ -175,7 +175,7 @@ If `processing_drops` increases while `lost_packets` stays low, packet receive i
 
 ## Common Mitigations For Byte Gaps
 
-- Keep DCA1000 packet delay at `200 us`.
+- Use DCA1000 packet delay `100 us` for the current 25 FPS setup.
 - Use direct wired Ethernet between PC and DCA1000.
 - Avoid Wi-Fi, VPN routing, switches, and busy adapters during capture.
 - Increase Ethernet adapter receive buffers in Windows Device Manager if needed.
