@@ -415,21 +415,71 @@ class LiveDisplay:
         if self.payload_queue is None:
             return
 
-        try:
-            self.payload_queue.put_nowait(payload)
+        _put_latest_queue_payload(self.payload_queue, payload)
+
+
+class DisplayPayloadSink:
+    def __init__(
+        self,
+        mode: str,
+        update_every: int,
+        payload_queue: Optional[mp.Queue],
+    ) -> None:
+        self.mode = mode
+        self.update_every = max(update_every, 1)
+        self.payload_queue = payload_queue
+        self.frame_count = 0
+
+    def update(
+        self,
+        range_fft: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+        frame_first_byte_at_s: float,
+    ) -> None:
+        if self.mode == "none" or self.payload_queue is None:
             return
-        except queue.Full:
-            pass
 
-        try:
-            self.payload_queue.get_nowait()
-        except queue.Empty:
-            pass
+        self.frame_count += 1
+        if self.frame_count % self.update_every != 0:
+            return
 
-        try:
-            self.payload_queue.put_nowait(payload)
-        except queue.Full:
-            pass
+        if self.mode == "range":
+            payload = (
+                frame_first_byte_at_s,
+                range_axis_m,
+                compute_range_profile(range_fft),
+            )
+        elif self.mode == "range-doppler":
+            payload = (
+                frame_first_byte_at_s,
+                range_axis_m,
+                compute_range_doppler_heatmap(range_fft),
+            )
+        else:
+            return
+
+        _put_latest_queue_payload(self.payload_queue, payload)
+
+    def emit_latency_messages(self) -> None:
+        return
+
+
+def _put_latest_queue_payload(payload_queue: mp.Queue, payload: Any) -> None:
+    try:
+        payload_queue.put_nowait(payload)
+        return
+    except queue.Full:
+        pass
+
+    try:
+        payload_queue.get_nowait()
+    except queue.Empty:
+        pass
+
+    try:
+        payload_queue.put_nowait(payload)
+    except queue.Full:
+        pass
 
 
 class RawFrameWriter:
@@ -785,27 +835,42 @@ def _drain_log_queue(log_queue: mp.Queue) -> None:
             return
 
 
+def _request_processor_stop(frame_queue: mp.Queue) -> None:
+    try:
+        frame_queue.put(None, timeout=0.2)
+        return
+    except queue.Full:
+        pass
+
+    try:
+        frame_queue.get(timeout=0.2)
+    except queue.Empty:
+        pass
+
+    try:
+        frame_queue.put(None, timeout=0.2)
+    except queue.Full:
+        pass
+
+
 def _run_frame_processor(
     config: RadarCaptureConfig,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
+    display_payload_queue: Optional[mp.Queue],
     raw_output: Optional[Path],
     raw_metadata: Optional[Path],
     display_mode: str,
     display_update_every: int,
-    display_pause: float,
-    max_range_m: float,
 ) -> None:
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
 
     raw_writer = RawFrameWriter(raw_output, raw_metadata, config, worker_emit)
-    display = LiveDisplay(
+    display = DisplayPayloadSink(
         display_mode,
         display_update_every,
-        display_pause,
-        max_range_m,
-        worker_emit,
+        display_payload_queue,
     )
 
     try:
@@ -821,7 +886,6 @@ def _run_frame_processor(
     except Exception as exc:
         worker_emit(f"Frame processor stopped after error: {exc!r}")
     finally:
-        display.close()
         raw_writer.close()
 
 
@@ -834,7 +898,8 @@ def listen_for_frames(
     socket_timeout_seconds: float,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
-) -> None:
+    display: LiveDisplay,
+) -> CaptureStats:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
     frame_buffer = FrameBuffer(config.bytes_per_frame, stats)
@@ -855,6 +920,7 @@ def listen_for_frames(
                 packet, _addr = sock.recvfrom(buffer_size)
                 packet_received_at_s = time.perf_counter()
             except socket.timeout:
+                display.emit_latency_messages()
                 _drain_log_queue(log_queue)
                 continue
 
@@ -892,15 +958,19 @@ def listen_for_frames(
                     )
 
             if stats.packets_received % 200 == 0:
+                display.emit_latency_messages()
                 _drain_log_queue(log_queue)
                 emit(_format_stats(stats))
     except KeyboardInterrupt:
+        display.emit_latency_messages()
         _drain_log_queue(log_queue)
         emit("Streaming stopped.")
         emit(_format_stats(stats))
     finally:
         sock.close()
+        display.emit_latency_messages()
         _drain_log_queue(log_queue)
+    return stats
 
 
 def parse_args() -> argparse.Namespace:
@@ -1382,9 +1452,16 @@ def main() -> None:
     frame_queue: Optional[mp.Queue] = None
     log_queue: Optional[mp.Queue] = None
     processor: Optional[mp.Process] = None
+    display: Optional[LiveDisplay] = None
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
+        display = LiveDisplay(
+            args.display,
+            args.display_update_every,
+            args.display_pause,
+            args.max_range_m,
+        )
         frame_queue = mp.Queue(maxsize=max(args.processing_queue_size, 1))
         log_queue = mp.Queue(maxsize=1000)
         processor = mp.Process(
@@ -1393,12 +1470,11 @@ def main() -> None:
                 config,
                 frame_queue,
                 log_queue,
+                display.payload_queue if display is not None else None,
                 args.raw_output,
                 args.raw_metadata,
                 args.display,
                 args.display_update_every,
-                args.display_pause,
-                args.max_range_m,
             ),
             name="RadarFrameProcessor",
         )
@@ -1411,22 +1487,26 @@ def main() -> None:
             socket_timeout_seconds=args.socket_timeout,
             frame_queue=frame_queue,
             log_queue=log_queue,
+            display=display,
         )
     finally:
+        emit("Shutting down capture pipeline...")
         if frame_queue is not None:
-            try:
-                frame_queue.put(None, timeout=2.0)
-            except queue.Full:
-                pass
+            _request_processor_stop(frame_queue)
 
         if processor is not None:
             processor.join(timeout=5.0)
             if processor.is_alive():
+                emit("Frame processor did not stop in time; terminating.")
                 processor.terminate()
                 processor.join(timeout=1.0)
 
         if log_queue is not None:
             _drain_log_queue(log_queue)
+
+        if display is not None:
+            display.close()
+            emit("Live display closed.")
 
         if frame_queue is not None:
             frame_queue.close()
@@ -1435,6 +1515,7 @@ def main() -> None:
             log_queue.close()
             log_queue.join_thread()
 
+        emit("Capture pipeline shutdown complete.")
         close_terminal_log()
 
 
