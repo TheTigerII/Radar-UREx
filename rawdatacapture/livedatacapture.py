@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Optional, TextIO
+from typing import Any, BinaryIO, Iterable, Optional, TextIO
 
 import numpy as np
 
@@ -364,6 +364,105 @@ class LiveDisplay:
             pass
 
 
+class RawFrameWriter:
+    def __init__(
+        self,
+        output_path: Optional[Path],
+        metadata_path: Optional[Path],
+        config: RadarCaptureConfig,
+    ) -> None:
+        self.config = config
+        self.output_path = _resolve_output_path(output_path) if output_path else None
+        self.metadata_path = (
+            _resolve_output_path(metadata_path)
+            if metadata_path
+            else _default_metadata_path(self.output_path)
+        )
+        self.file: Optional[BinaryIO] = None
+        self.frames_saved = 0
+        self.bytes_saved = 0
+        self.invalid_frames_skipped = 0
+        self.started_at: Optional[str] = None
+
+        if self.output_path is None:
+            return
+
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = self.output_path.open("wb")
+        self.started_at = _timestamp()
+        emit(f"Saving valid raw frames to {self.output_path}")
+        if self.metadata_path is not None:
+            emit(f"Raw capture metadata will be written to {self.metadata_path}")
+
+    @property
+    def enabled(self) -> bool:
+        return self.file is not None
+
+    def write_frame(self, frame: CapturedFrame) -> None:
+        if not self.enabled:
+            return
+        if not frame.is_valid:
+            self.invalid_frames_skipped += 1
+            return
+
+        assert self.file is not None
+        self.file.write(frame.data)
+        self.frames_saved += 1
+        self.bytes_saved += len(frame.data)
+
+    def close(self) -> None:
+        if self.file is None:
+            return
+
+        self.file.close()
+        self.file = None
+        emit(
+            "Raw capture saved "
+            f"frames={self.frames_saved}, bytes={self.bytes_saved}"
+        )
+        self._write_metadata()
+
+    def _write_metadata(self) -> None:
+        if self.output_path is None or self.metadata_path is None:
+            return
+
+        self.metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata = {
+            "created_at": self.started_at,
+            "closed_at": _timestamp(),
+            "raw_output_path": str(self.output_path),
+            "frames_saved": self.frames_saved,
+            "bytes_saved": self.bytes_saved,
+            "bytes_per_frame": self.config.bytes_per_frame,
+            "invalid_frames_skipped": self.invalid_frames_skipped,
+            "frame_shape": {
+                "num_chirps_per_frame": self.config.num_chirps_per_frame,
+                "num_rx_channels": self.config.num_rx_channels,
+                "num_adc_samples": self.config.num_adc_samples,
+            },
+            "sample_format": {
+                "adc_bits": 16,
+                "complex": True,
+                "i_dtype": "int16",
+                "q_dtype": "int16",
+                "byte_order": "little",
+                "iq_swap": self.config.iq_swap,
+                "channel_interleave": self.config.channel_interleave,
+                "lvds_lanes": self.config.lvds_lanes,
+            },
+            "range_processing": {
+                "sample_rate_ksps": self.config.sample_rate_ksps,
+                "frequency_slope_mhz_per_us": self.config.frequency_slope_mhz_per_us,
+                "range_resolution_m": self.config.range_resolution_m,
+            },
+        }
+        self.metadata_path.write_text(
+            json.dumps(metadata, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        emit(f"Raw capture metadata saved to {self.metadata_path}")
+
+
 def _run_display_process(
     mode: str,
     pause_seconds: float,
@@ -482,14 +581,17 @@ def process_complete_frame(
     frame: CapturedFrame,
     config: RadarCaptureConfig,
     display: LiveDisplay,
+    raw_writer: RawFrameWriter,
 ) -> None:
     if not frame.is_valid:
+        raw_writer.write_frame(frame)
         emit(
             "Dropped frame: incomplete payload, "
             f"gap_bytes={frame.gap_bytes}, bytes_per_frame={config.bytes_per_frame}"
         )
         return
 
+    raw_writer.write_frame(frame)
     radar_cube = frame_bytes_to_radar_cube(frame.data, config)
     range_fft = compute_range_fft(radar_cube)
     range_profile = compute_range_profile(range_fft)
@@ -589,6 +691,7 @@ def listen_for_frames(
     buffer_size: int,
     socket_timeout_seconds: float,
     display: LiveDisplay,
+    raw_writer: RawFrameWriter,
 ) -> None:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
@@ -623,7 +726,7 @@ def listen_for_frames(
 
             sequence_tracker.observe(header.sequence_number)
             for frame in frame_buffer.add_payload(header, payload):
-                process_complete_frame(frame, config, display)
+                process_complete_frame(frame, config, display, raw_writer)
 
             if stats.packets_received % 200 == 0:
                 emit(_format_stats(stats))
@@ -659,6 +762,22 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_LOG_PATH,
         help="Append terminal status output to this log file.",
+    )
+    parser.add_argument(
+        "--raw-output",
+        type=Path,
+        help=(
+            "Write valid complete raw ADC frames to this binary file. "
+            "Frames are stored consecutively without DCA1000 packet headers."
+        ),
+    )
+    parser.add_argument(
+        "--raw-metadata",
+        type=Path,
+        help=(
+            "Write raw capture metadata to this JSON file. "
+            "Defaults to '<raw-output>.json' when --raw-output is used."
+        ),
     )
     parser.add_argument(
         "--display",
@@ -716,6 +835,18 @@ def _resolve_config_path(config_path: Path) -> Path:
         f"{config_path}. Current directory is {Path.cwd()}. "
         "Pass the full path, or place the file beside livedatacapture.py."
     )
+
+
+def _resolve_output_path(output_path: Path) -> Path:
+    if output_path.is_absolute():
+        return output_path
+    return Path.cwd() / output_path
+
+
+def _default_metadata_path(output_path: Optional[Path]) -> Optional[Path]:
+    if output_path is None:
+        return None
+    return Path(f"{output_path}.json")
 
 
 def _config_from_json_command_lines(data: Any) -> Optional[RadarCaptureConfig]:
@@ -1073,9 +1204,11 @@ def _timestamp() -> str:
 def main() -> None:
     args = parse_args()
     setup_terminal_log(args.log_file)
+    raw_writer: Optional[RawFrameWriter] = None
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
+        raw_writer = RawFrameWriter(args.raw_output, args.raw_metadata, config)
         display = LiveDisplay(
             args.display,
             args.display_update_every,
@@ -1089,8 +1222,11 @@ def main() -> None:
             buffer_size=args.buffer_size,
             socket_timeout_seconds=args.socket_timeout,
             display=display,
+            raw_writer=raw_writer,
         )
     finally:
+        if raw_writer is not None:
+            raw_writer.close()
         close_terminal_log()
 
 

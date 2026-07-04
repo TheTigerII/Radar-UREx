@@ -69,6 +69,22 @@ To choose a different log file:
 python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --log-file .\rawdatacapture\capture_run.log
 ```
 
+## Save Raw Frames
+
+To save complete valid raw ADC frames for later testing:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --raw-output .\rawdatacapture\captures\test_capture.bin
+```
+
+The binary file stores valid frame payloads consecutively, without DCA1000 packet headers. Each frame is `bytes_per_frame` bytes. A JSON sidecar is written beside the binary file by default, for example:
+
+```text
+test_capture.bin.json
+```
+
+The sidecar records frame count, frame size, ADC format, RX/channel ordering, and radar dimensions so the file can be replayed in later tests.
+
 ## Live Range Profile
 
 To show a simple live range profile:
