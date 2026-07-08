@@ -106,6 +106,87 @@ python rawdatacapture\startup.py --radar-backend direct-serial --dca-backend dir
 Stop with Ctrl+C in Terminal 2 first so `startup.py` sends `sensorStop` and
 stops DCA1000. Then stop Terminal 1.
 
+## Linux / Jetson Orin Nano
+
+The same Python files can run on Linux/Jetson. Use Linux paths, Linux serial
+device names, and `python3`.
+
+Install Python dependencies:
+
+```bash
+python3 -m pip install numpy matplotlib pyserial
+```
+
+Give your user serial-port permission, then log out/in or reboot:
+
+```bash
+sudo usermod -a -G dialout $USER
+```
+
+Find the DCA1000 Ethernet interface:
+
+```bash
+ip addr
+```
+
+Assign the host IP used by DCA1000. Replace `eth0` with the actual interface
+name:
+
+```bash
+sudo ip addr add 192.168.33.30/24 dev eth0
+sudo ip link set eth0 up
+```
+
+Find the radar UART devices:
+
+```bash
+ls /dev/ttyACM*
+ls /dev/ttyUSB*
+```
+
+If `/dev/ttyACM*` does not exist but `/dev/ttyUSB0` and `/dev/ttyUSB1` do, that
+is fine. Test each port until the SDK CLI prompt appears:
+
+```bash
+python3 -m serial.tools.miniterm /dev/ttyUSB0 115200
+```
+
+Press Enter. The command UART should show:
+
+```text
+mmwDemo:/>
+```
+
+If not, exit miniterm with `Ctrl+]` and try:
+
+```bash
+python3 -m serial.tools.miniterm /dev/ttyUSB1 115200
+```
+
+Terminal 1 starts live capture on Linux:
+
+```bash
+python3 rawdatacapture/livedatacapture.py --config ./rawdatacapture/profile.cfg --setup ./rawdatacapture/setup.json --host-ip 192.168.33.30 --data-port 4098 --display range
+```
+
+Use `--display none` when running headless over SSH without X11/Wayland display
+forwarding.
+
+Terminal 2 starts the radar/DCA1000 on Linux. Replace `/dev/ttyUSB0` with the
+UART that showed `mmwDemo:/>`:
+
+```bash
+python3 rawdatacapture/startup.py --radar-backend direct-serial --dca-backend direct-udp --skip-socket-preflight --radar-port /dev/ttyUSB0 --radar-baud 115200 --radar-command-timeout 10
+```
+
+Linux does not need extra USB-serial drivers if `/dev/ttyUSB0` and
+`/dev/ttyUSB1` appear. To inspect which driver is active:
+
+```bash
+dmesg | grep ttyUSB
+udevadm info -q property -n /dev/ttyUSB0 | grep DRIVER
+```
+
 ## Common Overrides
 
 If your radar command UART is not `COM10`, change:
