@@ -12,13 +12,15 @@ This guide is for running `livedatacapture.py` with the IWR6843ISK-ODS and DCA10
 ```
 
 - Configure the DCA1000/radar in mmWave Studio before starting Python.
-- Keep the DCA1000 packet delay at:
+- Save the mmWave Studio radar config as `rawdatacapture\mmwave.json`.
+- Save the mmWave Studio capture setup as `rawdatacapture\setup.json`.
+- Keep the DCA1000 packet delay consistent with `setup.json`. The current setup uses:
 
 ```text
-100 us
+25 us
 ```
 
-The current 25 FPS, 16-bit complex, 4-RX setup needs roughly 9,000 DCA1000 payload packets per second. A `200 us` packet delay throttles the stream to roughly half the required rate, so use `100 us` and validate the result with:
+The current 25 FPS, 16-bit complex, 4-RX setup needs roughly 9,000 DCA1000 payload packets per second. Validate any packet-delay change with:
 
 ```text
 lost_packets=0
@@ -30,14 +32,31 @@ byte_gaps=0/0B
 From the repository root, run:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml
+python rawdatacapture\livedatacapture.py
 ```
+
+By default this reads:
+
+```text
+rawdatacapture\mmwave.json
+rawdatacapture\setup.json
+```
+
+To use alternate JSON files:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave.json --setup .\rawdatacapture\setup.json
+```
+
+XML configs are no longer supported by `livedatacapture.py`.
 
 Expected startup output:
 
 ```text
 Loaded radar config: RadarCaptureConfig(...)
+Loaded capture setup: CaptureSetupConfig(...)
 Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
+DCA1000 setup: packet_sequence_enable=True, packet_delay_us=25
 Trigger frames now. Press Ctrl+C to stop.
 ```
 
@@ -66,7 +85,7 @@ Each log line includes a local timestamp.
 To choose a different log file:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --log-file .\rawdatacapture\capture_run.log
+python rawdatacapture\livedatacapture.py --log-file .\rawdatacapture\capture_run.log
 ```
 
 ## Save Raw Frames
@@ -74,7 +93,7 @@ python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.
 To save complete valid raw ADC frames for later testing:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --raw-output .\rawdatacapture\captures\test_capture.bin
+python rawdatacapture\livedatacapture.py --raw-output .\rawdatacapture\captures\test_capture.bin
 ```
 
 The binary file stores valid frame payloads consecutively, without DCA1000 packet headers. Each frame is `bytes_per_frame` bytes. A JSON sidecar is written beside the binary file by default, for example:
@@ -90,13 +109,13 @@ The sidecar records frame count, frame size, ADC format, RX/channel ordering, an
 To show a simple live range profile:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range
+python rawdatacapture\livedatacapture.py --display range
 ```
 
 The live range X-axis shows `0` to `20 m` by default. To change it:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range --max-range-m 10
+python rawdatacapture\livedatacapture.py --display range --max-range-m 10
 ```
 
 Use `--max-range-m 0` to show the full computed range axis.
@@ -123,7 +142,7 @@ This is measured from the moment the first UDP payload byte belonging to that fr
 To show a first-pass range-Doppler heatmap:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range-doppler
+python rawdatacapture\livedatacapture.py --display range-doppler
 ```
 
 This is an early diagnostic view, not yet a fully calibrated radar processing product.
@@ -135,7 +154,7 @@ UDP packet receiving is split from FFT/display processing. The receive loop asse
 If plotting still feels sluggish, reduce update rate:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range --display-update-every 2 --display-pause 0.05
+python rawdatacapture\livedatacapture.py --display range --display-update-every 2 --display-pause 0.05
 ```
 
 If packet gaps increase while plotting, try:
@@ -147,12 +166,12 @@ If packet gaps increase while plotting, try:
 For packet-loss testing, run without display:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display none
+python rawdatacapture\livedatacapture.py --display none
 ```
 
 ## Packet Loss And Invalid Frames
 
-The script tracks DCA1000 sequence numbers and byte counts.
+The script reads `packetSequenceEnable` from `setup.json`. With sequence headers enabled, it tracks DCA1000 sequence numbers and byte counts. If sequence headers are disabled, it can still assemble frames from received bytes, but packet-loss detection is weaker.
 
 Healthy stats look like:
 
@@ -175,7 +194,7 @@ If `processing_drops` increases while `lost_packets` stays low, packet receive i
 
 ## Common Mitigations For Byte Gaps
 
-- Use DCA1000 packet delay `100 us` for the current 25 FPS setup.
+- Use the DCA1000 packet delay recorded in `setup.json`; the current setup uses `25 us`.
 - Use direct wired Ethernet between PC and DCA1000.
 - Avoid Wi-Fi, VPN routing, switches, and busy adapters during capture.
 - Increase Ethernet adapter receive buffers in Windows Device Manager if needed.
@@ -193,5 +212,5 @@ python rawdatacapture\livedatacapture.py --help
 Run with faster Ctrl+C polling:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --socket-timeout 0.1
+python rawdatacapture\livedatacapture.py --socket-timeout 0.1
 ```

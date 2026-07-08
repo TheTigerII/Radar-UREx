@@ -4,7 +4,6 @@ import multiprocessing as mp
 import queue
 import socket
 import time
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +22,8 @@ UINT32_MODULO = 2**32
 SOCKET_TIMEOUT_SECONDS = 0.5
 DEFAULT_PROCESSING_QUEUE_SIZE = 4
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
+DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
+DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 DEFAULT_MAX_RANGE_M = 20.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -162,8 +163,6 @@ class RadarCaptureConfig:
             return cls.from_mmwave_cfg(config_path)
         if suffix == ".json":
             return cls.from_mmwave_json(config_path)
-        if suffix == ".xml":
-            return cls.from_mmwave_xml(config_path)
         raise ValueError(f"Unsupported config file extension: {config_path.suffix}")
 
     @classmethod
@@ -174,21 +173,15 @@ class RadarCaptureConfig:
     def from_mmwave_json(cls, config_path: Path) -> "RadarCaptureConfig":
         data = json.loads(config_path.read_text(encoding="utf-8"))
 
+        studio_config = _config_from_mmwave_studio_json(data)
+        if studio_config is not None:
+            return studio_config
+
         command_config = _config_from_json_command_lines(data)
         if command_config is not None:
             return command_config
 
         return _config_from_mapping(data, source_name="JSON")
-
-    @classmethod
-    def from_mmwave_xml(cls, config_path: Path) -> "RadarCaptureConfig":
-        data = _xml_to_config_data(config_path)
-
-        command_config = _config_from_json_command_lines(data)
-        if command_config is not None:
-            return command_config
-
-        return _config_from_mapping(data, source_name="XML")
 
     @property
     def range_resolution_m(self) -> Optional[float]:
@@ -206,6 +199,43 @@ class RadarCaptureConfig:
         if resolution is None:
             return None
         return np.arange(self.num_adc_samples, dtype=np.float32) * resolution
+
+
+@dataclass(frozen=True)
+class CaptureSetupConfig:
+    packet_sequence_enable: bool
+    packet_delay_us: Optional[int] = None
+    capture_hardware: Optional[str] = None
+    config_used: Optional[str] = None
+
+    @classmethod
+    def from_file(cls, setup_path: Path) -> "CaptureSetupConfig":
+        setup_path = _resolve_config_path(setup_path)
+        data = json.loads(setup_path.read_text(encoding="utf-8"))
+        dca_config = data.get("DCA1000Config", {}) if isinstance(data, dict) else {}
+
+        packet_sequence_value = (
+            _optional_int(dca_config, "packetSequenceEnable")
+            if isinstance(dca_config, dict)
+            else None
+        )
+        packet_sequence_enable = (
+            True if packet_sequence_value is None else bool(packet_sequence_value)
+        )
+        packet_delay_us = (
+            _optional_int(dca_config, "packetDelay_us")
+            if isinstance(dca_config, dict)
+            else None
+        )
+        capture_hardware = _optional_string(data, "captureHardware")
+        config_used = _optional_string(data, "configUsed")
+
+        return cls(
+            packet_sequence_enable=packet_sequence_enable,
+            packet_delay_us=packet_delay_us,
+            capture_hardware=capture_hardware,
+            config_used=config_used,
+        )
 
 
 class FrameBuffer:
@@ -912,6 +942,7 @@ def listen_for_frames(
     host_ip: str,
     data_port: int,
     config: RadarCaptureConfig,
+    setup_config: CaptureSetupConfig,
     buffer_size: int,
     socket_recv_buffer_bytes: int,
     socket_timeout_seconds: float,
@@ -922,6 +953,8 @@ def listen_for_frames(
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
     frame_buffer = FrameBuffer(config.bytes_per_frame, stats)
+    synthetic_sequence_number = 0
+    synthetic_byte_count = 0
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if socket_recv_buffer_bytes > 0:
@@ -955,6 +988,11 @@ def listen_for_frames(
         f"on {host_ip}:{data_port}; bytes_per_frame={config.bytes_per_frame}"
     )
     emit(
+        "DCA1000 setup: "
+        f"packet_sequence_enable={setup_config.packet_sequence_enable}, "
+        f"packet_delay_us={setup_config.packet_delay_us}"
+    )
+    emit(
         "UDP socket receive buffer: "
         f"requested={socket_recv_buffer_bytes}B, actual={actual_recv_buffer_bytes}B"
     )
@@ -970,17 +1008,29 @@ def listen_for_frames(
                 _drain_log_queue(log_queue)
                 continue
 
-            try:
-                header = DCA1000PacketHeader.parse(packet)
-            except ValueError:
-                stats.malformed_packets += 1
-                continue
+            if setup_config.packet_sequence_enable:
+                try:
+                    header = DCA1000PacketHeader.parse(packet)
+                except ValueError:
+                    stats.malformed_packets += 1
+                    continue
 
-            payload = packet[DCA1000_HEADER_SIZE:]
+                payload = packet[DCA1000_HEADER_SIZE:]
+                sequence_tracker.observe(header.sequence_number)
+            else:
+                payload = packet
+                header = DCA1000PacketHeader(
+                    sequence_number=synthetic_sequence_number,
+                    byte_count=synthetic_byte_count,
+                )
+                synthetic_sequence_number = (
+                    synthetic_sequence_number + 1
+                ) % UINT32_MODULO
+                synthetic_byte_count += len(payload)
+
             stats.packets_received += 1
             stats.payload_bytes_received += len(payload)
 
-            sequence_tracker.observe(header.sequence_number)
             for frame in frame_buffer.add_payload(
                 header,
                 payload,
@@ -1025,9 +1075,21 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        required=True,
+        default=DEFAULT_CONFIG_PATH,
         type=Path,
-        help="Radar .cfg, mmWave Studio XML, or JSON used to derive frame size.",
+        help=(
+            "Radar .cfg or mmWave Studio JSON used to derive frame size. "
+            f"Defaults to {DEFAULT_CONFIG_PATH}."
+        ),
+    )
+    parser.add_argument(
+        "--setup",
+        default=DEFAULT_SETUP_PATH,
+        type=Path,
+        help=(
+            "mmWave Studio setup JSON with DCA1000 capture settings. "
+            f"Defaults to {DEFAULT_SETUP_PATH}."
+        ),
     )
     parser.add_argument("--host-ip", default=UDP_IP, help="Host Ethernet IP to bind.")
     parser.add_argument("--data-port", type=int, default=UDP_PORT)
@@ -1160,6 +1222,70 @@ def _config_from_json_command_lines(data: Any) -> Optional[RadarCaptureConfig]:
         return None
 
 
+def _config_from_mmwave_studio_json(data: Any) -> Optional[RadarCaptureConfig]:
+    if not isinstance(data, dict):
+        return None
+
+    devices = data.get("mmWaveDevices")
+    if not isinstance(devices, list) or not devices:
+        return None
+
+    device = devices[0]
+    if not isinstance(device, dict):
+        return None
+
+    rf_config = _as_mapping(device.get("rfConfig"))
+    if rf_config is None:
+        return None
+
+    channel_config = _as_mapping(rf_config.get("rlChanCfg_t"))
+    frame_config = _as_mapping(rf_config.get("rlFrameCfg_t"))
+    profile_config = _first_nested_mapping(
+        rf_config.get("rlProfiles"),
+        "rlProfileCfg_t",
+    )
+
+    if channel_config is None or frame_config is None or profile_config is None:
+        return None
+
+    raw_capture_config = _as_mapping(device.get("rawDataCaptureConfig")) or {}
+    data_format_config = _as_mapping(raw_capture_config.get("rlDevDataFmtCfg_t")) or {}
+    lane_enable_config = _as_mapping(raw_capture_config.get("rlDevLaneEnable_t")) or {}
+
+    rx_channel_mask = _required_int(channel_config, "rxChannelEn")
+    chirp_start_idx = _required_int(frame_config, "chirpStartIdx")
+    chirp_end_idx = _required_int(frame_config, "chirpEndIdx")
+    num_loops = _required_int(frame_config, "numLoops")
+
+    iq_swap = bool(_optional_int(data_format_config, "iqSwapSel", "iqSwap") or 0)
+    channel_interleave_value = _optional_int(
+        data_format_config,
+        "chInterleave",
+        "channelInterleave",
+    )
+    channel_interleave = (
+        False if channel_interleave_value is None else channel_interleave_value == 0
+    )
+
+    lane_mask = _optional_int(lane_enable_config, "laneEn")
+    lvds_lanes = _bit_count(lane_mask) if lane_mask is not None else 2
+
+    return RadarCaptureConfig.from_dimensions(
+        num_adc_samples=_required_int(profile_config, "numAdcSamples"),
+        num_rx_channels=_bit_count(rx_channel_mask),
+        num_chirps_per_frame=num_loops * (chirp_end_idx - chirp_start_idx + 1),
+        iq_swap=iq_swap,
+        channel_interleave=channel_interleave,
+        lvds_lanes=lvds_lanes,
+        sample_rate_ksps=_optional_float(profile_config, "digOutSampleRate"),
+        frequency_slope_mhz_per_us=_optional_float(
+            profile_config,
+            "freqSlopeConst_MHz_usec",
+            "freqSlopeConst",
+        ),
+    )
+
+
 def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
     num_adc_samples = _required_int(
         data,
@@ -1224,7 +1350,11 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         data, "digOutSampleRate", "sampleRateKsps", "sample_rate_ksps"
     )
     frequency_slope_mhz_per_us = _optional_float(
-        data, "freqSlopeConst", "frequencySlopeMhzPerUs", "frequency_slope_mhz_per_us"
+        data,
+        "freqSlopeConst",
+        "freqSlopeConst_MHz_usec",
+        "frequencySlopeMhzPerUs",
+        "frequency_slope_mhz_per_us",
     )
     channel_interleave_value = _optional_int(
         data, "channelInterleave", "ChannelInterleave", "chInterleave"
@@ -1258,41 +1388,6 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         sample_rate_ksps=sample_rate_ksps,
         frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
     )
-
-
-def _xml_to_config_data(config_path: Path) -> dict[str, Any]:
-    root = ET.parse(config_path).getroot()
-    data: dict[str, Any] = {}
-    command_lines: list[str] = []
-
-    for element in root.iter():
-        tag = _local_xml_name(element.tag)
-        text = (element.text or "").strip()
-
-        if text:
-            data.setdefault(tag, text)
-            if _looks_like_mmwave_command(text):
-                command_lines.append(text)
-
-        for key, value in element.attrib.items():
-            clean_key = _local_xml_name(key)
-            clean_value = value.strip()
-            data.setdefault(clean_key, clean_value)
-            if _looks_like_mmwave_command(clean_value):
-                command_lines.append(clean_value)
-
-        name = _first_attribute(element, "name", "Name", "key", "Key", "id", "Id")
-        value = _first_attribute(element, "value", "Value", "val", "Val")
-        if name is not None and value is not None:
-            data.setdefault(name, value)
-
-        if value is not None:
-            data.setdefault(tag, value)
-
-    if command_lines:
-        data["commandLines"] = command_lines
-
-    return data
 
 
 def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
@@ -1376,31 +1471,6 @@ def _iter_json_command_lines(value: Any) -> Iterable[str]:
             yield from _iter_json_command_lines(item)
 
 
-def _looks_like_mmwave_command(value: str) -> bool:
-    known_commands = {
-        "profileCfg",
-        "channelCfg",
-        "frameCfg",
-        "adcbufCfg",
-        "lvdsLaneCfg",
-        "laneCfg",
-    }
-    stripped = value.strip()
-    return bool(stripped) and stripped.split(maxsplit=1)[0] in known_commands
-
-
-def _first_attribute(element: ET.Element, *names: str) -> Optional[str]:
-    normalized_names = {_normalize_key(name) for name in names}
-    for key, value in element.attrib.items():
-        if _normalize_key(key) in normalized_names:
-            return value.strip()
-    return None
-
-
-def _local_xml_name(value: str) -> str:
-    return value.rsplit("}", 1)[-1]
-
-
 def _required_int(data: Any, *names: str) -> int:
     value = _optional_value(data, *names)
     if value is None:
@@ -1418,11 +1488,35 @@ def _optional_float(data: Any, *names: str) -> Optional[float]:
     return None if value is None else float(value)
 
 
+def _optional_string(data: Any, *names: str) -> Optional[str]:
+    value = _optional_value(data, *names)
+    return None if value is None else str(value)
+
+
 def _optional_value(data: Any, *names: str) -> Any:
     normalized_names = {_normalize_key(name) for name in names}
     for key, value in _walk_json(data):
         if _normalize_key(key) in normalized_names:
             return value
+    return None
+
+
+def _as_mapping(value: Any) -> Optional[dict[str, Any]]:
+    return value if isinstance(value, dict) else None
+
+
+def _first_nested_mapping(value: Any, key: str) -> Optional[dict[str, Any]]:
+    if isinstance(value, dict):
+        return _as_mapping(value.get(key))
+
+    if isinstance(value, list):
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            nested = _as_mapping(item.get(key))
+            if nested is not None:
+                return nested
+
     return None
 
 
@@ -1511,6 +1605,8 @@ def main() -> None:
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
+        setup_config = CaptureSetupConfig.from_file(args.setup)
+        emit(f"Loaded capture setup: {setup_config}")
         display = LiveDisplay(
             args.display,
             args.display_update_every,
@@ -1538,6 +1634,7 @@ def main() -> None:
             host_ip=args.host_ip,
             data_port=args.data_port,
             config=config,
+            setup_config=setup_config,
             buffer_size=args.buffer_size,
             socket_recv_buffer_bytes=args.socket_recv_buffer,
             socket_timeout_seconds=args.socket_timeout,

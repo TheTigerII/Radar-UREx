@@ -14,7 +14,7 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 - Parses the 10-byte DCA1000 inline packet header when sequence numbering is enabled.
 - Tracks packet sequence numbers and reports lost, duplicate, and out-of-order packets.
 - Uses the DCA1000 byte-count field to maintain a continuous payload byte stream.
-- Reads a radar `.cfg`, mmWave Studio XML, or mmWave Studio JSON to derive frame dimensions.
+- Reads `mmwave.json` to derive radar frame dimensions and `setup.json` for DCA1000 capture settings.
 - Accumulates UDP payload bytes until a full radar frame is available.
 - Marks frames touched by byte gaps as invalid and skips FFT on those frames.
 - Converts only complete frame bytes to a complex radar cube shaped `[chirp, rx, sample]`.
@@ -24,16 +24,16 @@ Goal: receive raw LVDS ADC samples through DCA1000 Ethernet, reconstruct frames 
 
 That keeps packet capture separate from packet-sized processing. A live display still needs a proper UI loop, but FFT code now has a frame-sized input boundary instead of a single UDP packet boundary.
 
-Example:
+Default run, using `rawdatacapture\mmwave.json` and `rawdatacapture\setup.json`:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config path\to\radar.cfg
+python rawdatacapture\livedatacapture.py
 ```
 
-or:
+To choose different JSON files:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave.json --setup .\rawdatacapture\setup.json
 ```
 
 By default, terminal status output is also appended to:
@@ -47,13 +47,13 @@ Each log line includes a local timestamp, and each run includes an explicit star
 To choose a different log file:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --log-file .\rawdatacapture\capture_run.log
+python rawdatacapture\livedatacapture.py --log-file .\rawdatacapture\capture_run.log
 ```
 
 To show a simple live range profile:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range
+python rawdatacapture\livedatacapture.py --display range
 ```
 
 The live range X-axis is limited to `20 m` by default. Use `--max-range-m N` to change it, or `--max-range-m 0` to show the full computed axis.
@@ -61,13 +61,13 @@ The live range X-axis is limited to `20 m` by default. Use `--max-range-m N` to 
 To show a first-pass range-Doppler heatmap:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range-doppler
+python rawdatacapture\livedatacapture.py --display range-doppler
 ```
 
 The Matplotlib display runs in a separate process with a one-item latest-frame queue. The capture loop never waits for plotting; if the UI falls behind, old display payloads are discarded and only the newest range profile or heatmap is shown. Use `--display none` for packet-loss testing and `--display-update-every N` if plotting still causes packet gaps. If the Matplotlib window looks unresponsive, give the GUI more event-loop time:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave_setup.xml --display range --display-update-every 2 --display-pause 0.05
+python rawdatacapture\livedatacapture.py --display range --display-update-every 2 --display-pause 0.05
 ```
 
 ## Architecture Overview
@@ -132,11 +132,11 @@ The local TI config examples use:
 - DCA1000 IP: `192.168.33.180`
 - DCA1000 config port: `4096`
 - DCA1000 data port: `4098`
-- Packet delay: use `100 us` for the current 25 FPS, 16-bit complex, 4-RX frame size
+- Packet delay: read from `setup.json`; the current file uses `25 us`
 - Raw LVDS capture mode
 - Sequence number enabled
 
-The DCA1000 packet delay should be set to `100 us` for the current 25 FPS target. With 256 ADC samples, 4 RX channels, 128 chirps per frame, and 16-bit complex samples, each frame is 524,288 bytes. At 25 FPS this needs about 9,000 DCA1000 payload packets per second, so a 200 us packet delay throttles the stream to roughly half the required rate. After changing to `100 us`, validate the run by checking that `lost_packets`, `byte_gaps`, and `invalid_frames` stay low.
+The DCA1000 packet delay should match the capture setup used in mmWave Studio and recorded in `setup.json`. With 256 ADC samples, 4 RX channels, 128 chirps per frame, and 16-bit complex samples, each frame is 524,288 bytes. At 25 FPS this needs about 9,000 DCA1000 payload packets per second, so validate any packet-delay change by checking that `lost_packets`, `byte_gaps`, and `invalid_frames` stay low.
 
 ## Data Plane
 
@@ -165,7 +165,8 @@ implemented:
   sequence tracking
   packet loss counters
   byte-count based payload stream
-  radar .cfg / mmWave Studio XML / JSON dimension parsing
+  mmWave Studio JSON dimension parsing
+  setup.json DCA1000 capture setting parsing
   frame buffering
   separate frame-processing worker
   invalid-frame tracking for packet gaps
@@ -195,7 +196,7 @@ For xWR68xx/IWR6843 raw capture, the local TI MATLAB reader assumes:
 - 2 LVDS lanes for xWR16xx/xWR18xx/xWR68xx.
 - RX channel count from the radar config.
 
-The current `mmwave_setup.xml` uses 16-bit complex ADC output:
+The current `mmwave.json` uses 16-bit complex ADC output:
 
 ```text
 bitsVal = 2      -> 16-bit ADC samples
@@ -243,7 +244,7 @@ Then it reshapes the stream into:
 [num_chirps_per_frame, num_rx_channels, num_adc_samples]
 ```
 
-For the current `mmwave_setup.xml`, the capture path assumes non-interleaved RX channels:
+For the current `mmwave.json`, the capture path assumes non-interleaved RX channels:
 
 ```text
 channel_interleave = False
@@ -297,7 +298,10 @@ capture/frame_builder.py
   Converts packet payload stream into complete frame byte arrays.
 
 radar/config.py
-  Parses radar .cfg, mmWave Studio XML, or JSON into derived dimensions.
+  Parses radar .cfg or mmWave Studio JSON into derived dimensions.
+
+capture/setup.py
+  Parses setup.json DCA1000 capture settings such as packet sequence headers.
 
 radar/lvds.py
   Converts frame bytes into complex ADC cube:
@@ -371,7 +375,7 @@ radar:
   ramp_end_time
 ```
 
-These should come from the same `.cfg`, mmWave Studio XML, or mmWave Studio JSON used to program the radar, not from hardcoded constants.
+Radar values should come from the same `mmwave.json` used to program the radar. DCA1000 capture behavior should come from `setup.json`, not from hardcoded constants.
 
 ## First Implementation Milestones
 
