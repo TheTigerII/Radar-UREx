@@ -84,6 +84,13 @@ If your SDK CLI baud rate is different, change:
 --radar-baud 115200
 ```
 
+`startup.py` sends SDK CLI commands with CRLF line endings by default. If your
+serial console only responds to LF, add:
+
+```powershell
+--radar-line-ending lf
+```
+
 If you want to use a different SDK CLI profile:
 
 ```powershell
@@ -131,3 +138,5 @@ If SDK CLI serial times out, check:
 - The COM port is the command UART, not the data UART.
 - The baud rate is correct.
 - No terminal program already has the COM port open.
+- Try a longer command timeout, for example `--radar-command-timeout 10`.
+- Try the alternate line ending, for example `--radar-line-ending lf`.

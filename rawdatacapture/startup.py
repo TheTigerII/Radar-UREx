@@ -92,6 +92,7 @@ class RuntimeOptions:
     radar_baud: Optional[int] = None
     radar_command_timeout_s: float = 2.0
     radar_command_delay_s: float = 0.03
+    radar_line_ending: str = "crlf"
     load_firmware: bool = False
     skip_socket_preflight: bool = False
     readiness_delay_s: float = 0.25
@@ -553,7 +554,8 @@ class SdkCliRadarControl:
             raise StartupError("SDK CLI serial port is not open")
 
         self.emit(f"SDK CLI command: {command}")
-        self.serial.write(f"{command}\n".encode("ascii"))
+        line_ending = _serial_line_ending(self.options)
+        self.serial.write(f"{command}{line_ending}".encode("ascii"))
         self.serial.flush()
         response = self._read_command_response()
         normalized_response = response.lower()
@@ -581,6 +583,7 @@ class SdkCliRadarControl:
                     "Done" in text
                     or "Error" in text
                     or "mmwDemo:/>" in text
+                    or "Ignored" in text
                     or "Skipped" in text
                 ):
                     return text
@@ -841,6 +844,14 @@ def _radar_baud_rate(config: StartupConfig, options: RuntimeOptions) -> int:
     if baud is None or baud <= 0:
         raise StartupError("missing or invalid radar baud rate")
     return baud
+
+
+def _serial_line_ending(options: RuntimeOptions) -> str:
+    if options.radar_line_ending == "crlf":
+        return "\r\n"
+    if options.radar_line_ending == "cr":
+        return "\r"
+    return "\n"
 
 
 def _build_dca1000_command_packet(
@@ -1122,6 +1133,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         default=0.03,
         help="Seconds to wait between SDK CLI commands.",
     )
+    parser.add_argument(
+        "--radar-line-ending",
+        choices=("crlf", "lf", "cr"),
+        default="crlf",
+        help="Line ending to use when sending SDK CLI commands.",
+    )
     parser.add_argument("--dca-ip", default=DCA1000_IP)
     parser.add_argument("--dca-config-port", type=int, default=DCA1000_CONFIG_PORT)
     parser.add_argument(
@@ -1197,6 +1214,7 @@ def options_from_args(args: argparse.Namespace) -> RuntimeOptions:
         radar_baud=args.radar_baud,
         radar_command_timeout_s=max(args.radar_command_timeout, 0.1),
         radar_command_delay_s=max(args.radar_command_delay, 0.0),
+        radar_line_ending=args.radar_line_ending,
         load_firmware=args.load_firmware,
         skip_socket_preflight=args.skip_socket_preflight,
         readiness_delay_s=max(args.readiness_delay, 0.0),
