@@ -17,6 +17,11 @@ cd C:\Users\eliwe\Desktop\Radar-UREx
 ## Prerequisites
 
 - The radar is flashed with SDK CLI firmware.
+- Set the radar SOP/switches to functional mode `00110X` before reset/power-up.
+  This lets the flashed out-of-box/SDK CLI firmware boot and respond on the
+  command UART. Do not use DCA/mmWave Studio mode `01100X` with this
+  `startup.py` direct-serial path; the DCA1000 can still be used while the
+  radar is in functional mode.
 - `rawdatacapture\profile.cfg` is the SDK CLI profile to send to the radar.
 - The radar command UART is known. The examples below use:
 
@@ -135,6 +140,8 @@ If DCA1000 direct UDP times out at `SYSTEM_CONNECT`, check:
 If SDK CLI serial times out, check:
 
 - The radar is flashed with SDK CLI firmware.
+- The radar SOP/switches are in functional mode `00110X`, then reset/power-cycle
+  the radar.
 - The COM port is the command UART, not the data UART.
 - The baud rate is correct.
 - No terminal program already has the COM port open.
