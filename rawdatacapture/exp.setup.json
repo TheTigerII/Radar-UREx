@@ -1,7 +1,7 @@
 {
   "createdByVersion": "2.1.0",
-  "createdOn": "2026-07-08T15:04:13.0759265+08:00",
-  "configUsed": "D:\\Library\\Downloads\\exp2.mmwave.json",
+  "createdOn": "2026-07-08T15:50:56.8958134+08:00",
+  "configUsed": "D:\\Library\\Documents\\GitHub\\Radar-UREx\\rawdatacapture\\exp2.mmwave.json",
   "captureHardware": "DCA1000",
   "DCA1000Config": {
     "dataLoggingMode": "raw",

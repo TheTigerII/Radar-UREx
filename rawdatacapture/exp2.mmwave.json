@@ -1,7 +1,7 @@
 {
   "configGenerator": {
     "createdBy": "mmWaveStudio",
-    "createdOn": "2026-07-08T12:30:23.9822881+08:00",
+    "createdOn": "2026-07-08T15:10:17.0773023+08:00",
     "isConfigIntermediate": 1
   },
   "currentVersion": {
@@ -91,7 +91,7 @@
               "pfVcoSelect": "0x2",
               "pfCalLutUpdate": "0x0",
               "startFreqConst_GHz": 60.20000077039,
-              "idleTimeConst_usec": 100.0,
+              "idleTimeConst_usec": 7.0,
               "adcStartTimeConst_usec": 6.0,
               "rampEndTime_usec": 51.5,
               "txOutPowerBackoffCode": "0x0",
@@ -100,13 +100,25 @@
               "txStartTime_usec": 0.0,
               "numAdcSamples": 256,
               "digOutSampleRate": 10000,
-              "hpfCornerFreq1": 2,
-              "hpfCornerFreq2": 1,
+              "hpfCornerFreq1": 0,
+              "hpfCornerFreq2": 0,
               "rxGain_dB": "0x1E"
             }
           }
         ],
         "rlChirps": [
+          {
+            "rlChirpCfg_t": {
+              "chirpStartIdx": 2,
+              "chirpEndIdx": 2,
+              "profileId": 0,
+              "startFreqVar_MHz": 0.0,
+              "freqSlopeVar_KHz_usec": 0.0,
+              "idleTimeVar_usec": 0.0,
+              "adcStartTimeVar_usec": 0.0,
+              "txEnable": "0x2"
+            }
+          },
           {
             "rlChirpCfg_t": {
               "chirpStartIdx": 0,
@@ -130,22 +142,10 @@
               "adcStartTimeVar_usec": 0.0,
               "txEnable": "0x4"
             }
-          },
-          {
-            "rlChirpCfg_t": {
-              "chirpStartIdx": 2,
-              "chirpEndIdx": 2,
-              "profileId": 0,
-              "startFreqVar_MHz": 0.0,
-              "freqSlopeVar_KHz_usec": 0.0,
-              "idleTimeVar_usec": 0.0,
-              "adcStartTimeVar_usec": 0.0,
-              "txEnable": "0x2"
-            }
           }
         ],
         "rlFrameCfg_t": {
-          "chirpEndIdx": 0,
+          "chirpEndIdx": 2,
           "chirpStartIdx": 0,
           "numLoops": 128,
           "numFrames": 1000,
