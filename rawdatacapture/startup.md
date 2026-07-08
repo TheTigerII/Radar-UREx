@@ -120,10 +120,13 @@ frame data.
    - Capture loop begins receiving DCA1000 packets.
 
 8. Run and monitor
-   - Report packets, frames, byte gaps, invalid frames, and processing drops.
-   - Treat repeated byte gaps or missing packets as capture health warnings.
+   - Keep the startup process alive until Ctrl+C.
+   - The current `startup.py` loop holds the radar/DCA1000 session open.
+   - Future capture integration should report packets, frames, byte gaps,
+     invalid frames, and processing drops.
 
 9. Shutdown
+   - Ctrl+C exits the hold loop.
    - Send radar sensor stop.
    - Stop DCA1000 recording/streaming.
    - Drain queues.

@@ -3,10 +3,10 @@
 This guide covers running `startup.py` to configure the radar with SDK CLI
 firmware and optionally configure/arm the DCA1000 over UDP.
 
-`startup.py` currently validates and runs the startup sequence. The real UDP
-capture and frame processing loop still lives in `livedatacapture.py`, so the
-standalone startup command cleans up hardware on exit after it reaches
-`radar_streaming`.
+`startup.py` runs the startup sequence, starts the radar, and keeps the session
+alive until you press Ctrl+C. Ctrl+C sends `sensorStop`, stops DCA1000 if it was
+armed, and closes local resources. The real UDP capture and frame processing
+loop still lives in `livedatacapture.py`.
 
 Run commands from the repository root:
 
@@ -54,7 +54,7 @@ python rawdatacapture\startup.py --radar-backend direct-serial --dca-backend dry
 ## Start Radar Only
 
 This sends `profile.cfg` to the radar over SDK CLI serial, but keeps DCA1000 in
-dry-run mode:
+dry-run mode. The radar keeps sending until you press Ctrl+C:
 
 ```powershell
 python rawdatacapture\startup.py --radar-backend direct-serial --dca-backend dry-run --radar-port COM10 --radar-baud 115200
@@ -67,7 +67,7 @@ startup sequence.
 ## Start Radar And DCA1000
 
 This configures/arms the DCA1000 over UDP and starts the radar through SDK CLI
-serial:
+serial. The radar keeps sending until you press Ctrl+C:
 
 ```powershell
 python rawdatacapture\startup.py --radar-backend direct-serial --dca-backend direct-udp --radar-port COM10 --radar-baud 115200
@@ -126,6 +126,12 @@ radar_ready
 receiver_ready
 dca1000_armed
 radar_streaming
+```
+
+After `radar_streaming`, the process should print:
+
+```text
+Radar is running. Press Ctrl+C to stop.
 ```
 
 ## Troubleshooting

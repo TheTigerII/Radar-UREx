@@ -1233,6 +1233,11 @@ def main(argv: Optional[list[str]] = None) -> int:
 
         orchestrator.startup()
         print("Startup sequence reached radar_streaming.")
+        print("Radar is running. Press Ctrl+C to stop.")
+        _wait_until_interrupted()
+        return 0
+    except KeyboardInterrupt:
+        print("\nCtrl+C received. Stopping radar startup session.")
         return 0
     except StartupError as exc:
         print(f"Startup failed: {exc}", file=sys.stderr)
@@ -1242,6 +1247,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             orchestrator.stop()
         except StartupError as exc:
             print(f"Startup cleanup failed: {exc}", file=sys.stderr)
+
+
+def _wait_until_interrupted() -> None:
+    while True:
+        time.sleep(1.0)
 
 
 if __name__ == "__main__":
