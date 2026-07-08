@@ -23,6 +23,12 @@ cd C:\Users\eliwe\Desktop\Radar-UREx
   `startup.py` direct-serial path; the DCA1000 can still be used while the
   radar is in functional mode.
 - `rawdatacapture\profile.cfg` is the SDK CLI profile to send to the radar.
+- `profile.cfg` must enable LVDS ADC streaming for DCA1000 capture:
+
+```text
+lvdsStreamCfg -1 0 1 0
+```
+
 - The radar command UART is known. The examples below use:
 
 ```text
@@ -173,6 +179,14 @@ address and port. The common case is `livedatacapture.py` already listening on
 `192.168.33.30:4098`; run `startup.py` with `--skip-socket-preflight` in that
 case. If the conflict is on `4096`, close mmWave Studio, the TI DCA1000 CLI, or
 any other process controlling the DCA1000.
+
+If the live display window opens but stays empty, check Terminal 1 for
+`Complete frame` lines. If no complete frames arrive, confirm that `profile.cfg`
+has LVDS ADC streaming enabled:
+
+```text
+lvdsStreamCfg -1 0 1 0
+```
 
 If SDK CLI serial times out, check:
 
