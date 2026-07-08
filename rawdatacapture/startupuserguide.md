@@ -75,6 +75,27 @@ python rawdatacapture\startup.py --radar-backend direct-serial --dca-backend dir
 
 Use this only after preflight passes and the DCA1000 network is configured.
 
+## Run With Live Capture
+
+Use two terminals when `livedatacapture.py` is receiving data and `startup.py`
+is starting the radar/DCA1000.
+
+Terminal 1 starts the UDP receiver first:
+
+```powershell
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\profile.cfg --setup .\rawdatacapture\setup.json --host-ip 192.168.33.30 --data-port 4098
+```
+
+Terminal 2 starts the hardware. Use `--skip-socket-preflight` because
+`livedatacapture.py` already owns `192.168.33.30:4098`:
+
+```powershell
+python rawdatacapture\startup.py --radar-backend direct-serial --dca-backend direct-udp --skip-socket-preflight --radar-port COM4 --radar-baud 115200 --radar-command-timeout 10
+```
+
+Stop with Ctrl+C in Terminal 2 first so `startup.py` sends `sensorStop` and
+stops DCA1000. Then stop Terminal 1.
+
 ## Common Overrides
 
 If your radar command UART is not `COM10`, change:
@@ -142,6 +163,12 @@ If DCA1000 direct UDP times out at `SYSTEM_CONNECT`, check:
 - DCA1000 is powered and connected directly by Ethernet.
 - DCA1000 IP is `192.168.33.180`.
 - No other process is using UDP config port `4096`.
+
+If Windows reports `WinError 10048`, another process already owns the same UDP
+address and port. The common case is `livedatacapture.py` already listening on
+`192.168.33.30:4098`; run `startup.py` with `--skip-socket-preflight` in that
+case. If the conflict is on `4096`, close mmWave Studio, the TI DCA1000 CLI, or
+any other process controlling the DCA1000.
 
 If SDK CLI serial times out, check:
 
