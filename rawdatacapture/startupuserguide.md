@@ -83,8 +83,12 @@ is starting the radar/DCA1000.
 Terminal 1 starts the UDP receiver first:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\profile.cfg --setup .\rawdatacapture\setup.json --host-ip 192.168.33.30 --data-port 4098
+python rawdatacapture\livedatacapture.py --config .\rawdatacapture\profile.cfg --setup .\rawdatacapture\setup.json --host-ip 192.168.33.30 --data-port 4098 --display range
 ```
+
+Use `--display range-doppler` instead of `--display range` for the diagnostic
+range-Doppler heatmap. If `--display` is omitted, the default is
+`--display none`, so no live window appears.
 
 Terminal 2 starts the hardware. Use `--skip-socket-preflight` because
 `livedatacapture.py` already owns `192.168.33.30:4098`:
