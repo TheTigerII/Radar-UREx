@@ -352,17 +352,14 @@ class LiveDisplay:
     def __init__(
         self,
         mode: str,
-        update_every: int,
         pause_seconds: float,
         max_range_m: float,
         emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
-        self.update_every = max(update_every, 1)
         self.pause_seconds = max(pause_seconds, 0.001)
         self.max_range_m = max(max_range_m, 0.0)
         self.emit = emit_func or emit
-        self.frame_count = 0
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
         self.latency_queue: Optional[mp.Queue] = None
@@ -388,36 +385,6 @@ class LiveDisplay:
             daemon=True,
         )
         self.process.start()
-
-    def update(
-        self,
-        range_fft: np.ndarray,
-        range_axis_m: Optional[np.ndarray],
-        frame_first_byte_at_s: float,
-    ) -> None:
-        if self.mode == "none":
-            return
-
-        self.frame_count += 1
-        if self.frame_count % self.update_every != 0:
-            return
-
-        if self.mode == "range":
-            payload = (
-                frame_first_byte_at_s,
-                range_axis_m,
-                compute_range_profile(range_fft),
-            )
-        elif self.mode == "range-doppler":
-            payload = (
-                frame_first_byte_at_s,
-                range_axis_m,
-                compute_range_doppler_heatmap(range_fft),
-            )
-        else:
-            return
-
-        self._put_latest(payload)
 
     def close(self) -> None:
         self.emit_latency_messages()
@@ -445,12 +412,6 @@ class LiveDisplay:
                 self.emit(self.latency_queue.get_nowait())
             except queue.Empty:
                 return
-
-    def _put_latest(self, payload: Any) -> None:
-        if self.payload_queue is None:
-            return
-
-        _put_latest_queue_payload(self.payload_queue, payload)
 
 
 class DisplayPayloadSink:
@@ -494,9 +455,6 @@ class DisplayPayloadSink:
             return
 
         _put_latest_queue_payload(self.payload_queue, payload)
-
-    def emit_latency_messages(self) -> None:
-        return
 
 
 def _put_latest_queue_payload(payload_queue: mp.Queue, payload: Any) -> None:
@@ -763,7 +721,7 @@ def _range_plot_xmax(x_axis: np.ndarray, max_range_m: float) -> float:
 def process_complete_frame(
     frame: CapturedFrame,
     config: RadarCaptureConfig,
-    display: LiveDisplay,
+    display: DisplayPayloadSink,
     raw_writer: RawFrameWriter,
     emit_func: Optional[EmitFunc] = None,
 ) -> None:
@@ -928,7 +886,6 @@ def _run_frame_processor(
                 break
 
             process_complete_frame(frame, config, display, raw_writer, worker_emit)
-            display.emit_latency_messages()
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -1609,7 +1566,6 @@ def main() -> None:
         emit(f"Loaded capture setup: {setup_config}")
         display = LiveDisplay(
             args.display,
-            args.display_update_every,
             args.display_pause,
             args.max_range_m,
         )
