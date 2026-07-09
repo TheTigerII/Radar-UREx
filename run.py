@@ -20,7 +20,7 @@ DEFAULT_RADAR_BAUD = 115200
 DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
-DISPLAY_CHOICES = ("none", "range", "range-doppler")
+DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
 
@@ -64,6 +64,7 @@ def choose_display(display_arg: Optional[str]) -> str:
     print("  1. none")
     print("  2. range")
     print("  3. range-doppler")
+    print("  4. point-cloud")
     while True:
         choice = input("Select display type [2]: ").strip()
         if not choice:
@@ -74,7 +75,9 @@ def choose_display(display_arg: Optional[str]) -> str:
             return "range"
         if choice in {"3", "range-doppler", "range_doppler"}:
             return "range-doppler"
-        print("Choose 1, 2, 3, none, range, or range-doppler.")
+        if choice in {"4", "point-cloud", "point_cloud"}:
+            return "point-cloud"
+        print("Choose 1, 2, 3, 4, none, range, range-doppler, or point-cloud.")
 
 
 def resolve_radar_port(radar_port_arg: Optional[str]) -> str:

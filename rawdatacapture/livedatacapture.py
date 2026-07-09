@@ -14,6 +14,7 @@ import numpy as np
 try:
     from .dsp import (
         compute_range_doppler_heatmap,
+        compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
         frame_bytes_to_radar_cube,
@@ -23,6 +24,7 @@ try:
 except ImportError:
     from dsp import (
         compute_range_doppler_heatmap,
+        compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
         frame_bytes_to_radar_cube,
@@ -140,6 +142,7 @@ class RadarCaptureConfig:
     lvds_lanes: int
     num_loops: Optional[int] = None
     num_chirps_per_loop: Optional[int] = None
+    tx_channel_masks: Optional[tuple[int, ...]] = None
     sample_rate_ksps: Optional[float] = None
     frequency_slope_mhz_per_us: Optional[float] = None
 
@@ -155,6 +158,7 @@ class RadarCaptureConfig:
         lvds_lanes: int = 2,
         num_loops: Optional[int] = None,
         num_chirps_per_loop: Optional[int] = None,
+        tx_channel_masks: Optional[Iterable[int]] = None,
         sample_rate_ksps: Optional[float] = None,
         frequency_slope_mhz_per_us: Optional[float] = None,
     ) -> "RadarCaptureConfig":
@@ -175,6 +179,11 @@ class RadarCaptureConfig:
             lvds_lanes=lvds_lanes,
             num_loops=num_loops,
             num_chirps_per_loop=num_chirps_per_loop,
+            tx_channel_masks=(
+                tuple(int(mask) for mask in tx_channel_masks)
+                if tx_channel_masks is not None
+                else None
+            ),
             sample_rate_ksps=sample_rate_ksps,
             frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
         )
@@ -467,6 +476,11 @@ class DisplayPayloadSink:
                 range_axis_m,
                 compute_range_doppler_heatmap(range_fft, self.config),
             )
+        elif self.mode == "point-cloud":
+            payload = (
+                frame_first_byte_at_s,
+                compute_point_cloud(range_fft, range_axis_m, self.config),
+            )
         else:
             return
 
@@ -568,6 +582,7 @@ class RawFrameWriter:
                 "num_chirps_per_frame": self.config.num_chirps_per_frame,
                 "num_loops": self.config.num_loops,
                 "num_chirps_per_loop": self.config.num_chirps_per_loop,
+                "tx_channel_masks": self.config.tx_channel_masks,
                 "num_rx_channels": self.config.num_rx_channels,
                 "num_adc_samples": self.config.num_adc_samples,
             },
@@ -616,9 +631,14 @@ def _run_display_process(
         return
 
     plt.ion()
-    figure, axis = plt.subplots()
+    figure = plt.figure()
+    if mode == "point-cloud":
+        axis = figure.add_subplot(111, projection="3d")
+    else:
+        axis = figure.add_subplot(111)
     line = None
     image = None
+    scatter = None
 
     if mode == "range":
         line = axis.plot([], [], lw=1.5)[0]
@@ -637,6 +657,15 @@ def _run_display_process(
         axis.set_title("Live Range-Doppler Heatmap")
         axis.set_xlabel("Range (m)")
         axis.set_ylabel("Doppler bin")
+    elif mode == "point-cloud":
+        scatter = axis.scatter([], [], [], c=[], s=18, cmap="viridis")
+        figure.colorbar(scatter, ax=axis, label="Magnitude (dB)", pad=0.12)
+        axis.set_title("Live 3D Point Cloud")
+        axis.set_xlabel("X left/right (m)")
+        axis.set_ylabel("Y forward (m)")
+        axis.set_zlabel("Z elevation (m)")
+        axis.view_init(elev=24, azim=-60)
+        axis.grid(True, alpha=0.3)
 
     figure.tight_layout()
     plt.show(block=False)
@@ -663,6 +692,9 @@ def _run_display_process(
                 elif mode == "range-doppler" and image is not None:
                     frame_first_byte_at_s, range_axis_m, heatmap = payload
                     _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
+                elif mode == "point-cloud" and scatter is not None:
+                    frame_first_byte_at_s, points = payload
+                    _draw_point_cloud(axis, scatter, points, max_range_m)
                 else:
                     frame_first_byte_at_s = None
 
@@ -719,6 +751,44 @@ def _draw_range_doppler(
     image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
     axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
     axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
+
+
+def _draw_point_cloud(
+    axis: Any,
+    scatter: Any,
+    points: np.ndarray,
+    max_range_m: float,
+) -> None:
+    empty = np.array([], dtype=np.float32)
+    if points.size == 0:
+        scatter._offsets3d = (empty, empty, empty)
+        axis.set_xlim(-1, 1)
+        axis.set_ylim(0, max(max_range_m, 1.0))
+        axis.set_zlim(-1, 1)
+        return
+
+    x_m = points[:, 0]
+    y_m = points[:, 1]
+    z_m = points[:, 2]
+    magnitudes_db = points[:, 3]
+    scatter._offsets3d = (x_m, y_m, z_m)
+    scatter.set_array(magnitudes_db)
+    magnitude_min = float(np.min(magnitudes_db))
+    magnitude_max = float(np.max(magnitudes_db))
+    if magnitude_min == magnitude_max:
+        magnitude_min -= 1.0
+        magnitude_max += 1.0
+    scatter.set_clim(magnitude_min, magnitude_max)
+
+    horizontal_extent = max(
+        float(np.max(np.abs(x_m))) + 0.5,
+        float(np.max(np.abs(z_m))) + 0.5,
+        1.0,
+    )
+    y_max = max_range_m if max_range_m > 0 else float(np.max(y_m) + 1.0)
+    axis.set_xlim(-horizontal_extent, horizontal_extent)
+    axis.set_ylim(0, max(y_max, 1.0))
+    axis.set_zlim(-horizontal_extent, horizontal_extent)
 
 
 def _range_plot_axis(
@@ -1051,7 +1121,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--display",
-        choices=("none", "range", "range-doppler"),
+        choices=("none", "range", "range-doppler", "point-cloud"),
         default="none",
         help="Optional live display mode.",
     )
@@ -1318,6 +1388,7 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
     lvds_lanes = 2
     sample_rate_ksps: Optional[float] = None
     frequency_slope_mhz_per_us: Optional[float] = None
+    chirp_tx_masks: dict[int, int] = {}
 
     for raw_line in lines:
         line = raw_line.split("%", 1)[0].split("#", 1)[0].strip()
@@ -1336,6 +1407,12 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
             chirp_start_idx = int(tokens[1])
             chirp_end_idx = int(tokens[2])
             num_loops = int(tokens[3])
+        elif command == "chirpCfg" and len(tokens) > 8:
+            chirp_cfg_start_idx = int(tokens[1])
+            chirp_cfg_end_idx = int(tokens[2])
+            tx_enable_mask = int(tokens[8], 0)
+            for chirp_idx in range(chirp_cfg_start_idx, chirp_cfg_end_idx + 1):
+                chirp_tx_masks[chirp_idx] = tx_enable_mask
         elif command == "adcbufCfg" and len(tokens) > 4:
             iq_swap = bool(int(tokens[3]))
             # TI adcbufCfg uses 0 for interleaved and 1 for non-interleaved.
@@ -1362,6 +1439,10 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         lvds_lanes=lvds_lanes or 2,
         num_loops=num_loops,
         num_chirps_per_loop=chirp_end_idx - chirp_start_idx + 1,
+        tx_channel_masks=tuple(
+            chirp_tx_masks.get(chirp_idx, 1 << offset)
+            for offset, chirp_idx in enumerate(range(chirp_start_idx, chirp_end_idx + 1))
+        ),
         sample_rate_ksps=sample_rate_ksps,
         frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
     )

@@ -16,6 +16,7 @@ class RadarDspConfig(Protocol):
     lvds_lanes: int
     num_loops: Optional[int]
     num_chirps_per_loop: Optional[int]
+    tx_channel_masks: Optional[tuple[int, ...]]
     sample_rate_ksps: Optional[float]
     frequency_slope_mhz_per_us: Optional[float]
 
@@ -51,6 +52,15 @@ def compute_range_doppler_heatmap(
     range_fft: np.ndarray,
     config: RadarDspConfig,
 ) -> np.ndarray:
+    doppler_fft = compute_range_doppler_fft(range_fft, config)
+    magnitude = np.abs(doppler_fft).mean(axis=(1, 2))
+    return 20.0 * np.log10(magnitude + 1e-6)
+
+
+def compute_range_doppler_fft(
+    range_fft: np.ndarray,
+    config: RadarDspConfig,
+) -> np.ndarray:
     loops = config.num_loops or config.num_chirps_per_frame
     chirps_per_loop = config.num_chirps_per_loop or 1
     if loops * chirps_per_loop != range_fft.shape[0]:
@@ -63,9 +73,122 @@ def compute_range_doppler_heatmap(
         config.num_rx_channels,
         config.num_adc_samples,
     )
-    doppler_fft = np.fft.fftshift(np.fft.fft(tdm_cube, axis=0), axes=0)
-    magnitude = np.abs(doppler_fft).mean(axis=(1, 2))
-    return 20.0 * np.log10(magnitude + 1e-6)
+    return np.fft.fftshift(np.fft.fft(tdm_cube, axis=0), axes=0)
+
+
+def compute_point_cloud(
+    range_fft: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    config: RadarDspConfig,
+    *,
+    max_points: int = 200,
+    threshold_db_below_peak: float = 18.0,
+) -> np.ndarray:
+    doppler_fft = compute_range_doppler_fft(range_fft, config)
+    heatmap = 20.0 * np.log10(np.abs(doppler_fft).mean(axis=(1, 2)) + 1e-6)
+    if heatmap.size == 0:
+        return np.empty((0, 4), dtype=np.float32)
+
+    threshold = float(np.max(heatmap) - threshold_db_below_peak)
+    candidate_indices = np.argwhere(heatmap >= threshold)
+    if candidate_indices.size == 0:
+        return np.empty((0, 4), dtype=np.float32)
+
+    candidate_magnitudes = heatmap[candidate_indices[:, 0], candidate_indices[:, 1]]
+    order = np.argsort(candidate_magnitudes)[::-1][:max_points]
+    selected_indices = candidate_indices[order]
+    selected_magnitudes = candidate_magnitudes[order]
+
+    points = []
+    for (doppler_bin, range_bin), magnitude_db in zip(
+        selected_indices,
+        selected_magnitudes,
+    ):
+        if range_axis is not None and range_axis.size == heatmap.shape[1]:
+            target_range_m = float(range_axis[range_bin])
+        else:
+            target_range_m = float(range_bin)
+
+        x_m, y_m, z_m = estimate_xyz_from_virtual_array(
+            doppler_fft[int(doppler_bin), :, :, int(range_bin)],
+            target_range_m,
+            config,
+        )
+        points.append((x_m, y_m, z_m, float(magnitude_db)))
+
+    if not points:
+        return np.empty((0, 4), dtype=np.float32)
+    return np.asarray(points, dtype=np.float32)
+
+
+def estimate_xyz_from_virtual_array(
+    virtual_samples: np.ndarray,
+    target_range_m: float,
+    config: RadarDspConfig,
+    *,
+    angle_fft_size: int = 32,
+) -> tuple[float, float, float]:
+    """Estimate x/y/z from one range-Doppler cell using a simple 2D angle FFT.
+
+    The returned coordinate system is x=left/right, y=forward range, z=elevation.
+    This is an uncalibrated planar-array estimate intended for live visualization.
+    """
+    virtual_array = build_virtual_antenna_grid(virtual_samples, config)
+    angle_response = np.fft.fftshift(
+        np.fft.fft2(virtual_array, s=(angle_fft_size, angle_fft_size)),
+    )
+    magnitude = np.abs(angle_response)
+    if not np.any(magnitude):
+        return 0.0, max(target_range_m, 0.0), 0.0
+
+    elevation_bin, azimuth_bin = np.unravel_index(
+        int(np.argmax(magnitude)),
+        magnitude.shape,
+    )
+    azimuth_u = _spatial_bin_to_direction_cosine(azimuth_bin, angle_fft_size)
+    elevation_u = _spatial_bin_to_direction_cosine(elevation_bin, angle_fft_size)
+
+    radial_scale = max(0.0, 1.0 - azimuth_u**2 - elevation_u**2) ** 0.5
+    x_m = target_range_m * azimuth_u
+    z_m = target_range_m * elevation_u
+    y_m = target_range_m * radial_scale
+    return float(x_m), float(y_m), float(z_m)
+
+
+def build_virtual_antenna_grid(
+    virtual_samples: np.ndarray,
+    config: RadarDspConfig,
+) -> np.ndarray:
+    chirps_per_loop = virtual_samples.shape[0]
+    rx_count = virtual_samples.shape[1]
+    tx_indices = _tx_indices_for_chirps(config, chirps_per_loop)
+    elevation_size = max(max(tx_indices, default=0) + 1, chirps_per_loop)
+    grid = np.zeros((elevation_size, rx_count), dtype=np.complex64)
+
+    for chirp_index, tx_index in enumerate(tx_indices[:chirps_per_loop]):
+        grid[tx_index, :rx_count] = virtual_samples[chirp_index, :rx_count]
+    return grid
+
+
+def _tx_indices_for_chirps(
+    config: RadarDspConfig,
+    chirps_per_loop: int,
+) -> list[int]:
+    masks = config.tx_channel_masks
+    if masks:
+        indices = []
+        for mask in masks[:chirps_per_loop]:
+            enabled = [bit for bit in range(8) if mask & (1 << bit)]
+            indices.append(enabled[0] if enabled else len(indices))
+        if len(indices) == chirps_per_loop:
+            return indices
+    return list(range(chirps_per_loop))
+
+
+def _spatial_bin_to_direction_cosine(bin_index: int, fft_size: int) -> float:
+    # For half-wavelength antenna spacing, direction cosine is 2 * FFT frequency.
+    direction_cosine = 2.0 * ((bin_index - (fft_size // 2)) / float(fft_size))
+    return float(np.clip(direction_cosine, -1.0, 1.0))
 
 
 def frame_bytes_to_radar_cube(

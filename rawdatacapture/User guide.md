@@ -52,6 +52,7 @@ To choose the display mode without the prompt:
 ```powershell
 python run.py --display range
 python run.py --display range-doppler
+python run.py --display point-cloud
 python run.py --display none
 ```
 
@@ -193,6 +194,34 @@ calibrated velocity in m/s.
 The DSP math for frame reshaping, range FFT, range profile, and range-Doppler
 heatmap lives in `rawdatacapture\dsp.py`; `livedatacapture.py` owns UDP receive,
 frame assembly, logging, raw saving, and display orchestration.
+
+## 3D Point Cloud
+
+To show the live 3D point-cloud view:
+
+```powershell
+python rawdatacapture\livedatacapture.py --display point-cloud
+```
+
+Or through the one-command runner:
+
+```powershell
+python run.py --display point-cloud
+```
+
+Point-cloud axes:
+
+```text
+X-axis: left/right position in meters
+Y-axis: forward position in meters
+Z-axis: elevation position in meters
+Color: magnitude in dB
+```
+
+The point-cloud display detects strong range-Doppler cells, estimates azimuth
+and elevation with a 2D virtual-antenna FFT, and projects those detections into
+live `x/y/z` points. The angle estimate is currently uncalibrated, so it is best
+used as a live spatial visualization rather than precision metrology.
 
 ## Display Responsiveness
 
