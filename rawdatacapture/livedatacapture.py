@@ -120,6 +120,8 @@ class RadarCaptureConfig:
     iq_swap: bool
     channel_interleave: bool
     lvds_lanes: int
+    num_loops: Optional[int] = None
+    num_chirps_per_loop: Optional[int] = None
     sample_rate_ksps: Optional[float] = None
     frequency_slope_mhz_per_us: Optional[float] = None
 
@@ -133,6 +135,8 @@ class RadarCaptureConfig:
         iq_swap: bool = False,
         channel_interleave: bool = False,
         lvds_lanes: int = 2,
+        num_loops: Optional[int] = None,
+        num_chirps_per_loop: Optional[int] = None,
         sample_rate_ksps: Optional[float] = None,
         frequency_slope_mhz_per_us: Optional[float] = None,
     ) -> "RadarCaptureConfig":
@@ -151,6 +155,8 @@ class RadarCaptureConfig:
             iq_swap=iq_swap,
             channel_interleave=channel_interleave,
             lvds_lanes=lvds_lanes,
+            num_loops=num_loops,
+            num_chirps_per_loop=num_chirps_per_loop,
             sample_rate_ksps=sample_rate_ksps,
             frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
         )
@@ -199,6 +205,14 @@ class RadarCaptureConfig:
         if resolution is None:
             return None
         return np.arange(self.num_adc_samples, dtype=np.float32) * resolution
+
+    @property
+    def doppler_loops(self) -> int:
+        return self.num_loops or self.num_chirps_per_frame
+
+    @property
+    def doppler_chirps_per_loop(self) -> int:
+        return self.num_chirps_per_loop or 1
 
 
 @dataclass(frozen=True)
@@ -420,10 +434,12 @@ class DisplayPayloadSink:
         mode: str,
         update_every: int,
         payload_queue: Optional[mp.Queue],
+        config: RadarCaptureConfig,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
         self.payload_queue = payload_queue
+        self.config = config
         self.frame_count = 0
 
     def update(
@@ -449,7 +465,7 @@ class DisplayPayloadSink:
             payload = (
                 frame_first_byte_at_s,
                 range_axis_m,
-                compute_range_doppler_heatmap(range_fft),
+                compute_range_doppler_heatmap(range_fft, self.config),
             )
         else:
             return
@@ -550,6 +566,8 @@ class RawFrameWriter:
             "invalid_frames_skipped": self.invalid_frames_skipped,
             "frame_shape": {
                 "num_chirps_per_frame": self.config.num_chirps_per_frame,
+                "num_loops": self.config.num_loops,
+                "num_chirps_per_loop": self.config.num_chirps_per_loop,
                 "num_rx_channels": self.config.num_rx_channels,
                 "num_adc_samples": self.config.num_adc_samples,
             },
@@ -768,9 +786,24 @@ def compute_range_profile(range_fft: np.ndarray) -> np.ndarray:
     return np.abs(range_fft).mean(axis=(0, 1))
 
 
-def compute_range_doppler_heatmap(range_fft: np.ndarray) -> np.ndarray:
-    doppler_fft = np.fft.fftshift(np.fft.fft(range_fft, axis=0), axes=0)
-    magnitude = np.abs(doppler_fft).mean(axis=1)
+def compute_range_doppler_heatmap(
+    range_fft: np.ndarray,
+    config: RadarCaptureConfig,
+) -> np.ndarray:
+    loops = config.doppler_loops
+    chirps_per_loop = config.doppler_chirps_per_loop
+    if loops * chirps_per_loop != range_fft.shape[0]:
+        loops = range_fft.shape[0]
+        chirps_per_loop = 1
+
+    tdm_cube = range_fft.reshape(
+        loops,
+        chirps_per_loop,
+        config.num_rx_channels,
+        config.num_adc_samples,
+    )
+    doppler_fft = np.fft.fftshift(np.fft.fft(tdm_cube, axis=0), axes=0)
+    magnitude = np.abs(doppler_fft).mean(axis=(1, 2))
     return 20.0 * np.log10(magnitude + 1e-6)
 
 
@@ -877,6 +910,7 @@ def _run_frame_processor(
         display_mode,
         display_update_every,
         display_payload_queue,
+        config,
     )
 
     try:
@@ -1234,6 +1268,8 @@ def _config_from_mmwave_studio_json(data: Any) -> Optional[RadarCaptureConfig]:
         iq_swap=iq_swap,
         channel_interleave=channel_interleave,
         lvds_lanes=lvds_lanes,
+        num_loops=num_loops,
+        num_chirps_per_loop=chirp_end_idx - chirp_start_idx + 1,
         sample_rate_ksps=_optional_float(profile_config, "digOutSampleRate"),
         frequency_slope_mhz_per_us=_optional_float(
             profile_config,
@@ -1342,6 +1378,12 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         iq_swap=iq_swap,
         channel_interleave=channel_interleave,
         lvds_lanes=lvds_lanes,
+        num_loops=num_loops if "num_loops" in locals() else None,
+        num_chirps_per_loop=(
+            chirp_end_idx - chirp_start_idx + 1
+            if "chirp_start_idx" in locals() and "chirp_end_idx" in locals()
+            else None
+        ),
         sample_rate_ksps=sample_rate_ksps,
         frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
     )
@@ -1400,6 +1442,8 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         iq_swap=iq_swap,
         channel_interleave=channel_interleave,
         lvds_lanes=lvds_lanes or 2,
+        num_loops=num_loops,
+        num_chirps_per_loop=chirp_end_idx - chirp_start_idx + 1,
         sample_rate_ksps=sample_rate_ksps,
         frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
     )

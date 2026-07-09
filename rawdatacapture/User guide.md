@@ -185,7 +185,10 @@ To show a first-pass range-Doppler heatmap:
 python rawdatacapture\livedatacapture.py --display range-doppler
 ```
 
-This is an early diagnostic view, not yet a fully calibrated radar processing product.
+The range-Doppler view reshapes TDM-MIMO chirps into loops before running the
+Doppler FFT, so static scenes should concentrate near the center Doppler bin
+instead of repeating once per TX chirp. The Y-axis is still Doppler bin, not
+calibrated velocity in m/s.
 
 ## Display Responsiveness
 
