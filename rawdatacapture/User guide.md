@@ -27,6 +27,45 @@ lost_packets=0
 byte_gaps=0/0B
 ```
 
+## One-Command Startup And Capture
+
+From the repository root, run:
+
+```powershell
+python run.py
+```
+
+`run.py` asks for the display type, starts `livedatacapture.py`, starts
+`startup.py`, and saves valid raw frames to a timestamped file under:
+
+```text
+rawdatacapture\captures\
+```
+
+Stop with Ctrl+C. `run.py` stops `startup.py` first so the radar receives
+`sensorStop`, then stops `livedatacapture.py` so the raw data file and metadata
+sidecar are closed cleanly.
+
+To choose the display mode without the prompt:
+
+```powershell
+python run.py --display range
+python run.py --display range-doppler
+python run.py --display none
+```
+
+If the radar command UART is not detected correctly, pass it explicitly:
+
+```powershell
+python run.py --radar-port COM4
+```
+
+On Linux/Jetson, use the Linux serial device:
+
+```bash
+python3 run.py --radar-port /dev/ttyUSB1
+```
+
 ## Basic Capture
 
 From the repository root, run:
