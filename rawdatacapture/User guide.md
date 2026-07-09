@@ -190,6 +190,10 @@ Doppler FFT, so static scenes should concentrate near the center Doppler bin
 instead of repeating once per TX chirp. The Y-axis is still Doppler bin, not
 calibrated velocity in m/s.
 
+The DSP math for frame reshaping, range FFT, range profile, and range-Doppler
+heatmap lives in `rawdatacapture\dsp.py`; `livedatacapture.py` owns UDP receive,
+frame assembly, logging, raw saving, and display orchestration.
+
 ## Display Responsiveness
 
 UDP packet receiving is split from FFT/display processing. The receive loop assembles complete frames and hands valid frames to a processing worker. Matplotlib then runs behind that worker in a separate display process with a one-item latest-frame queue.

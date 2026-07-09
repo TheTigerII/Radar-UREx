@@ -11,6 +11,25 @@ from typing import Any, BinaryIO, Callable, Iterable, Optional, TextIO
 
 import numpy as np
 
+try:
+    from .dsp import (
+        compute_range_doppler_heatmap,
+        compute_range_fft,
+        compute_range_profile,
+        frame_bytes_to_radar_cube,
+        range_axis_m,
+        range_resolution_m,
+    )
+except ImportError:
+    from dsp import (
+        compute_range_doppler_heatmap,
+        compute_range_fft,
+        compute_range_profile,
+        frame_bytes_to_radar_cube,
+        range_axis_m,
+        range_resolution_m,
+    )
+
 
 # Default DCA1000 network parameters.
 UDP_IP = "192.168.33.30"  # Host/laptop static Ethernet IP
@@ -24,7 +43,6 @@ DEFAULT_PROCESSING_QUEUE_SIZE = 4
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
-SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 DEFAULT_MAX_RANGE_M = 20.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
 _LOG_FILE: Optional[TextIO] = None
@@ -191,28 +209,10 @@ class RadarCaptureConfig:
 
     @property
     def range_resolution_m(self) -> Optional[float]:
-        if not self.sample_rate_ksps or not self.frequency_slope_mhz_per_us:
-            return None
-
-        sample_rate_hz = self.sample_rate_ksps * 1_000.0
-        slope_hz_per_s = self.frequency_slope_mhz_per_us * 1e12
-        return SPEED_OF_LIGHT_M_PER_S * sample_rate_hz / (
-            2.0 * slope_hz_per_s * self.num_adc_samples
-        )
+        return range_resolution_m(self)
 
     def range_axis_m(self) -> Optional[np.ndarray]:
-        resolution = self.range_resolution_m
-        if resolution is None:
-            return None
-        return np.arange(self.num_adc_samples, dtype=np.float32) * resolution
-
-    @property
-    def doppler_loops(self) -> int:
-        return self.num_loops or self.num_chirps_per_frame
-
-    @property
-    def doppler_chirps_per_loop(self) -> int:
-        return self.num_chirps_per_loop or 1
+        return range_axis_m(self)
 
 
 @dataclass(frozen=True)
@@ -775,88 +775,6 @@ def process_complete_frame(
         f"peak_magnitude={range_profile[peak_range_bin]:.2f}"
     )
     display.update(range_fft, range_axis_m, frame.first_byte_at_s)
-
-
-def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
-    window = np.hanning(radar_cube.shape[2]).astype(np.float32)
-    return np.fft.fft(radar_cube * window, axis=2)
-
-
-def compute_range_profile(range_fft: np.ndarray) -> np.ndarray:
-    return np.abs(range_fft).mean(axis=(0, 1))
-
-
-def compute_range_doppler_heatmap(
-    range_fft: np.ndarray,
-    config: RadarCaptureConfig,
-) -> np.ndarray:
-    loops = config.doppler_loops
-    chirps_per_loop = config.doppler_chirps_per_loop
-    if loops * chirps_per_loop != range_fft.shape[0]:
-        loops = range_fft.shape[0]
-        chirps_per_loop = 1
-
-    tdm_cube = range_fft.reshape(
-        loops,
-        chirps_per_loop,
-        config.num_rx_channels,
-        config.num_adc_samples,
-    )
-    doppler_fft = np.fft.fftshift(np.fft.fft(tdm_cube, axis=0), axes=0)
-    magnitude = np.abs(doppler_fft).mean(axis=(1, 2))
-    return 20.0 * np.log10(magnitude + 1e-6)
-
-
-def frame_bytes_to_radar_cube(
-    frame_bytes: bytes, config: RadarCaptureConfig
-) -> np.ndarray:
-    """Convert one complete DCA1000 frame into [chirp, rx, sample] complex data."""
-    expected_int16_count = config.bytes_per_frame // np.dtype("<i2").itemsize
-    adc_samples = np.frombuffer(frame_bytes, dtype="<i2", count=expected_int16_count)
-
-    if adc_samples.size != expected_int16_count:
-        raise ValueError(
-            f"Frame has {adc_samples.size} int16 values; expected {expected_int16_count}"
-        )
-    if adc_samples.size % 4 != 0:
-        raise ValueError("Complex 2-lane LVDS data must contain int16 groups of 4")
-    if config.lvds_lanes != 2:
-        raise NotImplementedError(
-            f"LVDS reshape currently supports 2 lanes, got {config.lvds_lanes}"
-        )
-
-    grouped = adc_samples.reshape(-1, 4)
-    first = grouped[:, 0:2].reshape(-1).astype(np.float32)
-    second = grouped[:, 2:4].reshape(-1).astype(np.float32)
-
-    if config.iq_swap:
-        complex_samples = second + 1j * first
-    else:
-        complex_samples = first + 1j * second
-
-    expected_complex_count = (
-        config.num_chirps_per_frame
-        * config.num_rx_channels
-        * config.num_adc_samples
-    )
-    if complex_samples.size != expected_complex_count:
-        raise ValueError(
-            "Frame produced "
-            f"{complex_samples.size} complex samples; expected {expected_complex_count}"
-        )
-
-    if config.channel_interleave:
-        return complex_samples.reshape(
-            config.num_chirps_per_frame,
-            config.num_adc_samples,
-            config.num_rx_channels,
-        ).transpose(0, 2, 1)
-
-    return complex_samples.reshape(
-        config.num_chirps_per_frame,
-        config.num_rx_channels,
-        config.num_adc_samples,
-    )
 
 
 def _queue_emit(log_queue: mp.Queue, message: str) -> None:
