@@ -46,6 +46,7 @@ DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
 DEFAULT_MAX_RANGE_M = 20.0
+POINT_CLOUD_BOX_SIZE_M = 5.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
 _LOG_FILE: Optional[TextIO] = None
 EmitFunc = Callable[[str], None]
@@ -664,6 +665,10 @@ def _run_display_process(
         axis.set_xlabel("X left/right (m)")
         axis.set_ylabel("Y forward (m)")
         axis.set_zlabel("Z elevation (m)")
+        axis.set_xlim(-POINT_CLOUD_BOX_SIZE_M / 2.0, POINT_CLOUD_BOX_SIZE_M / 2.0)
+        axis.set_ylim(0, POINT_CLOUD_BOX_SIZE_M)
+        axis.set_zlim(-POINT_CLOUD_BOX_SIZE_M / 2.0, POINT_CLOUD_BOX_SIZE_M / 2.0)
+        axis.set_box_aspect((1, 1, 1))
         axis.view_init(elev=24, azim=-60)
         axis.grid(True, alpha=0.3)
 
@@ -759,12 +764,13 @@ def _draw_point_cloud(
     points: np.ndarray,
     max_range_m: float,
 ) -> None:
+    half_box_m = POINT_CLOUD_BOX_SIZE_M / 2.0
     empty = np.array([], dtype=np.float32)
     if points.size == 0:
         scatter._offsets3d = (empty, empty, empty)
-        axis.set_xlim(-1, 1)
-        axis.set_ylim(0, max(max_range_m, 1.0))
-        axis.set_zlim(-1, 1)
+        axis.set_xlim(-half_box_m, half_box_m)
+        axis.set_ylim(0, POINT_CLOUD_BOX_SIZE_M)
+        axis.set_zlim(-half_box_m, half_box_m)
         return
 
     x_m = points[:, 0]
@@ -780,15 +786,9 @@ def _draw_point_cloud(
         magnitude_max += 1.0
     scatter.set_clim(magnitude_min, magnitude_max)
 
-    horizontal_extent = max(
-        float(np.max(np.abs(x_m))) + 0.5,
-        float(np.max(np.abs(z_m))) + 0.5,
-        1.0,
-    )
-    y_max = max_range_m if max_range_m > 0 else float(np.max(y_m) + 1.0)
-    axis.set_xlim(-horizontal_extent, horizontal_extent)
-    axis.set_ylim(0, max(y_max, 1.0))
-    axis.set_zlim(-horizontal_extent, horizontal_extent)
+    axis.set_xlim(-half_box_m, half_box_m)
+    axis.set_ylim(0, POINT_CLOUD_BOX_SIZE_M)
+    axis.set_zlim(-half_box_m, half_box_m)
 
 
 def _range_plot_axis(
