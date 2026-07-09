@@ -214,17 +214,11 @@ RadarControl
     - Configuration commands are sent first; `sensorStart` is deferred until
       after DCA1000 arm.
 
-  CliRadarControl
-    - Not implemented.
-
 DCA1000Control
   DirectUdpDca1000Control
     - Python sends DCA1000 control commands over UDP.
     - Implemented in startup.py for system connect, FPGA reset, FPGA config,
       packet config, record start, and record stop.
-
-  CliDca1000Control
-    - Not implemented.
 ```
 
 The public orchestration sequence should stay the same whichever backend is used.
@@ -340,7 +334,6 @@ finally:
 
 - `startup.py` has a dry-run capture pipeline placeholder. The real UDP receive,
   frame assembly, processing, and display still live in `livedatacapture.py`.
-- `cli` backends are exposed as choices but are not implemented.
 - `direct-serial` assumes SDK CLI firmware is already flashed and running.
 - `direct-serial` does not flash MSS/BSS firmware.
 - `direct-udp` configures and arms DCA1000, but the end-to-end capture handoff to

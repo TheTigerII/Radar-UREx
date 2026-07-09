@@ -60,14 +60,11 @@ class StartupState(str, Enum):
 
 class DCA1000Command(IntEnum):
     RESET_FPGA = 0x01
-    RESET_AR_DEVICE = 0x02
     CONFIG_FPGA_GEN = 0x03
     RECORD_START = 0x05
     RECORD_STOP = 0x06
     SYSTEM_CONNECT = 0x09
     CONFIG_RECORD = 0x0B
-    CONFIG_PACKET_DATA = 0x0B
-    READ_FPGA_VERSION = 0x0E
 
 
 class DCA1000Status(IntEnum):
@@ -625,40 +622,6 @@ class DryRunCapturePipeline:
         self.running = False
 
 
-class UnsupportedDCA1000Control:
-    def __init__(self, backend: str) -> None:
-        self.backend = backend
-
-    def configure(self, config: StartupConfig) -> None:
-        raise StartupError(
-            f"DCA1000 backend '{self.backend}' is not implemented yet. "
-            "Use --dca-backend dry-run for preflight/state-machine validation."
-        )
-
-    def arm(self, config: StartupConfig) -> None:
-        raise StartupError(f"DCA1000 backend '{self.backend}' cannot arm capture")
-
-    def stop(self) -> None:
-        return
-
-
-class UnsupportedRadarControl:
-    def __init__(self, backend: str) -> None:
-        self.backend = backend
-
-    def configure(self, config: StartupConfig) -> None:
-        raise StartupError(
-            f"radar backend '{self.backend}' is not implemented yet. "
-            "Use --radar-backend dry-run for preflight/state-machine validation."
-        )
-
-    def start_sensor(self) -> None:
-        raise StartupError(f"radar backend '{self.backend}' cannot start sensor")
-
-    def stop_sensor(self) -> None:
-        return
-
-
 class StartupOrchestrator:
     def __init__(
         self,
@@ -775,7 +738,7 @@ def _make_dca1000_control(
         return DryRunDCA1000Control(options, emit)
     if options.dca_backend == "direct-udp":
         return DirectUdpDCA1000Control(options, emit)
-    return UnsupportedDCA1000Control(options.dca_backend)
+    raise StartupError(f"unsupported DCA1000 backend: {options.dca_backend}")
 
 
 def _make_radar_control(options: RuntimeOptions, emit: EmitFunc) -> RadarControl:
@@ -783,7 +746,7 @@ def _make_radar_control(options: RuntimeOptions, emit: EmitFunc) -> RadarControl
         return DryRunRadarControl(options, emit)
     if options.radar_backend == "direct-serial":
         return SdkCliRadarControl(options, emit)
-    return UnsupportedRadarControl(options.radar_backend)
+    raise StartupError(f"unsupported radar backend: {options.radar_backend}")
 
 
 def _make_capture_pipeline(
@@ -1143,12 +1106,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dca-config-port", type=int, default=DCA1000_CONFIG_PORT)
     parser.add_argument(
         "--dca-backend",
-        choices=("dry-run", "direct-udp", "cli"),
+        choices=("dry-run", "direct-udp"),
         default="dry-run",
     )
     parser.add_argument(
         "--radar-backend",
-        choices=("dry-run", "direct-serial", "cli"),
+        choices=("dry-run", "direct-serial"),
         default="dry-run",
     )
     parser.add_argument(
