@@ -81,30 +81,45 @@ def compute_point_cloud(
     range_axis: Optional[np.ndarray],
     config: RadarDspConfig,
     *,
-    max_points: int = 200,
-    threshold_db_below_peak: float = 18.0,
+    max_points: int = 50,
+    false_alarm_rate: float = 1e-3,
+    range_guard_cells: int = 2,
+    doppler_guard_cells: int = 1,
+    range_training_cells: int = 8,
+    doppler_training_cells: int = 2,
+    min_range_m: float = 0.15,
 ) -> np.ndarray:
     doppler_fft = compute_range_doppler_fft(range_fft, config)
-    heatmap = 20.0 * np.log10(np.abs(doppler_fft).mean(axis=(1, 2)) + 1e-6)
-    if heatmap.size == 0:
+    detection_power = np.mean(np.abs(doppler_fft) ** 2, axis=(1, 2))
+    if detection_power.size == 0:
         return np.empty((0, 4), dtype=np.float32)
 
-    threshold = float(np.max(heatmap) - threshold_db_below_peak)
-    candidate_indices = np.argwhere(heatmap >= threshold)
+    detections = ca_cfar_2d(
+        detection_power,
+        false_alarm_rate=false_alarm_rate,
+        range_guard_cells=range_guard_cells,
+        doppler_guard_cells=doppler_guard_cells,
+        range_training_cells=range_training_cells,
+        doppler_training_cells=doppler_training_cells,
+    )
+    detections &= local_peak_mask(detection_power)
+    detections = _apply_min_range_gate(detections, range_axis, min_range_m)
+
+    candidate_indices = np.argwhere(detections)
     if candidate_indices.size == 0:
         return np.empty((0, 4), dtype=np.float32)
 
-    candidate_magnitudes = heatmap[candidate_indices[:, 0], candidate_indices[:, 1]]
-    order = np.argsort(candidate_magnitudes)[::-1][:max_points]
+    candidate_powers = detection_power[candidate_indices[:, 0], candidate_indices[:, 1]]
+    order = np.argsort(candidate_powers)[::-1][:max_points]
     selected_indices = candidate_indices[order]
-    selected_magnitudes = candidate_magnitudes[order]
+    selected_magnitudes_db = 10.0 * np.log10(candidate_powers[order] + 1e-12)
 
     points = []
     for (doppler_bin, range_bin), magnitude_db in zip(
         selected_indices,
-        selected_magnitudes,
+        selected_magnitudes_db,
     ):
-        if range_axis is not None and range_axis.size == heatmap.shape[1]:
+        if range_axis is not None and range_axis.size == detection_power.shape[1]:
             target_range_m = float(range_axis[range_bin])
         else:
             target_range_m = float(range_bin)
@@ -119,6 +134,106 @@ def compute_point_cloud(
     if not points:
         return np.empty((0, 4), dtype=np.float32)
     return np.asarray(points, dtype=np.float32)
+
+
+def ca_cfar_2d(
+    power_map: np.ndarray,
+    *,
+    false_alarm_rate: float,
+    range_guard_cells: int,
+    doppler_guard_cells: int,
+    range_training_cells: int,
+    doppler_training_cells: int,
+) -> np.ndarray:
+    """Run 2D cell-averaging CFAR on a [doppler, range] power map."""
+    if power_map.ndim != 2 or power_map.size == 0:
+        return np.zeros_like(power_map, dtype=bool)
+
+    doppler_bins, range_bins = power_map.shape
+    detections = np.zeros_like(power_map, dtype=bool)
+    range_margin = range_training_cells + range_guard_cells
+    doppler_window = doppler_training_cells + doppler_guard_cells
+    training_cells = (
+        (2 * doppler_window + 1) * (2 * range_margin + 1)
+        - (2 * doppler_guard_cells + 1) * (2 * range_guard_cells + 1)
+    )
+    if training_cells <= 0 or range_bins <= (2 * range_margin):
+        return detections
+
+    pfa = min(max(false_alarm_rate, 1e-9), 0.5)
+    threshold_scale = training_cells * (pfa ** (-1.0 / training_cells) - 1.0)
+
+    for doppler_idx in range(doppler_bins):
+        doppler_indices = [
+            (doppler_idx + offset) % doppler_bins
+            for offset in range(-doppler_window, doppler_window + 1)
+        ]
+        guard_doppler_indices = {
+            (doppler_idx + offset) % doppler_bins
+            for offset in range(-doppler_guard_cells, doppler_guard_cells + 1)
+        }
+        for range_idx in range(range_margin, range_bins - range_margin):
+            training_sum = 0.0
+            for neighbor_doppler_idx in doppler_indices:
+                for neighbor_range_idx in range(
+                    range_idx - range_margin,
+                    range_idx + range_margin + 1,
+                ):
+                    in_guard = (
+                        neighbor_doppler_idx in guard_doppler_indices
+                        and abs(neighbor_range_idx - range_idx) <= range_guard_cells
+                    )
+                    if not in_guard:
+                        training_sum += float(
+                            power_map[neighbor_doppler_idx, neighbor_range_idx]
+                        )
+
+            noise_estimate = training_sum / training_cells
+            detections[doppler_idx, range_idx] = (
+                power_map[doppler_idx, range_idx] > threshold_scale * noise_estimate
+            )
+
+    return detections
+
+
+def local_peak_mask(power_map: np.ndarray) -> np.ndarray:
+    if power_map.ndim != 2 or power_map.size == 0:
+        return np.zeros_like(power_map, dtype=bool)
+
+    doppler_bins, range_bins = power_map.shape
+    peaks = np.ones_like(power_map, dtype=bool)
+    for doppler_offset in (-1, 0, 1):
+        for range_offset in (-1, 0, 1):
+            if doppler_offset == 0 and range_offset == 0:
+                continue
+            shifted = np.roll(power_map, shift=doppler_offset, axis=0)
+            if range_offset < 0:
+                neighbor = np.empty_like(power_map)
+                neighbor[:, :-1] = shifted[:, 1:]
+                neighbor[:, -1] = -np.inf
+            elif range_offset > 0:
+                neighbor = np.empty_like(power_map)
+                neighbor[:, 1:] = shifted[:, :-1]
+                neighbor[:, 0] = -np.inf
+            else:
+                neighbor = shifted
+            peaks &= power_map >= neighbor
+    return peaks
+
+
+def _apply_min_range_gate(
+    detections: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    min_range_m: float,
+) -> np.ndarray:
+    if min_range_m <= 0:
+        return detections
+    gated = detections.copy()
+    if range_axis is not None and range_axis.size == detections.shape[1]:
+        gated[:, range_axis < min_range_m] = False
+    else:
+        gated[:, 0] = False
+    return gated
 
 
 def estimate_xyz_from_virtual_array(
