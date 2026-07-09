@@ -225,8 +225,8 @@ Z-axis: elevation position in meters
 Color: magnitude in dB
 ```
 
-The live point-cloud plot uses a fixed 1 m by 1 m by 1 m box: X and Z span
-`-0.5 m` to `0.5 m`, and Y spans `0 m` to `1 m` in front of the radar.
+The live point-cloud plot uses a fixed 5 m by 5 m by 5 m box: X and Z span
+`-2.5 m` to `2.5 m`, and Y spans `0 m` to `5 m` in front of the radar.
 
 The point-cloud display uses 2D CA-CFAR on the range-Doppler power map before
 estimating azimuth and elevation with a 2D virtual-antenna FFT. The virtual
