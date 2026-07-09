@@ -20,6 +20,7 @@ DEFAULT_RADAR_BAUD = 115200
 DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
+DEFAULT_POINT_CLOUD_DISPLAY_UPDATE_EVERY = 2
 DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
@@ -51,6 +52,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dca-timeout", type=float, default=DEFAULT_DCA_TIMEOUT)
     parser.add_argument("--dca-retries", type=int, default=DEFAULT_DCA_RETRIES)
     parser.add_argument("--display", choices=DISPLAY_CHOICES)
+    parser.add_argument(
+        "--display-update-every",
+        type=int,
+        help=(
+            "Update the live display every N valid frames. "
+            "Defaults to 2 for point-cloud and 1 for other display modes."
+        ),
+    )
     parser.add_argument("--capture-dir", type=Path, default=DEFAULT_CAPTURE_DIR)
     parser.add_argument("--raw-output", type=Path)
     return parser.parse_args()
@@ -225,7 +234,19 @@ def kill_process(process: subprocess.Popen) -> None:
         os.killpg(process.pid, signal.SIGKILL)
 
 
-def build_capture_command(args: argparse.Namespace, display: str, raw_output: Path) -> list[str]:
+def build_capture_command(
+    args: argparse.Namespace,
+    display: str,
+    raw_output: Path,
+) -> list[str]:
+    display_update_every = args.display_update_every
+    if display_update_every is None:
+        display_update_every = (
+            DEFAULT_POINT_CLOUD_DISPLAY_UPDATE_EVERY
+            if display == "point-cloud"
+            else 1
+        )
+
     return [
         sys.executable,
         str(RAW_DATA_DIR / "livedatacapture.py"),
@@ -239,6 +260,8 @@ def build_capture_command(args: argparse.Namespace, display: str, raw_output: Pa
         str(args.data_port),
         "--display",
         display,
+        "--display-update-every",
+        str(max(display_update_every, 1)),
         "--raw-output",
         str(raw_output),
     ]

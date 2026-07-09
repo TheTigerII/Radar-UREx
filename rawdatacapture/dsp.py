@@ -163,35 +163,43 @@ def ca_cfar_2d(
     pfa = min(max(false_alarm_rate, 1e-9), 0.5)
     threshold_scale = training_cells * (pfa ** (-1.0 / training_cells) - 1.0)
 
-    for doppler_idx in range(doppler_bins):
-        doppler_indices = [
-            (doppler_idx + offset) % doppler_bins
-            for offset in range(-doppler_window, doppler_window + 1)
-        ]
-        guard_doppler_indices = {
-            (doppler_idx + offset) % doppler_bins
-            for offset in range(-doppler_guard_cells, doppler_guard_cells + 1)
-        }
-        for range_idx in range(range_margin, range_bins - range_margin):
-            training_sum = 0.0
-            for neighbor_doppler_idx in doppler_indices:
-                for neighbor_range_idx in range(
-                    range_idx - range_margin,
-                    range_idx + range_margin + 1,
-                ):
-                    in_guard = (
-                        neighbor_doppler_idx in guard_doppler_indices
-                        and abs(neighbor_range_idx - range_idx) <= range_guard_cells
-                    )
-                    if not in_guard:
-                        training_sum += float(
-                            power_map[neighbor_doppler_idx, neighbor_range_idx]
-                        )
+    doppler_extended = np.concatenate(
+        (
+            power_map[-doppler_window:, :],
+            power_map,
+            power_map[:doppler_window, :],
+        ),
+        axis=0,
+    )
+    total_windows = np.lib.stride_tricks.sliding_window_view(
+        doppler_extended,
+        (2 * doppler_window + 1, 2 * range_margin + 1),
+    )
+    total_sum = total_windows.sum(axis=(-2, -1), dtype=np.float64)
 
-            noise_estimate = training_sum / training_cells
-            detections[doppler_idx, range_idx] = (
-                power_map[doppler_idx, range_idx] > threshold_scale * noise_estimate
-            )
+    guard_source = doppler_extended[
+        doppler_window - doppler_guard_cells : doppler_window
+        - doppler_guard_cells
+        + doppler_bins
+        + (2 * doppler_guard_cells),
+        :,
+    ]
+    guard_windows = np.lib.stride_tricks.sliding_window_view(
+        guard_source,
+        (2 * doppler_guard_cells + 1, 2 * range_guard_cells + 1),
+    )
+    guard_start = range_margin - range_guard_cells
+    guard_sum = guard_windows[
+        :,
+        guard_start : guard_start + total_sum.shape[1],
+    ].sum(axis=(-2, -1), dtype=np.float64)
+
+    training_sum = total_sum - guard_sum
+    noise_estimate = training_sum / training_cells
+    test_cells = power_map[:, range_margin : range_bins - range_margin]
+    detections[:, range_margin : range_bins - range_margin] = (
+        test_cells > threshold_scale * noise_estimate
+    )
 
     return detections
 

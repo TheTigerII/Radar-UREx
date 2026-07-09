@@ -209,6 +209,13 @@ Or through the one-command runner:
 python run.py --display point-cloud
 ```
 
+When using `run.py`, point-cloud display updates every 2 valid frames by
+default to reduce DSP/display backlog. To change that rate:
+
+```powershell
+python run.py --display point-cloud --display-update-every 3
+```
+
 Point-cloud axes:
 
 ```text
