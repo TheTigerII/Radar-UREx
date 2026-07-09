@@ -222,7 +222,7 @@ Point-cloud axes:
 X-axis: left/right position in meters
 Y-axis: forward position in meters
 Z-axis: elevation position in meters
-Color: magnitude in dB
+Color: magnitude in dB, fixed from 40 dB to 120 dB
 ```
 
 The live point-cloud plot uses a fixed 5 m by 5 m by 5 m box: X and Z span

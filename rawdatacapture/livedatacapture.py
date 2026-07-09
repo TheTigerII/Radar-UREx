@@ -47,6 +47,8 @@ DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
 DEFAULT_MAX_RANGE_M = 20.0
 POINT_CLOUD_BOX_SIZE_M = 5.0
+POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
+POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
 _LOG_FILE: Optional[TextIO] = None
 EmitFunc = Callable[[str], None]
@@ -660,6 +662,7 @@ def _run_display_process(
         axis.set_ylabel("Doppler bin")
     elif mode == "point-cloud":
         scatter = axis.scatter([], [], [], c=[], s=18, cmap="viridis")
+        scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
         figure.colorbar(scatter, ax=axis, label="Magnitude (dB)", pad=0.12)
         axis.set_title("Live 3D Point Cloud")
         axis.set_xlabel("X left/right (m)")
@@ -779,12 +782,7 @@ def _draw_point_cloud(
     magnitudes_db = points[:, 3]
     scatter._offsets3d = (x_m, y_m, z_m)
     scatter.set_array(magnitudes_db)
-    magnitude_min = float(np.min(magnitudes_db))
-    magnitude_max = float(np.max(magnitudes_db))
-    if magnitude_min == magnitude_max:
-        magnitude_min -= 1.0
-        magnitude_max += 1.0
-    scatter.set_clim(magnitude_min, magnitude_max)
+    scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
 
     axis.set_xlim(-half_box_m, half_box_m)
     axis.set_ylim(0, POINT_CLOUD_BOX_SIZE_M)
