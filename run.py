@@ -6,7 +6,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 
 ROOT = Path(__file__).resolve().parent
@@ -21,6 +21,13 @@ DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
 DISPLAY_CHOICES = ("none", "range", "range-doppler")
+WINDOWS_DEFAULT_RADAR_PORT = "COM4"
+LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
+
+
+class SerialPortInfo(NamedTuple):
+    device: str
+    description: str = ""
 
 
 def parse_args() -> argparse.Namespace:
@@ -78,35 +85,77 @@ def resolve_radar_port(radar_port_arg: Optional[str]) -> str:
     if env_port:
         return env_port
 
-    detected_port = detect_radar_port()
-    if detected_port:
-        return detected_port
+    detected_ports = detect_serial_ports()
+    default_port = default_radar_port()
+    if default_port and any(port.device == default_port for port in detected_ports):
+        return default_port
+    if len(detected_ports) == 1:
+        return detected_ports[0].device
+    if detected_ports:
+        return choose_radar_port(detected_ports)
 
-    return input("Radar command UART port: ").strip()
+    return default_port or input("Radar command UART port: ").strip()
 
 
-def detect_radar_port() -> Optional[str]:
+def choose_radar_port(ports: list[SerialPortInfo]) -> str:
+    print("Radar command UART ports:")
+    for index, port in enumerate(ports, start=1):
+        description = f" - {port.description}" if port.description else ""
+        print(f"  {index}. {port.device}{description}")
+
+    while True:
+        choice = input("Select radar command UART: ").strip()
+        if choice.isdigit():
+            selected_index = int(choice)
+            if 1 <= selected_index <= len(ports):
+                return ports[selected_index - 1].device
+        for port in ports:
+            if choice == port.device:
+                return port.device
+        print("Choose a listed number or serial device path.")
+
+
+def detect_serial_ports() -> list[SerialPortInfo]:
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return fallback_serial_ports()
+
+    ports = [
+        SerialPortInfo(port.device, port.description or "")
+        for port in list_ports.comports()
+    ]
+    return sorted(ports, key=serial_port_sort_key)
+
+
+def fallback_serial_ports() -> list[SerialPortInfo]:
     if os.name == "nt":
-        try:
-            from serial.tools import list_ports
-        except ImportError:
-            return "COM4"
+        return [SerialPortInfo(WINDOWS_DEFAULT_RADAR_PORT)]
 
-        ports = [port.device for port in list_ports.comports()]
-        if "COM4" in ports:
-            return "COM4"
-        return ports[0] if ports else "COM4"
-
-    preferred_ports = (
+    preferred_ports = [
+        LINUX_DEFAULT_RADAR_PORT,
         "/dev/ttyUSB1",
-        "/dev/ttyUSB0",
         "/dev/ttyACM1",
         "/dev/ttyACM0",
-    )
-    for port in preferred_ports:
-        if Path(port).exists():
-            return port
-    return None
+    ]
+    return [SerialPortInfo(port) for port in preferred_ports if Path(port).exists()]
+
+
+def serial_port_sort_key(port: SerialPortInfo) -> tuple[int, str]:
+    preferred_order = {
+        WINDOWS_DEFAULT_RADAR_PORT: 0,
+        LINUX_DEFAULT_RADAR_PORT: 0,
+        "/dev/ttyUSB1": 1,
+        "/dev/ttyACM1": 2,
+        "/dev/ttyACM0": 3,
+    }
+    return (preferred_order.get(port.device, 99), port.device)
+
+
+def default_radar_port() -> Optional[str]:
+    if os.name == "nt":
+        return WINDOWS_DEFAULT_RADAR_PORT
+    return LINUX_DEFAULT_RADAR_PORT
 
 
 def default_raw_output(capture_dir: Path) -> Path:

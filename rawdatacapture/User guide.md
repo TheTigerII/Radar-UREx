@@ -35,8 +35,9 @@ From the repository root, run:
 python run.py
 ```
 
-`run.py` asks for the display type, starts `livedatacapture.py`, starts
-`startup.py`, and saves valid raw frames to a timestamped file under:
+`run.py` asks for the display type, uses `/dev/ttyUSB0` as the default Linux
+radar command UART, starts `livedatacapture.py`, starts `startup.py`, and saves
+valid raw frames to a timestamped file under:
 
 ```text
 rawdatacapture\captures\
@@ -63,7 +64,7 @@ python run.py --radar-port COM4
 On Linux/Jetson, use the Linux serial device:
 
 ```bash
-python3 run.py --radar-port /dev/ttyUSB1
+python3 run.py --radar-port /dev/ttyUSB0
 ```
 
 ## Basic Capture
