@@ -285,6 +285,14 @@ def build_virtual_antenna_grid(
     chirps_per_loop = virtual_samples.shape[0]
     rx_count = virtual_samples.shape[1]
     tx_indices = _tx_indices_for_chirps(config, chirps_per_loop)
+    ods_grid = _build_iwr6843isk_ods_virtual_antenna_grid(
+        virtual_samples,
+        tx_indices,
+        rx_count,
+    )
+    if ods_grid is not None:
+        return ods_grid
+
     elevation_size = max(max(tx_indices, default=0) + 1, chirps_per_loop)
     grid = np.zeros((elevation_size, rx_count), dtype=np.complex64)
 
@@ -312,6 +320,51 @@ def _spatial_bin_to_direction_cosine(bin_index: int, fft_size: int) -> float:
     # For half-wavelength antenna spacing, direction cosine is 2 * FFT frequency.
     direction_cosine = 2.0 * ((bin_index - (fft_size // 2)) / float(fft_size))
     return float(np.clip(direction_cosine, -1.0, 1.0))
+
+
+def _build_iwr6843isk_ods_virtual_antenna_grid(
+    virtual_samples: np.ndarray,
+    tx_indices: list[int],
+    rx_count: int,
+) -> Optional[np.ndarray]:
+    if rx_count != 4:
+        return None
+
+    tx_numbers = [tx_index + 1 for tx_index in tx_indices]
+    if not set(tx_numbers).issubset({1, 2, 3}):
+        return None
+
+    # IWR6843ISK-ODS page-40 layout. Rows are bottom-to-top elevation; columns
+    # are left-to-right azimuth. RX2/RX3 require 180 degree phase inversion.
+    positions = {
+        (1, 1): (3, 0),
+        (1, 2): (2, 0),
+        (1, 3): (2, 1),
+        (1, 4): (3, 1),
+        (2, 1): (3, 2),
+        (2, 2): (2, 2),
+        (2, 3): (2, 3),
+        (2, 4): (3, 3),
+        (3, 1): (1, 2),
+        (3, 2): (0, 2),
+        (3, 3): (0, 3),
+        (3, 4): (1, 3),
+    }
+    rx_phase = {
+        1: 1.0,
+        2: -1.0,
+        3: -1.0,
+        4: 1.0,
+    }
+
+    grid = np.zeros((4, 4), dtype=np.complex64)
+    for chirp_index, tx_number in enumerate(tx_numbers[: virtual_samples.shape[0]]):
+        for rx_number in range(1, rx_count + 1):
+            row, col = positions[(tx_number, rx_number)]
+            grid[row, col] = (
+                rx_phase[rx_number] * virtual_samples[chirp_index, rx_number - 1]
+            )
+    return grid
 
 
 def frame_bytes_to_radar_cube(
