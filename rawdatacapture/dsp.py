@@ -273,7 +273,7 @@ def estimate_xyz_from_virtual_array(
 
     radial_scale = max(0.0, 1.0 - azimuth_u**2 - elevation_u**2) ** 0.5
     x_m = target_range_m * azimuth_u
-    z_m = target_range_m * elevation_u
+    z_m = -target_range_m * elevation_u
     y_m = target_range_m * radial_scale
     return float(x_m), float(y_m), float(z_m)
 

@@ -221,7 +221,7 @@ Point-cloud axes:
 ```text
 X-axis: left/right position in meters
 Y-axis: forward position in meters
-Z-axis: elevation position in meters
+Z-axis: elevation position in meters, sign inverted to match the current board setup
 Color: magnitude in dB, fixed from 40 dB to 120 dB
 ```
 
