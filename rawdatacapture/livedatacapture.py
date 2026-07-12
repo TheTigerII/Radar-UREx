@@ -89,6 +89,7 @@ class CaptureStats:
     duplicate_packets: int = 0
     byte_gaps: int = 0
     byte_gap_bytes: int = 0
+    stream_resyncs: int = 0
     byte_overlaps: int = 0
     byte_overlap_bytes: int = 0
     invalid_frames: int = 0
@@ -295,12 +296,17 @@ class FrameBuffer:
 
         if payload_start > self.next_stream_offset:
             gap = payload_start - self.next_stream_offset
+            if gap > self.bytes_per_frame:
+                self._resynchronize(header.byte_count)
+                payload_start = 0
+                gap = 0
             gap_start = len(self.buffer)
-            self.buffer.extend(b"\x00" * gap)
-            self.gap_markers.append((gap_start, gap_start + gap))
-            self.next_stream_offset += gap
-            self.stats.byte_gaps += 1
-            self.stats.byte_gap_bytes += gap
+            if gap:
+                self.buffer.extend(b"\x00" * gap)
+                self.gap_markers.append((gap_start, gap_start + gap))
+                self.next_stream_offset += gap
+                self.stats.byte_gaps += 1
+                self.stats.byte_gap_bytes += gap
 
         if payload_start < self.next_stream_offset:
             overlap = self.next_stream_offset - payload_start
@@ -338,6 +344,15 @@ class FrameBuffer:
             self.stats.frames_emitted += 1
 
         return frames
+
+    def _resynchronize(self, byte_count: int) -> None:
+        """Discard partial assembly after an implausibly large stream gap."""
+        self.base_byte_count = byte_count
+        self.next_stream_offset = 0
+        self.buffer.clear()
+        self.gap_markers.clear()
+        self.arrival_markers.clear()
+        self.stats.stream_resyncs += 1
 
     def _gap_bytes_in_next_frame(self) -> int:
         frame_end = self.bytes_per_frame
@@ -1154,6 +1169,7 @@ def _format_stats(stats: CaptureStats) -> str:
         f"out_of_order={stats.out_of_order_packets}, "
         f"duplicates={stats.duplicate_packets}, "
         f"byte_gaps={stats.byte_gaps}/{stats.byte_gap_bytes}B, "
+        f"stream_resyncs={stats.stream_resyncs}, "
         f"byte_overlaps={stats.byte_overlaps}/{stats.byte_overlap_bytes}B, "
         f"malformed={stats.malformed_packets}, "
         f"processing_drops={stats.processing_frames_dropped}"
