@@ -29,13 +29,16 @@ python run.py
 `run.py`:
 
 1. Prompts for a display mode unless `--display` is supplied.
-2. Detects serial ports and asks which command UART to use when needed.
-3. Starts `livedatacapture.py` with `profile.cfg` and `setup.json` by default.
-4. Saves valid frames to a timestamped `.bin` under
+2. Prompts for a run duration in minutes. Press Enter for the 3-minute default,
+   or enter `0` for an unlimited run.
+3. Detects serial ports and asks which command UART to use when needed.
+4. Starts `livedatacapture.py` with `profile.cfg` and `setup.json` by default.
+5. Saves valid frames to a timestamped `.bin` under
    `rawdatacapture\captures` unless `--raw-output` is given.
-5. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
+6. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
    control.
-6. Stops hardware control before capture on Ctrl+C.
+7. Stops hardware control before capture when the duration expires or Ctrl+C
+   is pressed.
 
 Choose a display without prompting:
 
@@ -45,6 +48,15 @@ python run.py --display range
 python run.py --display range-doppler
 python run.py --display point-cloud
 ```
+
+Skip the duration prompt with an explicit value:
+
+```powershell
+python run.py --duration-minutes 3
+python run.py --duration-minutes 0
+```
+
+The second command runs without a time limit.
 
 Specify the radar UART if automatic detection is wrong:
 
@@ -147,8 +159,9 @@ Only valid complete frames are written, without DCA1000 headers. The default
 metadata path is `test_capture.bin.json`; override it with `--raw-metadata`.
 The sidecar is written during clean shutdown.
 
-There is no file-size or duration limit. Monitor free disk space during long
-captures.
+Raw files have no file-size limit. A `run.py` session is limited to 3 minutes by
+default, but `livedatacapture.py` alone and `run.py --duration-minutes 0` run
+until stopped. Monitor free disk space during long captures.
 
 ## Logging and Statistics
 

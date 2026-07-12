@@ -32,7 +32,9 @@ python run.py --display range
 ```
 
 This starts capture before hardware control and saves raw data. See
-`User guide.md` for display and capture options.
+`User guide.md` for display and capture options. It prompts for a run duration;
+press Enter for 3 minutes or enter `0` for unlimited. Use
+`--duration-minutes N` to provide the value non-interactively.
 
 ## Preflight Only
 

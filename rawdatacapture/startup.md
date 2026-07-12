@@ -137,12 +137,14 @@ The final state is `STOPPED`.
 `run.py` supplies the missing integration externally:
 
 ```text
+prompt for duration (default 3 minutes; 0 is unlimited)
 start livedatacapture.py
 wait 1 second and verify it is still running
 start startup.py with:
   --radar-backend direct-serial
   --dca-backend direct-udp
   --skip-socket-preflight
+stop both processes when the deadline expires or Ctrl+C is pressed
 ```
 
 It passes the same `.cfg` to capture, startup dimension parsing, and the SDK CLI

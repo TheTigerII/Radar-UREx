@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import signal
 import subprocess
@@ -21,6 +22,7 @@ DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
 DEFAULT_POINT_CLOUD_DISPLAY_UPDATE_EVERY = 2
+DEFAULT_DURATION_MINUTES = 3.0
 DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
@@ -35,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Start live DCA1000 capture, then start radar/DCA1000 hardware. "
-            "Press Ctrl+C to stop startup first, then capture."
+            "Stop automatically after the selected duration, or press Ctrl+C."
         )
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
@@ -52,6 +54,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dca-timeout", type=float, default=DEFAULT_DCA_TIMEOUT)
     parser.add_argument("--dca-retries", type=int, default=DEFAULT_DCA_RETRIES)
     parser.add_argument("--display", choices=DISPLAY_CHOICES)
+    parser.add_argument(
+        "--duration-minutes",
+        type=float,
+        help=(
+            "Run duration in minutes. Use 0 for no time limit. "
+            "When omitted, prompt with a default of 3 minutes."
+        ),
+    )
     parser.add_argument(
         "--display-update-every",
         type=int,
@@ -87,6 +97,29 @@ def choose_display(display_arg: Optional[str]) -> str:
         if choice in {"4", "point-cloud", "point_cloud"}:
             return "point-cloud"
         print("Choose 1, 2, 3, 4, none, range, range-doppler, or point-cloud.")
+
+
+def choose_duration_minutes(duration_arg: Optional[float]) -> float:
+    if duration_arg is not None:
+        if not math.isfinite(duration_arg) or duration_arg < 0:
+            raise ValueError("Run duration must be a finite, non-negative number.")
+        return duration_arg
+
+    while True:
+        choice = input(
+            f"Run duration in minutes (0 for unlimited) "
+            f"[{DEFAULT_DURATION_MINUTES:g}]: "
+        ).strip()
+        if not choice:
+            return DEFAULT_DURATION_MINUTES
+        try:
+            duration_minutes = float(choice)
+        except ValueError:
+            print("Enter a non-negative number of minutes, or 0 for unlimited.")
+            continue
+        if math.isfinite(duration_minutes) and duration_minutes >= 0:
+            return duration_minutes
+        print("Enter a non-negative number of minutes, or 0 for unlimited.")
 
 
 def resolve_radar_port(radar_port_arg: Optional[str]) -> str:
@@ -302,6 +335,11 @@ def build_startup_command(args: argparse.Namespace, radar_port: str) -> list[str
 def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
+    try:
+        duration_minutes = choose_duration_minutes(args.duration_minutes)
+    except ValueError as exc:
+        print(f"Invalid duration: {exc}", file=sys.stderr)
+        return 2
     radar_port = resolve_radar_port(args.radar_port)
     if not radar_port:
         print("No radar command UART port was provided.", file=sys.stderr)
@@ -312,6 +350,10 @@ def main() -> int:
     raw_output.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Display mode: {display}")
+    duration_text = (
+        "unlimited" if duration_minutes == 0 else f"{duration_minutes:g} minute(s)"
+    )
+    print(f"Run duration: {duration_text}")
     print(f"Radar command UART: {radar_port}")
     print(f"Raw output: {raw_output}")
 
@@ -334,6 +376,11 @@ def main() -> int:
             "startup",
             build_startup_command(args, radar_port),
         )
+        deadline = (
+            None
+            if duration_minutes == 0
+            else time.monotonic() + (duration_minutes * 60.0)
+        )
 
         while True:
             if startup_process.poll() is not None:
@@ -342,7 +389,17 @@ def main() -> int:
             if capture_process.poll() is not None:
                 print(f"live capture exited with code {capture_process.returncode}")
                 return capture_process.returncode or 0
-            time.sleep(0.5)
+            if deadline is not None:
+                remaining_seconds = deadline - time.monotonic()
+                if remaining_seconds <= 0:
+                    print(
+                        f"Run duration of {duration_minutes:g} minute(s) reached. "
+                        "Stopping radar and capture."
+                    )
+                    return 0
+                time.sleep(min(0.5, remaining_seconds))
+            else:
+                time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nCtrl+C received. Stopping radar and capture.")
         return 0

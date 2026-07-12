@@ -14,9 +14,11 @@ run.py
   +-- startup.py           radar serial control and DCA1000 UDP control
 ```
 
-`run.py` starts the receiver first, waits one second, and then starts the
-hardware controller. On shutdown it stops `startup.py` first so `sensorStop`
-and DCA1000 `RECORD_STOP` are attempted before capture is closed.
+`run.py` prompts for a duration before initialization (3 minutes by default;
+zero means unlimited), starts the receiver first, waits one second, and then
+starts the hardware controller. When the deadline expires or Ctrl+C is pressed,
+it stops `startup.py` first so `sensorStop` and DCA1000 `RECORD_STOP` are
+attempted before capture is closed.
 
 The programs can also be run manually in two terminals. `startup.py` does not
 embed the real capture receiver: its `--capture-backend` currently supports

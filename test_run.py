@@ -1,0 +1,34 @@
+import unittest
+from unittest.mock import patch
+
+import run
+
+
+class ChooseDurationMinutesTests(unittest.TestCase):
+    def test_blank_input_uses_three_minute_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(
+                run.choose_duration_minutes(None),
+                run.DEFAULT_DURATION_MINUTES,
+            )
+
+    def test_zero_means_unlimited(self) -> None:
+        with patch("builtins.input", return_value="0"):
+            self.assertEqual(run.choose_duration_minutes(None), 0.0)
+
+    def test_cli_value_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertEqual(run.choose_duration_minutes(1.5), 1.5)
+            prompt.assert_not_called()
+
+    def test_negative_cli_value_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finite, non-negative"):
+            run.choose_duration_minutes(-1.0)
+
+    def test_non_finite_cli_value_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finite, non-negative"):
+            run.choose_duration_minutes(float("nan"))
+
+
+if __name__ == "__main__":
+    unittest.main()
