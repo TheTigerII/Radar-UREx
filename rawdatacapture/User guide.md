@@ -1,305 +1,204 @@
 # Live Raw ADC Capture User Guide
 
-This guide is for running `livedatacapture.py` with the IWR6843ISK-ODS and DCA1000EVM.
+This guide explains `livedatacapture.py` and the integrated `run.py` launcher
+for an IWR6843ISK-ODS connected to a DCA1000EVM.
 
-## Hardware And Tool Setup
+## Prerequisites
 
-- Connect the PC directly to the DCA1000 Ethernet port.
-- Configure the PC Ethernet adapter with the host IP used by the script:
-
-```text
-192.168.33.30
-```
-
-- Configure the DCA1000/radar in mmWave Studio before starting Python.
-- Save the mmWave Studio radar config as `rawdatacapture\mmwave.json`.
-- Save the mmWave Studio capture setup as `rawdatacapture\setup.json`.
-- Keep the DCA1000 packet delay consistent with `setup.json`. The current setup uses:
+- Python 3 with NumPy.
+- Matplotlib for a live display.
+- pyserial when using `run.py` or `startup.py --radar-backend direct-serial`.
+- PC Ethernet interface configured as `192.168.33.30/24` by default.
+- DCA1000 reachable at `192.168.33.180`.
+- Radar running SDK CLI firmware when using `profile.cfg` and direct serial.
+- `profile.cfg` must enable ADC LVDS streaming, for example:
 
 ```text
-25 us
+lvdsStreamCfg -1 0 1 0
 ```
 
-The current 25 FPS, 16-bit complex, 4-RX setup needs roughly 9,000 DCA1000 payload packets per second. Validate any packet-delay change with:
+Run commands from the repository root. Windows examples use `python` and
+backslashes; Linux examples may use `python3` and forward slashes.
 
-```text
-lost_packets=0
-byte_gaps=0/0B
-```
-
-## One-Command Startup And Capture
-
-From the repository root, run:
+## Recommended: Integrated Run
 
 ```powershell
 python run.py
 ```
 
-`run.py` asks for the display type, uses `/dev/ttyUSB0` as the default Linux
-radar command UART, starts `livedatacapture.py`, starts `startup.py`, and saves
-valid raw frames to a timestamped file under:
+`run.py`:
 
-```text
-rawdatacapture\captures\
-```
+1. Prompts for a display mode unless `--display` is supplied.
+2. Detects serial ports and asks which command UART to use when needed.
+3. Starts `livedatacapture.py` with `profile.cfg` and `setup.json` by default.
+4. Saves valid frames to a timestamped `.bin` under
+   `rawdatacapture\captures` unless `--raw-output` is given.
+5. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
+   control.
+6. Stops hardware control before capture on Ctrl+C.
 
-Stop with Ctrl+C. `run.py` stops `startup.py` first so the radar receives
-`sensorStop`, then stops `livedatacapture.py` so the raw data file and metadata
-sidecar are closed cleanly.
-
-To choose the display mode without the prompt:
+Choose a display without prompting:
 
 ```powershell
+python run.py --display none
 python run.py --display range
 python run.py --display range-doppler
 python run.py --display point-cloud
-python run.py --display none
 ```
 
-If the radar command UART is not detected correctly, pass it explicitly:
+Specify the radar UART if automatic detection is wrong:
 
 ```powershell
 python run.py --radar-port COM4
 ```
 
-On Linux/Jetson, use the Linux serial device:
-
 ```bash
 python3 run.py --radar-port /dev/ttyUSB0
 ```
 
-## Basic Capture
+Point-cloud display defaults to updating every two valid frames; other modes
+default to every frame. Override it with `--display-update-every N`.
 
-From the repository root, run:
+## Capture Receiver Only
+
+This starts UDP capture but does not configure or start the hardware:
 
 ```powershell
 python rawdatacapture\livedatacapture.py
 ```
 
-By default this reads:
+Its defaults are `mmwave.json`, `setup.json`, host `192.168.33.30`, UDP port
+4098, no display, processing queue size 4, and a requested 4 MiB socket receive
+buffer. The operating system may grant a different receive-buffer size; the
+actual value is printed.
 
-```text
-rawdatacapture\mmwave.json
-rawdatacapture\setup.json
-```
-
-To use alternate JSON files:
+Use the same config that programmed the radar:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --config .\rawdatacapture\mmwave.json --setup .\rawdatacapture\setup.json
+python rawdatacapture\livedatacapture.py `
+  --config .\rawdatacapture\profile.cfg `
+  --setup .\rawdatacapture\setup.json
 ```
 
-XML configs are no longer supported by `livedatacapture.py`.
+Both SDK CLI `.cfg` and mmWave Studio `.json` radar configs are supported. XML
+is not supported.
 
-Expected startup output:
+## Displays
 
-```text
-Loaded radar config: RadarCaptureConfig(...)
-Loaded capture setup: CaptureSetupConfig(...)
-Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=524288
-DCA1000 setup: packet_sequence_enable=True, packet_delay_us=25
-Trigger frames now. Press Ctrl+C to stop.
-```
-
-Expected frame output:
-
-```text
-Complete frame cube_shape=(128, 4, 256), peak_range_m=..., peak_range_bin=30, peak_magnitude=...
-```
-
-Stop with:
-
-```text
-Ctrl+C
-```
-
-## Logging
-
-By default, terminal status output is appended to:
-
-```text
-rawdatacapture\livedatacapture.log
-```
-
-Each log line includes a local timestamp.
-
-To choose a different log file:
-
-```powershell
-python rawdatacapture\livedatacapture.py --log-file .\rawdatacapture\capture_run.log
-```
-
-## Save Raw Frames
-
-To save complete valid raw ADC frames for later testing:
-
-```powershell
-python rawdatacapture\livedatacapture.py --raw-output .\rawdatacapture\captures\test_capture.bin
-```
-
-The binary file stores valid frame payloads consecutively, without DCA1000 packet headers. Each frame is `bytes_per_frame` bytes. A JSON sidecar is written beside the binary file by default, for example:
-
-```text
-test_capture.bin.json
-```
-
-The sidecar records frame count, frame size, ADC format, RX/channel ordering, and radar dimensions so the file can be replayed in later tests.
-
-## Live Range Profile
-
-To show a simple live range profile:
+### Range profile
 
 ```powershell
 python rawdatacapture\livedatacapture.py --display range
 ```
 
-The live range X-axis shows `0` to `20 m` by default. To change it:
+The plot is average range-FFT magnitude over chirps and receivers. Its X-axis
+uses meters when sample rate and frequency slope are available; otherwise it
+falls back to bin numbers. The displayed X limit defaults to 20 m:
 
 ```powershell
 python rawdatacapture\livedatacapture.py --display range --max-range-m 10
+python rawdatacapture\livedatacapture.py --display range --max-range-m 0
 ```
 
-Use `--max-range-m 0` to show the full computed range axis.
+Zero selects the full computed axis.
 
-Plot axes:
-
-```text
-X-axis: range in meters
-Y-axis: average FFT magnitude across chirps and RX channels
-```
-
-The script derives range in meters from `digOutSampleRate` and `freqSlopeConst` in the radar config. The terminal still prints `peak_range_bin` for debugging, but `peak_range_m` is the physical range estimate.
-
-When a live display is enabled, the script also prints and logs display latency:
-
-```text
-display latency: frame_first_byte_to_canvas_draw_ms=...
-```
-
-This is measured from the moment the first UDP payload byte belonging to that frame reaches Python until Matplotlib completes the canvas draw for that frame. It is the software-side approximation of first frame byte sent to displayed frame.
-
-## Range-Doppler Heatmap
-
-To show a first-pass range-Doppler heatmap:
+### Range-Doppler heatmap
 
 ```powershell
 python rawdatacapture\livedatacapture.py --display range-doppler
 ```
 
-The range-Doppler view reshapes TDM-MIMO chirps into loops before running the
-Doppler FFT, so static scenes should concentrate near the center Doppler bin
-instead of repeating once per TX chirp. The Y-axis is still Doppler bin, not
-calibrated velocity in m/s.
+The Y-axis is centered Doppler-bin index, not calibrated velocity. Processing
+uses frame loops as slow time and averages magnitude across TX chirp position
+and receivers.
 
-The DSP math for frame reshaping, range FFT, range profile, and range-Doppler
-heatmap lives in `rawdatacapture\dsp.py`; `livedatacapture.py` owns UDP receive,
-frame assembly, logging, raw saving, and display orchestration.
-
-## 3D Point Cloud
-
-To show the live 3D point-cloud view:
+### Point cloud
 
 ```powershell
 python rawdatacapture\livedatacapture.py --display point-cloud
 ```
 
-Or through the one-command runner:
+The diagnostic point cloud uses CA-CFAR, local-peak filtering, and a virtual
+antenna 2D FFT. It shows at most 50 points. Coordinates are X left/right, Y
+forward, and Z elevation. The plot box is fixed at 5 m: X and Z are -2.5 to
+2.5 m and Y is 0 to 5 m. Color is fixed from 40 to 120 dB. Angle output is not
+calibrated.
+
+### Display performance
+
+Display rendering is a separate process and receives only the latest result.
+If processing cannot keep up, reduce display frequency:
 
 ```powershell
-python run.py --display point-cloud
+python rawdatacapture\livedatacapture.py `
+  --display range-doppler --display-update-every 3 --display-pause 0.05
 ```
 
-When using `run.py`, point-cloud display updates every 2 valid frames by
-default to reduce DSP/display backlog. To change that rate:
+Use `--display none` for packet-loss testing or headless operation.
+
+## Save Raw Frames
 
 ```powershell
-python run.py --display point-cloud --display-update-every 3
+python rawdatacapture\livedatacapture.py `
+  --raw-output .\rawdatacapture\captures\test_capture.bin
 ```
 
-Point-cloud axes:
+Only valid complete frames are written, without DCA1000 headers. The default
+metadata path is `test_capture.bin.json`; override it with `--raw-metadata`.
+The sidecar is written during clean shutdown.
 
-```text
-X-axis: left/right position in meters
-Y-axis: forward position in meters
-Z-axis: elevation position in meters, sign inverted to match the current board setup
-Color: magnitude in dB, fixed from 40 dB to 120 dB
-```
+There is no file-size or duration limit. Monitor free disk space during long
+captures.
 
-The live point-cloud plot uses a fixed 5 m by 5 m by 5 m box: X and Z span
-`-2.5 m` to `2.5 m`, and Y spans `0 m` to `5 m` in front of the radar.
+## Logging and Statistics
 
-The point-cloud display uses 2D CA-CFAR on the range-Doppler power map before
-estimating azimuth and elevation with a 2D virtual-antenna FFT. The virtual
-antenna grid follows the IWR6843ISK-ODS page-40 layout: TX1/TX2/TX3 are mapped
-to their ODS azimuth/elevation positions, and RX2/RX3 receive a 180 degree
-phase inversion before angle processing. This rejects many noisy one-frame dots
-before they reach the 3D plot. The angle estimate is still uncalibrated, so it
-is best used as a live spatial visualization rather than precision metrology.
-
-## Display Responsiveness
-
-UDP packet receiving is split from FFT/display processing. The receive loop assembles complete frames and hands valid frames to a processing worker. Matplotlib then runs behind that worker in a separate display process with a one-item latest-frame queue.
-
-If plotting still feels sluggish, reduce update rate:
+Terminal output is appended to `rawdatacapture\livedatacapture.log` by default:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --display range --display-update-every 2 --display-pause 0.05
+python rawdatacapture\livedatacapture.py `
+  --log-file .\rawdatacapture\capture_run.log
 ```
 
-If packet gaps increase while plotting, try:
+Important counters are:
 
-```powershell
---display-update-every 3
-```
+- `lost_packets`: missing DCA1000 sequence numbers.
+- `out_of_order`: late/backward packets or byte counts.
+- `duplicates`: repeated sequence/payload data.
+- `byte_gaps`: discontinuities inserted into normal frame assembly.
+- `stream_resyncs`: byte-count jumps larger than one frame; partial assembly
+  was discarded to avoid unbounded memory allocation.
+- `invalid_frames`: frames touched by an ordinary byte gap.
+- `processing_drops`: valid frames discarded because the bounded processing
+  queue was full.
 
-For packet-loss testing, run without display:
+Healthy capture normally keeps all of these at zero. Frames containing gap
+padding are neither processed nor saved.
 
-```powershell
-python rawdatacapture\livedatacapture.py --display none
-```
+If `processing_drops` grows while packet-loss counters remain zero, reduce
+display updates or use `--display none`. Increasing `--processing-queue-size`
+can absorb short bursts but does not fix processing that is consistently too
+slow.
 
-## Packet Loss And Invalid Frames
+## Packet-Loss Troubleshooting
 
-The script reads `packetSequenceEnable` from `setup.json`. With sequence headers enabled, it tracks DCA1000 sequence numbers and byte counts. If sequence headers are disabled, it can still assemble frames from received bytes, but packet-loss detection is weaker.
+- Connect the PC directly to DCA1000 over wired Ethernet.
+- Ensure `packetDelay_us` in `setup.json` matches the DCA1000 configuration.
+- Avoid routing capture traffic through Wi-Fi, VPNs, or busy switches.
+- Increase the OS/network-adapter receive buffers where supported.
+- Check the logged requested and actual socket receive-buffer sizes.
+- Run with `--display none` to distinguish capture loss from DSP load.
 
-Healthy stats look like:
+When `packetSequenceEnable` is false, capture still assembles received bytes but
+cannot reliably report network packet loss.
 
-```text
-lost_packets=0
-byte_gaps=0/0B
-invalid_frames=0
-processing_drops=0
-```
+## Shutdown
 
-If packets are lost, you may see:
+Press Ctrl+C. With `run.py`, the startup process is stopped first, followed by
+the capture process. Clean capture shutdown closes the socket, child processes,
+queues, raw file, metadata sidecar, and log file.
 
-```text
-Dropped frame: incomplete payload, gap_bytes=..., bytes_per_frame=524288
-```
-
-That is expected behavior. Frames touched by byte gaps are skipped so FFT is not run on zero-filled corrupted data.
-
-If `processing_drops` increases while `lost_packets` stays low, packet receive is keeping up but FFT/display processing is falling behind. Increase `--processing-queue-size`, reduce display updates, or run with `--display none`.
-
-## Common Mitigations For Byte Gaps
-
-- Use the DCA1000 packet delay recorded in `setup.json`; the current setup uses `25 us`.
-- Use direct wired Ethernet between PC and DCA1000.
-- Avoid Wi-Fi, VPN routing, switches, and busy adapters during capture.
-- Increase Ethernet adapter receive buffers in Windows Device Manager if needed.
-- Run with `--display none` while validating packet-loss behavior.
-- Use `--display-update-every 2` or `3` if plotting causes packet gaps.
-
-## Useful Commands
-
-Show command-line options:
+Show all receiver options with:
 
 ```powershell
 python rawdatacapture\livedatacapture.py --help
-```
-
-Run with faster Ctrl+C polling:
-
-```powershell
-python rawdatacapture\livedatacapture.py --socket-timeout 0.1
 ```
