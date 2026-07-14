@@ -2,6 +2,21 @@ from typing import Optional, Protocol
 
 import numpy as np
 
+try:
+    from .openradar_backend import (
+        ca_cfar_2d as openradar_ca_cfar_2d,
+        doppler_fft as openradar_doppler_fft,
+        range_fft as openradar_range_fft,
+        validate_openradar_backend,
+    )
+except ImportError:
+    from openradar_backend import (
+        ca_cfar_2d as openradar_ca_cfar_2d,
+        doppler_fft as openradar_doppler_fft,
+        range_fft as openradar_range_fft,
+        validate_openradar_backend,
+    )
+
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 
@@ -40,8 +55,7 @@ def range_axis_m(config: RadarDspConfig) -> Optional[np.ndarray]:
 
 
 def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
-    window = np.hanning(radar_cube.shape[2]).astype(np.float32)
-    return np.fft.fft(radar_cube * window, axis=2)
+    return openradar_range_fft(radar_cube)
 
 
 def compute_range_profile(range_fft: np.ndarray) -> np.ndarray:
@@ -67,13 +81,10 @@ def compute_range_doppler_fft(
         loops = range_fft.shape[0]
         chirps_per_loop = 1
 
-    tdm_cube = range_fft.reshape(
-        loops,
-        chirps_per_loop,
-        config.num_rx_channels,
-        config.num_adc_samples,
+    return openradar_doppler_fft(
+        range_fft,
+        num_tx_antennas=chirps_per_loop,
     )
-    return np.fft.fftshift(np.fft.fft(tdm_cube, axis=0), axes=0)
 
 
 def compute_point_cloud(
@@ -85,7 +96,7 @@ def compute_point_cloud(
     false_alarm_rate: float = 1e-3,
     range_guard_cells: int = 2,
     doppler_guard_cells: int = 1,
-    range_training_cells: int = 8,
+    range_training_cells: int = 4,
     doppler_training_cells: int = 2,
     min_range_m: float = 0.15,
 ) -> np.ndarray:
@@ -124,11 +135,14 @@ def compute_point_cloud(
         else:
             target_range_m = float(range_bin)
 
-        x_m, y_m, z_m = estimate_xyz_from_virtual_array(
+        xyz_m = estimate_xyz_from_virtual_array(
             doppler_fft[int(doppler_bin), :, :, int(range_bin)],
             target_range_m,
             config,
         )
+        if xyz_m is None:
+            continue
+        x_m, y_m, z_m = xyz_m
         points.append((x_m, y_m, z_m, float(magnitude_db)))
 
     if not points:
@@ -145,63 +159,15 @@ def ca_cfar_2d(
     range_training_cells: int,
     doppler_training_cells: int,
 ) -> np.ndarray:
-    """Run 2D cell-averaging CFAR on a [doppler, range] power map."""
-    if power_map.ndim != 2 or power_map.size == 0:
-        return np.zeros_like(power_map, dtype=bool)
-
-    doppler_bins, range_bins = power_map.shape
-    detections = np.zeros_like(power_map, dtype=bool)
-    range_margin = range_training_cells + range_guard_cells
-    doppler_window = doppler_training_cells + doppler_guard_cells
-    training_cells = (
-        (2 * doppler_window + 1) * (2 * range_margin + 1)
-        - (2 * doppler_guard_cells + 1) * (2 * range_guard_cells + 1)
+    """Run OpenRadar CA-CFAR on a [doppler, range] power map."""
+    return openradar_ca_cfar_2d(
+        power_map,
+        false_alarm_rate=false_alarm_rate,
+        range_guard_cells=range_guard_cells,
+        doppler_guard_cells=doppler_guard_cells,
+        range_training_cells=range_training_cells,
+        doppler_training_cells=doppler_training_cells,
     )
-    if training_cells <= 0 or range_bins <= (2 * range_margin):
-        return detections
-
-    pfa = min(max(false_alarm_rate, 1e-9), 0.5)
-    threshold_scale = training_cells * (pfa ** (-1.0 / training_cells) - 1.0)
-
-    doppler_extended = np.concatenate(
-        (
-            power_map[-doppler_window:, :],
-            power_map,
-            power_map[:doppler_window, :],
-        ),
-        axis=0,
-    )
-    total_windows = np.lib.stride_tricks.sliding_window_view(
-        doppler_extended,
-        (2 * doppler_window + 1, 2 * range_margin + 1),
-    )
-    total_sum = total_windows.sum(axis=(-2, -1), dtype=np.float64)
-
-    guard_source = doppler_extended[
-        doppler_window - doppler_guard_cells : doppler_window
-        - doppler_guard_cells
-        + doppler_bins
-        + (2 * doppler_guard_cells),
-        :,
-    ]
-    guard_windows = np.lib.stride_tricks.sliding_window_view(
-        guard_source,
-        (2 * doppler_guard_cells + 1, 2 * range_guard_cells + 1),
-    )
-    guard_start = range_margin - range_guard_cells
-    guard_sum = guard_windows[
-        :,
-        guard_start : guard_start + total_sum.shape[1],
-    ].sum(axis=(-2, -1), dtype=np.float64)
-
-    training_sum = total_sum - guard_sum
-    noise_estimate = training_sum / training_cells
-    test_cells = power_map[:, range_margin : range_bins - range_margin]
-    detections[:, range_margin : range_bins - range_margin] = (
-        test_cells > threshold_scale * noise_estimate
-    )
-
-    return detections
 
 
 def local_peak_mask(power_map: np.ndarray) -> np.ndarray:
@@ -250,7 +216,7 @@ def estimate_xyz_from_virtual_array(
     config: RadarDspConfig,
     *,
     angle_fft_size: int = 32,
-) -> tuple[float, float, float]:
+) -> Optional[tuple[float, float, float]]:
     """Estimate x/y/z from one range-Doppler cell using a simple 2D angle FFT.
 
     The returned coordinate system is x=left/right, y=forward range, z=elevation.
@@ -271,7 +237,11 @@ def estimate_xyz_from_virtual_array(
     azimuth_u = _spatial_bin_to_direction_cosine(azimuth_bin, angle_fft_size)
     elevation_u = _spatial_bin_to_direction_cosine(elevation_bin, angle_fft_size)
 
-    radial_scale = max(0.0, 1.0 - azimuth_u**2 - elevation_u**2) ** 0.5
+    direction_norm_sq = azimuth_u**2 + elevation_u**2
+    if direction_norm_sq > 1.0:
+        return None
+
+    radial_scale = (1.0 - direction_norm_sq) ** 0.5
     x_m = target_range_m * azimuth_u
     z_m = -target_range_m * elevation_u
     y_m = target_range_m * radial_scale

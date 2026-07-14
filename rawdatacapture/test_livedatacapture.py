@@ -4,6 +4,8 @@ from rawdatacapture.livedatacapture import (
     CaptureStats,
     DCA1000PacketHeader,
     FrameBuffer,
+    RadarCaptureConfig,
+    _point_cloud_range_limit_m,
 )
 
 
@@ -37,6 +39,25 @@ class FrameBufferTests(unittest.TestCase):
         self.assertEqual(stats.byte_gap_bytes, 0)
         self.assertEqual(len(buffer.buffer), 0)
 
+
+class PointCloudBoundsTests(unittest.TestCase):
+    def test_range_limit_includes_every_range_bin(self) -> None:
+        config = RadarCaptureConfig.from_dimensions(
+            num_adc_samples=128,
+            num_rx_channels=4,
+            num_chirps_per_frame=192,
+            sample_rate_ksps=5000.0,
+            frequency_slope_mhz_per_us=70.0,
+        )
+
+        limit_m = _point_cloud_range_limit_m(config)
+        range_axis_m = config.range_axis_m()
+
+        self.assertIsNotNone(limit_m)
+        self.assertIsNotNone(range_axis_m)
+        assert limit_m is not None
+        assert range_axis_m is not None
+        self.assertGreater(limit_m, float(range_axis_m[-1]))
 
 if __name__ == "__main__":
     unittest.main()

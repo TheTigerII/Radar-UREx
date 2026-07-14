@@ -20,6 +20,7 @@ try:
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
+        validate_openradar_backend,
     )
 except ImportError:
     from dsp import (
@@ -30,6 +31,7 @@ except ImportError:
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
+        validate_openradar_backend,
     )
 
 
@@ -46,7 +48,6 @@ DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
 DEFAULT_MAX_RANGE_M = 20.0
-POINT_CLOUD_BOX_SIZE_M = 5.0
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -395,11 +396,18 @@ class LiveDisplay:
         mode: str,
         pause_seconds: float,
         max_range_m: float,
+        point_cloud_range_m: Optional[float] = None,
         emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
         self.pause_seconds = max(pause_seconds, 0.001)
         self.max_range_m = max(max_range_m, 0.0)
+        self.point_cloud_range_m = max(
+            point_cloud_range_m
+            if point_cloud_range_m is not None
+            else self.max_range_m,
+            1.0,
+        )
         self.emit = emit_func or emit
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
@@ -418,6 +426,7 @@ class LiveDisplay:
                 self.mode,
                 self.pause_seconds,
                 self.max_range_m,
+                self.point_cloud_range_m,
                 self.payload_queue,
                 self.latency_queue,
                 self.stop_event,
@@ -631,6 +640,7 @@ def _run_display_process(
     mode: str,
     pause_seconds: float,
     max_range_m: float,
+    point_cloud_range_m: float,
     payload_queue: mp.Queue,
     latency_queue: mp.Queue,
     stop_event: mp.Event,
@@ -683,13 +693,9 @@ def _run_display_process(
         axis.set_xlabel("X left/right (m)")
         axis.set_ylabel("Y forward (m)")
         axis.set_zlabel("Z elevation (m)")
-        axis.set_xlim(-POINT_CLOUD_BOX_SIZE_M / 2.0, POINT_CLOUD_BOX_SIZE_M / 2.0)
-        axis.set_ylim(0, POINT_CLOUD_BOX_SIZE_M)
-        axis.set_zlim(-POINT_CLOUD_BOX_SIZE_M / 2.0, POINT_CLOUD_BOX_SIZE_M / 2.0)
-        axis.set_box_aspect((1, 1, 1))
+        _set_point_cloud_axes(axis, point_cloud_range_m)
         axis.view_init(elev=24, azim=-60)
         axis.grid(True, alpha=0.3)
-
     figure.tight_layout()
     plt.show(block=False)
 
@@ -717,7 +723,12 @@ def _run_display_process(
                     _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
                 elif mode == "point-cloud" and scatter is not None:
                     frame_first_byte_at_s, points = payload
-                    _draw_point_cloud(axis, scatter, points, max_range_m)
+                    _draw_point_cloud(
+                        axis,
+                        scatter,
+                        points,
+                        point_cloud_range_m,
+                    )
                 else:
                     frame_first_byte_at_s = None
 
@@ -780,28 +791,37 @@ def _draw_point_cloud(
     axis: Any,
     scatter: Any,
     points: np.ndarray,
-    max_range_m: float,
+    point_cloud_range_m: float,
 ) -> None:
-    half_box_m = POINT_CLOUD_BOX_SIZE_M / 2.0
     empty = np.array([], dtype=np.float32)
     if points.size == 0:
         scatter._offsets3d = (empty, empty, empty)
-        axis.set_xlim(-half_box_m, half_box_m)
-        axis.set_ylim(0, POINT_CLOUD_BOX_SIZE_M)
-        axis.set_zlim(-half_box_m, half_box_m)
-        return
+        scatter.set_array(empty)
+    else:
+        scatter._offsets3d = (points[:, 0], points[:, 1], points[:, 2])
+        scatter.set_array(points[:, 3])
+        scatter.set_clim(
+            POINT_CLOUD_MAGNITUDE_DB_MIN,
+            POINT_CLOUD_MAGNITUDE_DB_MAX,
+        )
 
-    x_m = points[:, 0]
-    y_m = points[:, 1]
-    z_m = points[:, 2]
-    magnitudes_db = points[:, 3]
-    scatter._offsets3d = (x_m, y_m, z_m)
-    scatter.set_array(magnitudes_db)
-    scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
+    _set_point_cloud_axes(axis, point_cloud_range_m)
 
-    axis.set_xlim(-half_box_m, half_box_m)
-    axis.set_ylim(0, POINT_CLOUD_BOX_SIZE_M)
-    axis.set_zlim(-half_box_m, half_box_m)
+
+def _set_point_cloud_axes(axis: Any, point_cloud_range_m: float) -> None:
+    range_limit_m = max(float(point_cloud_range_m), 1.0)
+    axis.set_xlim(-range_limit_m, range_limit_m)
+    axis.set_ylim(0.0, range_limit_m)
+    axis.set_zlim(-range_limit_m, range_limit_m)
+    axis.set_box_aspect((2.0, 1.0, 2.0))
+
+
+def _point_cloud_range_limit_m(config: RadarCaptureConfig) -> Optional[float]:
+    """Return a one-bin-padded limit that contains every DSP range bin."""
+    resolution_m = config.range_resolution_m
+    if resolution_m is None:
+        return None
+    return config.num_adc_samples * resolution_m
 
 
 def _range_plot_axis(
@@ -1619,12 +1639,18 @@ def main() -> None:
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
+        try:
+            dsp_backend = validate_openradar_backend()
+        except RuntimeError as exc:
+            raise CaptureStartupError(str(exc)) from exc
+        emit(f"DSP backend: {dsp_backend}")
         setup_config = CaptureSetupConfig.from_file(args.setup)
         emit(f"Loaded capture setup: {setup_config}")
         display = LiveDisplay(
             args.display,
             args.display_pause,
             args.max_range_m,
+            point_cloud_range_m=_point_cloud_range_limit_m(config),
         )
         frame_queue = mp.Queue(maxsize=max(args.processing_queue_size, 1))
         log_queue = mp.Queue(maxsize=1000)

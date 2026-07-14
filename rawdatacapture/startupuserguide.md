@@ -129,7 +129,8 @@ Terminal 1 so raw metadata is finalized.
 Install dependencies:
 
 ```bash
-python3 -m pip install numpy matplotlib pyserial
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install -r requirements.txt
 ```
 
 Grant serial access, then log out and back in:

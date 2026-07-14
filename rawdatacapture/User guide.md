@@ -5,9 +5,8 @@ for an IWR6843ISK-ODS connected to a DCA1000EVM.
 
 ## Prerequisites
 
-- Python 3 with NumPy.
-- Matplotlib for a live display.
-- pyserial when using `run.py` or `startup.py --radar-backend direct-serial`.
+- Python 3 with the dependencies from the repository `requirements.txt`.
+- Git, which pip uses to install the pinned OpenRadar dependency.
 - PC Ethernet interface configured as `192.168.33.30/24` by default.
 - DCA1000 reachable at `192.168.33.180`.
 - Radar running SDK CLI firmware when using `profile.cfg` and direct serial.
@@ -20,10 +19,30 @@ lvdsStreamCfg -1 0 1 0
 Run commands from the repository root. Windows examples use `python` and
 backslashes; Linux examples may use `python3` and forward slashes.
 
+Create a project virtual environment and install dependencies before the first
+run. On Linux:
+
+```bash
+python3 -m venv --system-site-packages .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+On Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt
+```
+
+Live range, Doppler, and CFAR processing uses OpenRadar. The IWR6843ISK-ODS
+planar-array coordinate mapping remains in the local DSP adapter because
+OpenRadar's supplied XYZ helper targets the AWR1843 virtual antenna layout.
+Range, range-Doppler, and 3D point-cloud displays use Matplotlib.
+
 ## Recommended: Integrated Run
 
 ```powershell
-python run.py
+.venv\Scripts\python run.py
 ```
 
 `run.py`:
