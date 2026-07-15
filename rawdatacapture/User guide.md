@@ -124,7 +124,7 @@ python rawdatacapture\livedatacapture.py --display range
 
 The plot is average range-FFT magnitude over chirps and receivers. Its X-axis
 uses meters when sample rate and frequency slope are available; otherwise it
-falls back to bin numbers. The displayed X limit defaults to 20 m:
+falls back to bin numbers. The displayed X limit defaults to 10 m:
 
 ```powershell
 python rawdatacapture\livedatacapture.py --display range --max-range-m 10
@@ -150,10 +150,14 @@ python rawdatacapture\livedatacapture.py --display point-cloud
 ```
 
 The diagnostic point cloud uses CA-CFAR, local-peak filtering, and a virtual
-antenna 2D FFT. It shows at most 50 points. Coordinates are X left/right, Y
-forward, and Z elevation. The plot box is fixed at 5 m: X and Z are -2.5 to
-2.5 m and Y is 0 to 5 m. Color is fixed from 40 to 120 dB. Angle output is not
-calibrated.
+antenna 2D FFT. It shows at most 50 points within a 10 m radial range and a
+±60-degree azimuth/elevation field of view. Coordinates are X left/right, Y
+forward, and Z elevation. The plot spans 0 to 10 m forward and approximately
+-8.66 to +8.66 m across X and Z. Color is fixed from 40 to 120 dB. Angle output
+is not calibrated.
+
+Use `--max-range-m` to change the shared range limit for any display, and use
+`--point-cloud-fov-deg` to change the point-cloud half-FOV.
 
 ### Display performance
 

@@ -47,7 +47,8 @@ DEFAULT_PROCESSING_QUEUE_SIZE = 4
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
-DEFAULT_MAX_RANGE_M = 20.0
+DEFAULT_MAX_RANGE_M = 10.0
+DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -397,6 +398,7 @@ class LiveDisplay:
         pause_seconds: float,
         max_range_m: float,
         point_cloud_range_m: Optional[float] = None,
+        point_cloud_fov_deg: float = DEFAULT_POINT_CLOUD_FOV_DEG,
         emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
@@ -408,6 +410,7 @@ class LiveDisplay:
             else self.max_range_m,
             1.0,
         )
+        self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
         self.emit = emit_func or emit
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
@@ -427,6 +430,7 @@ class LiveDisplay:
                 self.pause_seconds,
                 self.max_range_m,
                 self.point_cloud_range_m,
+                self.point_cloud_fov_deg,
                 self.payload_queue,
                 self.latency_queue,
                 self.stop_event,
@@ -471,11 +475,15 @@ class DisplayPayloadSink:
         update_every: int,
         payload_queue: Optional[mp.Queue],
         config: RadarCaptureConfig,
+        max_range_m: float = DEFAULT_MAX_RANGE_M,
+        point_cloud_fov_deg: float = DEFAULT_POINT_CLOUD_FOV_DEG,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
         self.payload_queue = payload_queue
         self.config = config
+        self.max_range_m = max(float(max_range_m), 0.0)
+        self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
         self.frame_count = 0
 
     def update(
@@ -506,7 +514,14 @@ class DisplayPayloadSink:
         elif self.mode == "point-cloud":
             payload = (
                 frame_first_byte_at_s,
-                compute_point_cloud(range_fft, range_axis_m, self.config),
+                compute_point_cloud(
+                    range_fft,
+                    range_axis_m,
+                    self.config,
+                    max_range_m=self.max_range_m,
+                    azimuth_fov_deg=self.point_cloud_fov_deg,
+                    elevation_fov_deg=self.point_cloud_fov_deg,
+                ),
             )
         else:
             return
@@ -641,6 +656,7 @@ def _run_display_process(
     pause_seconds: float,
     max_range_m: float,
     point_cloud_range_m: float,
+    point_cloud_fov_deg: float,
     payload_queue: mp.Queue,
     latency_queue: mp.Queue,
     stop_event: mp.Event,
@@ -689,11 +705,14 @@ def _run_display_process(
         scatter = axis.scatter([], [], [], c=[], s=18, cmap="viridis")
         scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
         figure.colorbar(scatter, ax=axis, label="Magnitude (dB)", pad=0.12)
-        axis.set_title("Live 3D Point Cloud")
+        axis.set_title(
+            "Live 3D Point Cloud "
+            f"(±{point_cloud_fov_deg:g}° FOV, {point_cloud_range_m:g} m)"
+        )
         axis.set_xlabel("X left/right (m)")
         axis.set_ylabel("Y forward (m)")
         axis.set_zlabel("Z elevation (m)")
-        _set_point_cloud_axes(axis, point_cloud_range_m)
+        _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
         axis.view_init(elev=24, azim=-60)
         axis.grid(True, alpha=0.3)
     figure.tight_layout()
@@ -728,6 +747,7 @@ def _run_display_process(
                         scatter,
                         points,
                         point_cloud_range_m,
+                        point_cloud_fov_deg,
                     )
                 else:
                     frame_first_byte_at_s = None
@@ -792,6 +812,7 @@ def _draw_point_cloud(
     scatter: Any,
     points: np.ndarray,
     point_cloud_range_m: float,
+    point_cloud_fov_deg: float,
 ) -> None:
     empty = np.array([], dtype=np.float32)
     if points.size == 0:
@@ -805,15 +826,23 @@ def _draw_point_cloud(
             POINT_CLOUD_MAGNITUDE_DB_MAX,
         )
 
-    _set_point_cloud_axes(axis, point_cloud_range_m)
+    _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
 
 
-def _set_point_cloud_axes(axis: Any, point_cloud_range_m: float) -> None:
+def _set_point_cloud_axes(
+    axis: Any,
+    point_cloud_range_m: float,
+    point_cloud_fov_deg: float,
+) -> None:
     range_limit_m = max(float(point_cloud_range_m), 1.0)
-    axis.set_xlim(-range_limit_m, range_limit_m)
+    fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
+    cross_range_limit_m = max(range_limit_m * np.sin(np.deg2rad(fov_deg)), 0.5)
+    axis.set_xlim(-cross_range_limit_m, cross_range_limit_m)
     axis.set_ylim(0.0, range_limit_m)
-    axis.set_zlim(-range_limit_m, range_limit_m)
-    axis.set_box_aspect((2.0, 1.0, 2.0))
+    axis.set_zlim(-cross_range_limit_m, cross_range_limit_m)
+    axis.set_box_aspect(
+        (2.0 * cross_range_limit_m, range_limit_m, 2.0 * cross_range_limit_m)
+    )
 
 
 def _point_cloud_range_limit_m(config: RadarCaptureConfig) -> Optional[float]:
@@ -922,6 +951,8 @@ def _run_frame_processor(
     raw_metadata: Optional[Path],
     display_mode: str,
     display_update_every: int,
+    max_range_m: float,
+    point_cloud_fov_deg: float,
 ) -> None:
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
@@ -932,6 +963,8 @@ def _run_frame_processor(
         display_update_every,
         display_payload_queue,
         config,
+        max_range_m,
+        point_cloud_fov_deg,
     )
 
     try:
@@ -1174,7 +1207,19 @@ def parse_args() -> argparse.Namespace:
         "--max-range-m",
         type=float,
         default=DEFAULT_MAX_RANGE_M,
-        help="Maximum X-axis range in meters for live range displays. Use 0 for full axis.",
+        help=(
+            "Maximum range in meters for all live displays. "
+            "Defaults to 10 m; use 0 for the full computed range."
+        ),
+    )
+    parser.add_argument(
+        "--point-cloud-fov-deg",
+        type=float,
+        default=DEFAULT_POINT_CLOUD_FOV_DEG,
+        help=(
+            "Point-cloud azimuth/elevation half-FOV in degrees. "
+            "Defaults to ±60 degrees."
+        ),
     )
     return parser.parse_args()
 
@@ -1650,7 +1695,12 @@ def main() -> None:
             args.display,
             args.display_pause,
             args.max_range_m,
-            point_cloud_range_m=_point_cloud_range_limit_m(config),
+            point_cloud_range_m=(
+                args.max_range_m
+                if args.max_range_m > 0.0
+                else _point_cloud_range_limit_m(config)
+            ),
+            point_cloud_fov_deg=args.point_cloud_fov_deg,
         )
         frame_queue = mp.Queue(maxsize=max(args.processing_queue_size, 1))
         log_queue = mp.Queue(maxsize=1000)
@@ -1665,6 +1715,8 @@ def main() -> None:
                 args.raw_metadata,
                 args.display,
                 args.display_update_every,
+                args.max_range_m,
+                args.point_cloud_fov_deg,
             ),
             name="RadarFrameProcessor",
         )

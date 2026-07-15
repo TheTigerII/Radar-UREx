@@ -167,8 +167,10 @@ The point-cloud path:
 1. Forms mean range-Doppler power.
 2. Runs two-dimensional CA-CFAR with Doppler wrapping.
 3. Keeps local peaks and removes detections below 0.15 m.
-4. Keeps at most the 50 strongest detections.
+4. Rejects detections beyond 10 m.
 5. Estimates direction using a 32-by-32 2D FFT of a virtual antenna grid.
+6. Applies ±60-degree azimuth and elevation gates and keeps at most the 50
+   strongest in-FOV detections.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and

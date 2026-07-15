@@ -99,6 +99,9 @@ def compute_point_cloud(
     range_training_cells: int = 4,
     doppler_training_cells: int = 2,
     min_range_m: float = 0.15,
+    max_range_m: float = 10.0,
+    azimuth_fov_deg: float = 60.0,
+    elevation_fov_deg: float = 60.0,
 ) -> np.ndarray:
     doppler_fft = compute_range_doppler_fft(range_fft, config)
     detection_power = np.mean(np.abs(doppler_fft) ** 2, axis=(1, 2))
@@ -121,19 +124,19 @@ def compute_point_cloud(
         return np.empty((0, 4), dtype=np.float32)
 
     candidate_powers = detection_power[candidate_indices[:, 0], candidate_indices[:, 1]]
-    order = np.argsort(candidate_powers)[::-1][:max_points]
-    selected_indices = candidate_indices[order]
-    selected_magnitudes_db = 10.0 * np.log10(candidate_powers[order] + 1e-12)
+    order = np.argsort(candidate_powers)[::-1]
 
     points = []
-    for (doppler_bin, range_bin), magnitude_db in zip(
-        selected_indices,
-        selected_magnitudes_db,
-    ):
+    for candidate_index in order:
+        doppler_bin, range_bin = candidate_indices[candidate_index]
+        magnitude_db = 10.0 * np.log10(candidate_powers[candidate_index] + 1e-12)
         if range_axis is not None and range_axis.size == detection_power.shape[1]:
             target_range_m = float(range_axis[range_bin])
         else:
             target_range_m = float(range_bin)
+
+        if max_range_m > 0.0 and target_range_m > max_range_m:
+            continue
 
         xyz_m = estimate_xyz_from_virtual_array(
             doppler_fft[int(doppler_bin), :, :, int(range_bin)],
@@ -143,11 +146,43 @@ def compute_point_cloud(
         if xyz_m is None:
             continue
         x_m, y_m, z_m = xyz_m
+        if not _point_is_within_fov(
+            x_m,
+            y_m,
+            z_m,
+            azimuth_fov_deg=azimuth_fov_deg,
+            elevation_fov_deg=elevation_fov_deg,
+        ):
+            continue
         points.append((x_m, y_m, z_m, float(magnitude_db)))
+        if len(points) >= max_points:
+            break
 
     if not points:
         return np.empty((0, 4), dtype=np.float32)
     return np.asarray(points, dtype=np.float32)
+
+
+def _point_is_within_fov(
+    x_m: float,
+    y_m: float,
+    z_m: float,
+    *,
+    azimuth_fov_deg: float,
+    elevation_fov_deg: float,
+) -> bool:
+    """Gate XYZ coordinates using the array's azimuth/elevation direction cosines."""
+    range_m = float(np.sqrt(x_m**2 + y_m**2 + z_m**2))
+    if range_m <= 0.0:
+        return True
+
+    azimuth_limit = np.sin(np.deg2rad(np.clip(azimuth_fov_deg, 0.0, 90.0)))
+    elevation_limit = np.sin(np.deg2rad(np.clip(elevation_fov_deg, 0.0, 90.0)))
+    tolerance = 1e-9
+    return (
+        abs(x_m / range_m) <= azimuth_limit + tolerance
+        and abs(z_m / range_m) <= elevation_limit + tolerance
+    )
 
 
 def ca_cfar_2d(
