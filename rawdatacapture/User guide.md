@@ -149,7 +149,7 @@ and receivers.
 python rawdatacapture\livedatacapture.py --display point-cloud
 ```
 
-The diagnostic point cloud uses CA-CFAR, local-peak filtering, and a virtual
+The diagnostic point cloud uses OS-CFAR, local-peak filtering, and a virtual
 antenna 2D FFT. It shows at most 50 points within a 10 m radial range and a
 ±60-degree azimuth/elevation field of view. Coordinates are X left/right, Y
 forward, and Z elevation. The plot spans 0 to 10 m forward and approximately

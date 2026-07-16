@@ -3,10 +3,32 @@ import unittest
 
 import numpy as np
 
-from rawdatacapture.openradar_backend import ca_cfar_2d, doppler_fft, range_fft
+from rawdatacapture.openradar_backend import (
+    _os_scale,
+    doppler_fft,
+    os_cfar_2d,
+    range_fft,
+)
 
 
 OPENRADAR_AVAILABLE = importlib.util.find_spec("mmwave") is not None
+
+
+class OsCfarParameterTests(unittest.TestCase):
+    def test_scale_matches_requested_false_alarm_rate(self) -> None:
+        training_cells = 8
+        rank = 6
+        expected_pfa = 1e-3
+
+        scale = _os_scale(training_cells, rank, expected_pfa)
+        actual_pfa = np.prod(
+            [
+                (training_cells - index) / (training_cells - index + scale)
+                for index in range(rank)
+            ]
+        )
+
+        self.assertAlmostEqual(actual_pfa, expected_pfa, places=12)
 
 
 @unittest.skipUnless(OPENRADAR_AVAILABLE, "OpenRadar is not installed")
@@ -28,7 +50,7 @@ class OpenRadarBackendTests(unittest.TestCase):
         power_map = np.ones((16, 32), dtype=np.float64)
         power_map[8, 16] = 1e8
 
-        detections = ca_cfar_2d(
+        detections = os_cfar_2d(
             power_map,
             false_alarm_rate=1e-3,
             range_guard_cells=2,

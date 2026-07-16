@@ -4,14 +4,14 @@ import numpy as np
 
 try:
     from .openradar_backend import (
-        ca_cfar_2d as openradar_ca_cfar_2d,
+        os_cfar_2d as openradar_os_cfar_2d,
         doppler_fft as openradar_doppler_fft,
         range_fft as openradar_range_fft,
         validate_openradar_backend,
     )
 except ImportError:
     from openradar_backend import (
-        ca_cfar_2d as openradar_ca_cfar_2d,
+        os_cfar_2d as openradar_os_cfar_2d,
         doppler_fft as openradar_doppler_fft,
         range_fft as openradar_range_fft,
         validate_openradar_backend,
@@ -108,7 +108,7 @@ def compute_point_cloud(
     if detection_power.size == 0:
         return np.empty((0, 4), dtype=np.float32)
 
-    detections = ca_cfar_2d(
+    detections = os_cfar_2d(
         detection_power,
         false_alarm_rate=false_alarm_rate,
         range_guard_cells=range_guard_cells,
@@ -185,7 +185,7 @@ def _point_is_within_fov(
     )
 
 
-def ca_cfar_2d(
+def os_cfar_2d(
     power_map: np.ndarray,
     *,
     false_alarm_rate: float,
@@ -194,8 +194,8 @@ def ca_cfar_2d(
     range_training_cells: int,
     doppler_training_cells: int,
 ) -> np.ndarray:
-    """Run OpenRadar CA-CFAR on a [doppler, range] power map."""
-    return openradar_ca_cfar_2d(
+    """Run OpenRadar OS-CFAR on a [doppler, range] power map."""
+    return openradar_os_cfar_2d(
         power_map,
         false_alarm_rate=false_alarm_rate,
         range_guard_cells=range_guard_cells,

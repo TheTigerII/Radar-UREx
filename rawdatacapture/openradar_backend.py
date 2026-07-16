@@ -88,7 +88,7 @@ def doppler_fft(
     return np.fft.fftshift(explicit_cube, axes=0)
 
 
-def ca_cfar_2d(
+def os_cfar_2d(
     power_map: np.ndarray,
     *,
     false_alarm_rate: float,
@@ -97,7 +97,7 @@ def ca_cfar_2d(
     range_training_cells: int,
     doppler_training_cells: int,
 ) -> np.ndarray:
-    """Apply OpenRadar CA-CFAR independently in range and Doppler."""
+    """Apply OpenRadar OS-CFAR independently in range and Doppler."""
     if power_map.ndim != 2 or power_map.size == 0:
         return np.zeros_like(power_map, dtype=bool)
 
@@ -108,46 +108,72 @@ def ca_cfar_2d(
         return np.zeros_like(power_map, dtype=bool)
 
     openradar_dsp = _openradar_dsp()
-    log_power_db = 10.0 * np.log10(
-        np.maximum(power_map.astype(np.float64), np.finfo(np.float64).tiny)
-    )
+    power = np.maximum(power_map.astype(np.float64), 0.0)
     pfa = min(max(false_alarm_rate, 1e-9), 0.5)
 
-    def threshold_offset_db(training_cells_per_side: int) -> float:
+    def os_parameters(training_cells_per_side: int) -> tuple[int, float]:
         total_training_cells = 2 * training_cells_per_side
-        scale = total_training_cells * (
-            pfa ** (-1.0 / total_training_cells) - 1.0
-        )
-        return float(10.0 * np.log10(scale))
+        # Use the conventional 75th-percentile ordered statistic. OpenRadar's
+        # rank is zero-based, while the Pfa calculation uses a one-based rank.
+        rank = max(1, int(np.ceil(0.75 * total_training_cells)))
+        return rank - 1, _os_scale(total_training_cells, rank, pfa)
 
     def range_threshold(row: np.ndarray) -> np.ndarray:
-        threshold, _noise = openradar_dsp.ca_(
+        rank, scale = os_parameters(range_training_cells)
+        threshold, _noise = openradar_dsp.os_(
             row,
             guard_len=range_guard_cells,
             noise_len=range_training_cells,
-            mode="constant",
-            l_bound=threshold_offset_db(range_training_cells),
+            k=rank,
+            scale=scale,
         )
         return threshold
 
     def doppler_threshold(column: np.ndarray) -> np.ndarray:
-        threshold, _noise = openradar_dsp.ca_(
+        rank, scale = os_parameters(doppler_training_cells)
+        threshold, _noise = openradar_dsp.os_(
             column,
             guard_len=doppler_guard_cells,
             noise_len=doppler_training_cells,
-            mode="wrap",
-            l_bound=threshold_offset_db(doppler_training_cells),
+            k=rank,
+            scale=scale,
         )
         return threshold
 
-    range_thresholds = np.apply_along_axis(range_threshold, 1, log_power_db)
-    doppler_thresholds = np.apply_along_axis(doppler_threshold, 0, log_power_db)
-    detections = (log_power_db > range_thresholds) & (
-        log_power_db > doppler_thresholds
+    range_thresholds = np.apply_along_axis(range_threshold, 1, power)
+    doppler_thresholds = np.apply_along_axis(doppler_threshold, 0, power)
+    detections = (power > range_thresholds) & (
+        power > doppler_thresholds
     )
 
-    # OpenRadar's constant-padding range mode supplies thresholds at the edge.
-    # Keep those bins disabled because they do not have a complete noise window.
+    # OpenRadar OS-CFAR wraps its training window. Range is not cyclic, so keep
+    # edge bins disabled where a complete range training window is unavailable.
     detections[:, :range_margin] = False
     detections[:, range_bins - range_margin :] = False
     return detections
+
+
+def _os_scale(total_training_cells: int, rank: int, pfa: float) -> float:
+    """Return the exponential-noise OS-CFAR multiplier for a requested Pfa."""
+    if not 1 <= rank <= total_training_cells:
+        raise ValueError("OS-CFAR rank must be within the training window")
+
+    target_log_pfa = float(np.log(pfa))
+
+    def log_pfa(scale: float) -> float:
+        indices = np.arange(rank, dtype=np.float64)
+        denominators = total_training_cells - indices
+        return float(-np.log1p(scale / denominators).sum())
+
+    lower = 0.0
+    upper = 1.0
+    while log_pfa(upper) > target_log_pfa:
+        upper *= 2.0
+
+    for _ in range(64):
+        midpoint = (lower + upper) / 2.0
+        if log_pfa(midpoint) > target_log_pfa:
+            lower = midpoint
+        else:
+            upper = midpoint
+    return (lower + upper) / 2.0
