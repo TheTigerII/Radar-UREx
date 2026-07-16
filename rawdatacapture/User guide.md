@@ -228,6 +228,9 @@ Important counters are:
 Healthy capture normally keeps all of these at zero. Frames containing gap
 padding are neither processed nor saved.
 
+Successful frames and display latency are not printed. A statistics line is
+emitted only when one or more capture or processing error counters change.
+
 If `processing_drops` grows while packet-loss counters remain zero, reduce
 display updates or use `--display none`. Increasing `--processing-queue-size`
 can absorb short bursts but does not fix processing that is consistently too

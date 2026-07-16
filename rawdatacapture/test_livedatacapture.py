@@ -1,6 +1,7 @@
 import math
 import unittest
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -8,6 +9,7 @@ from rawdatacapture.dsp import _point_is_within_fov
 
 from rawdatacapture.livedatacapture import (
     CaptureStats,
+    CapturedFrame,
     DEFAULT_CLUSTER_EPS_M,
     DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
@@ -15,11 +17,13 @@ from rawdatacapture.livedatacapture import (
     DCA1000PacketHeader,
     FrameBuffer,
     RadarCaptureConfig,
+    _capture_error_counts,
     _draw_point_cloud,
     _draw_range_doppler,
     _draw_range_profile,
     _point_cloud_range_limit_m,
     _set_point_cloud_axes,
+    process_complete_frame,
 )
 
 
@@ -52,6 +56,61 @@ class FrameBufferTests(unittest.TestCase):
         self.assertEqual(stats.stream_resyncs, 1)
         self.assertEqual(stats.byte_gap_bytes, 0)
         self.assertEqual(len(buffer.buffer), 0)
+
+
+class FrameDiagnosticsTests(unittest.TestCase):
+    def test_valid_frame_does_not_emit_routine_diagnostics(self) -> None:
+        frame = CapturedFrame(data=b"valid", gap_bytes=0, first_byte_at_s=1.0)
+        range_axis_m = np.asarray((0.0, 0.25), dtype=np.float32)
+        config = SimpleNamespace(
+            bytes_per_frame=len(frame.data),
+            range_axis_m=Mock(return_value=range_axis_m),
+        )
+        display = Mock()
+        raw_writer = Mock()
+        emit_func = Mock()
+        radar_cube = np.ones((1, 1, 2), dtype=np.complex64)
+        range_fft = np.ones((1, 1, 2), dtype=np.complex64)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.frame_bytes_to_radar_cube",
+                return_value=radar_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_fft",
+                return_value=range_fft,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_profile"
+            ) as range_profile,
+        ):
+            process_complete_frame(
+                frame,
+                config,
+                display,
+                raw_writer,
+                emit_func,
+            )
+
+        emit_func.assert_not_called()
+        range_profile.assert_not_called()
+        display.update.assert_called_once_with(range_fft, range_axis_m)
+
+    def test_error_snapshot_ignores_success_counters(self) -> None:
+        initial = CaptureStats(packets_received=100, frames_emitted=5)
+        later_success = CaptureStats(packets_received=200, frames_emitted=10)
+
+        self.assertEqual(
+            _capture_error_counts(initial),
+            _capture_error_counts(later_success),
+        )
+
+        later_success.lost_packets = 1
+        self.assertNotEqual(
+            _capture_error_counts(initial),
+            _capture_error_counts(later_success),
+        )
 
 
 class PointCloudBoundsTests(unittest.TestCase):

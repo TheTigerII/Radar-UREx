@@ -402,7 +402,6 @@ class LiveDisplay:
         max_range_m: float,
         point_cloud_range_m: Optional[float] = None,
         point_cloud_fov_deg: float = DEFAULT_POINT_CLOUD_FOV_DEG,
-        emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
         self.pause_seconds = max(pause_seconds, 0.001)
@@ -414,10 +413,8 @@ class LiveDisplay:
             1.0,
         )
         self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
-        self.emit = emit_func or emit
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
-        self.latency_queue: Optional[mp.Queue] = None
         self.process: Optional[mp.Process] = None
 
         if self.mode == "none":
@@ -425,7 +422,6 @@ class LiveDisplay:
 
         self.stop_event = mp.Event()
         self.payload_queue = mp.Queue(maxsize=1)
-        self.latency_queue = mp.Queue(maxsize=100)
         self.process = mp.Process(
             target=_run_display_process,
             args=(
@@ -435,7 +431,6 @@ class LiveDisplay:
                 self.point_cloud_range_m,
                 self.point_cloud_fov_deg,
                 self.payload_queue,
-                self.latency_queue,
                 self.stop_event,
             ),
             name="RadarLiveDisplay",
@@ -444,7 +439,6 @@ class LiveDisplay:
         self.process.start()
 
     def close(self) -> None:
-        self.emit_latency_messages()
         if self.stop_event is not None:
             self.stop_event.set()
         if self.process is not None:
@@ -452,23 +446,9 @@ class LiveDisplay:
             if self.process.is_alive():
                 self.process.terminate()
                 self.process.join(timeout=1.0)
-        self.emit_latency_messages()
         if self.payload_queue is not None:
             self.payload_queue.close()
             self.payload_queue.join_thread()
-        if self.latency_queue is not None:
-            self.latency_queue.close()
-            self.latency_queue.join_thread()
-
-    def emit_latency_messages(self) -> None:
-        if self.latency_queue is None:
-            return
-
-        while True:
-            try:
-                self.emit(self.latency_queue.get_nowait())
-            except queue.Empty:
-                return
 
 
 class DisplayPayloadSink:
@@ -497,7 +477,6 @@ class DisplayPayloadSink:
         self,
         range_fft: np.ndarray,
         range_axis_m: Optional[np.ndarray],
-        frame_first_byte_at_s: float,
     ) -> None:
         if self.mode == "none" or self.payload_queue is None:
             return
@@ -508,13 +487,11 @@ class DisplayPayloadSink:
 
         if self.mode == "range":
             payload = (
-                frame_first_byte_at_s,
                 range_axis_m,
                 compute_range_profile(range_fft),
             )
         elif self.mode == "range-doppler":
             payload = (
-                frame_first_byte_at_s,
                 range_axis_m,
                 compute_range_doppler_heatmap(range_fft, self.config),
             )
@@ -528,7 +505,6 @@ class DisplayPayloadSink:
                 elevation_fov_deg=self.point_cloud_fov_deg,
             )
             payload = (
-                frame_first_byte_at_s,
                 points,
                 cluster_point_cloud(
                     points,
@@ -671,7 +647,6 @@ def _run_display_process(
     point_cloud_range_m: float,
     point_cloud_fov_deg: float,
     payload_queue: mp.Queue,
-    latency_queue: mp.Queue,
     stop_event: mp.Event,
 ) -> None:
     try:
@@ -754,7 +729,7 @@ def _run_display_process(
                         break
 
                 if mode == "range" and line is not None:
-                    frame_first_byte_at_s, range_axis_m, range_profile = payload
+                    range_axis_m, range_profile = payload
                     _draw_range_profile(
                         axis,
                         line,
@@ -763,14 +738,14 @@ def _run_display_process(
                         max_range_m,
                     )
                 elif mode == "range-doppler" and image is not None:
-                    frame_first_byte_at_s, range_axis_m, heatmap = payload
+                    range_axis_m, heatmap = payload
                     _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
                 elif (
                     mode == "point-cloud"
                     and scatter is not None
                     and cluster_scatter is not None
                 ):
-                    frame_first_byte_at_s, points, clusters = payload
+                    points, clusters = payload
                     _draw_point_cloud(
                         axis,
                         scatter,
@@ -780,22 +755,7 @@ def _run_display_process(
                         point_cloud_range_m,
                         point_cloud_fov_deg,
                     )
-                else:
-                    frame_first_byte_at_s = None
-
                 figure.canvas.draw()
-                if frame_first_byte_at_s is not None:
-                    display_latency_ms = (
-                        time.perf_counter() - frame_first_byte_at_s
-                    ) * 1000.0
-                    latency_message = (
-                        "display latency: "
-                        f"frame_first_byte_to_canvas_draw_ms={display_latency_ms:.1f}"
-                    )
-                    try:
-                        latency_queue.put_nowait(latency_message)
-                    except queue.Full:
-                        pass
             except queue.Empty:
                 pass
             except KeyboardInterrupt:
@@ -933,26 +893,8 @@ def process_complete_frame(
     raw_writer.write_frame(frame)
     radar_cube = frame_bytes_to_radar_cube(frame.data, config)
     range_fft = compute_range_fft(radar_cube)
-    range_profile = compute_range_profile(range_fft)
-    peak_range_bin = int(np.argmax(range_profile))
     range_axis_m = config.range_axis_m()
-    peak_range_m = (
-        float(range_axis_m[peak_range_bin]) if range_axis_m is not None else None
-    )
-    peak_range_text = (
-        f"peak_range_m={peak_range_m:.3f}"
-        if peak_range_m is not None
-        else f"peak_range_bin={peak_range_bin}"
-    )
-
-    emit_func(
-        "Complete frame "
-        f"cube_shape={radar_cube.shape}, "
-        f"{peak_range_text}, "
-        f"peak_range_bin={peak_range_bin}, "
-        f"peak_magnitude={range_profile[peak_range_bin]:.2f}"
-    )
-    display.update(range_fft, range_axis_m, frame.first_byte_at_s)
+    display.update(range_fft, range_axis_m)
 
 
 def _queue_emit(log_queue: mp.Queue, message: str) -> None:
@@ -1050,6 +992,15 @@ def listen_for_frames(
     frame_buffer = FrameBuffer(config.bytes_per_frame, stats)
     synthetic_sequence_number = 0
     synthetic_byte_count = 0
+    reported_error_counts = _capture_error_counts(stats)
+
+    def emit_new_error_stats() -> None:
+        nonlocal reported_error_counts
+        error_counts = _capture_error_counts(stats)
+        if error_counts == reported_error_counts:
+            return
+        emit(_format_stats(stats))
+        reported_error_counts = error_counts
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if socket_recv_buffer_bytes > 0:
@@ -1099,8 +1050,8 @@ def listen_for_frames(
                 packet, _addr = sock.recvfrom(buffer_size)
                 packet_received_at_s = time.perf_counter()
             except socket.timeout:
-                display.emit_latency_messages()
                 _drain_log_queue(log_queue)
+                emit_new_error_stats()
                 continue
 
             if setup_config.packet_sequence_enable:
@@ -1108,6 +1059,7 @@ def listen_for_frames(
                     header = DCA1000PacketHeader.parse(packet)
                 except ValueError:
                     stats.malformed_packets += 1
+                    emit_new_error_stats()
                     continue
 
                 payload = packet[DCA1000_HEADER_SIZE:]
@@ -1131,35 +1083,25 @@ def listen_for_frames(
                 packet_received_at_s,
             ):
                 if not frame.is_valid:
-                    emit(
-                        "Dropped frame: incomplete payload, "
-                        f"gap_bytes={frame.gap_bytes}, "
-                        f"bytes_per_frame={config.bytes_per_frame}"
-                    )
                     continue
 
                 try:
                     frame_queue.put_nowait(frame)
                 except queue.Full:
                     stats.processing_frames_dropped += 1
-                    emit(
-                        "Dropped frame: processing queue full, "
-                        f"bytes_per_frame={config.bytes_per_frame}"
-                    )
+
+            emit_new_error_stats()
 
             if stats.packets_received % 200 == 0:
-                display.emit_latency_messages()
                 _drain_log_queue(log_queue)
-                emit(_format_stats(stats))
     except KeyboardInterrupt:
-        display.emit_latency_messages()
         _drain_log_queue(log_queue)
+        emit_new_error_stats()
         emit("Streaming stopped.")
-        emit(_format_stats(stats))
     finally:
         sock.close()
-        display.emit_latency_messages()
         _drain_log_queue(log_queue)
+        emit_new_error_stats()
     return stats
 
 
@@ -1302,6 +1244,23 @@ def _format_stats(stats: CaptureStats) -> str:
         f"byte_overlaps={stats.byte_overlaps}/{stats.byte_overlap_bytes}B, "
         f"malformed={stats.malformed_packets}, "
         f"processing_drops={stats.processing_frames_dropped}"
+    )
+
+
+def _capture_error_counts(stats: CaptureStats) -> tuple[int, ...]:
+    """Return only counters that indicate capture or processing errors."""
+    return (
+        stats.invalid_frames,
+        stats.lost_packets,
+        stats.out_of_order_packets,
+        stats.duplicate_packets,
+        stats.byte_gaps,
+        stats.byte_gap_bytes,
+        stats.stream_resyncs,
+        stats.byte_overlaps,
+        stats.byte_overlap_bytes,
+        stats.malformed_packets,
+        stats.processing_frames_dropped,
     )
 
 

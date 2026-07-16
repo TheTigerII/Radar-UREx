@@ -64,8 +64,10 @@ results in favor of the newest one.
 - `RadarLiveDisplay`: Matplotlib UI for any display other than `none`.
 - Processing queue: `--processing-queue-size`, default 4 frames.
 - Display payload queue: one result.
-- Display latency queue: 100 messages.
 - Processor log queue: 1,000 messages.
+
+Routine successful frames and display latency are silent. Capture statistics
+are emitted only when an error counter changes.
 
 ## Configuration
 
