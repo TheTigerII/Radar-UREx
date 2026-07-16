@@ -30,5 +30,17 @@ class ChooseDurationMinutesTests(unittest.TestCase):
             run.choose_duration_minutes(float("nan"))
 
 
+class ChooseDisplayTests(unittest.TestCase):
+    def test_combined_display_menu_choice(self) -> None:
+        with patch("builtins.input", return_value="5"):
+            self.assertEqual(
+                run.choose_display(None),
+                "point-cloud-micro-doppler",
+            )
+
+    def test_combined_display_is_a_cli_choice(self) -> None:
+        self.assertIn("point-cloud-micro-doppler", run.DISPLAY_CHOICES)
+
+
 if __name__ == "__main__":
     unittest.main()

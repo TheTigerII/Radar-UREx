@@ -9,6 +9,7 @@ from rawdatacapture.dsp import (
     build_virtual_antenna_grid,
     build_virtual_antenna_grids,
     cluster_point_cloud,
+    compute_micro_doppler_spectrum,
     compute_point_cloud,
     doppler_peak_mask,
     estimate_xyz_from_virtual_array,
@@ -185,6 +186,46 @@ class DopplerPeakMaskTests(unittest.TestCase):
 
         self.assertFalse(peaks[0, 0])
         self.assertTrue(peaks[-1, 0])
+
+
+class MicroDopplerSpectrumTests(unittest.TestCase):
+    def test_auto_gate_uses_strongest_nonzero_doppler_range(self) -> None:
+        doppler_cube = np.zeros((8, 1, 1, 6), dtype=np.complex64)
+        doppler_cube[0, 0, 0, 4] = 3.0
+        doppler_cube[4, 0, 0, 2] = 100.0
+        range_axis = np.arange(6, dtype=np.float32)
+
+        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+            doppler_cube,
+            range_axis,
+            range_half_width_bins=0,
+            min_range_m=1.0,
+            max_range_m=5.0,
+        )
+
+        self.assertEqual(selected_range_m, 4.0)
+        self.assertEqual(int(np.argmax(spectrum_db)), 0)
+
+    def test_explicit_target_range_combines_gate_power_before_log(self) -> None:
+        doppler_cube = np.zeros((4, 2, 1, 5), dtype=np.complex64)
+        doppler_cube[1, :, :, 1:4] = 1.0
+        range_axis = np.arange(5, dtype=np.float32) * 0.5
+
+        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+            doppler_cube,
+            range_axis,
+            target_range_m=1.0,
+            range_half_width_bins=1,
+            min_range_m=0.25,
+            max_range_m=2.0,
+        )
+
+        self.assertEqual(selected_range_m, 1.0)
+        self.assertAlmostEqual(
+            float(spectrum_db[1]),
+            10.0 * np.log10(6.0),
+            places=6,
+        )
 
 
 class PointCloudClusteringTests(unittest.TestCase):

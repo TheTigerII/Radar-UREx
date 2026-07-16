@@ -4,6 +4,7 @@ import multiprocessing as mp
 import queue
 import socket
 import time
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +15,9 @@ import numpy as np
 try:
     from .dsp import (
         cluster_point_cloud,
+        compute_micro_doppler_spectrum,
         compute_range_doppler_heatmap,
+        compute_range_doppler_fft,
         compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
@@ -26,7 +29,9 @@ try:
 except ImportError:
     from dsp import (
         cluster_point_cloud,
+        compute_micro_doppler_spectrum,
         compute_range_doppler_heatmap,
+        compute_range_doppler_fft,
         compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
@@ -53,6 +58,9 @@ DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
 DEFAULT_CLUSTER_EPS_M = 0.5
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
+COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
+MICRO_DOPPLER_HISTORY_UPDATES = 150
+MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -471,6 +479,7 @@ class DisplayPayloadSink:
         self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
         self.cluster_eps_m = max(float(cluster_eps_m), 0.0)
         self.cluster_min_samples = max(int(cluster_min_samples), 1)
+        self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
         self.frame_count = 0
 
     def update(
@@ -512,6 +521,41 @@ class DisplayPayloadSink:
                     min_samples=self.cluster_min_samples,
                 ),
             )
+        elif self.mode == COMBINED_DISPLAY_MODE:
+            doppler_cube = compute_range_doppler_fft(range_fft, self.config)
+            points = compute_point_cloud(
+                range_fft,
+                range_axis_m,
+                self.config,
+                doppler_cube=doppler_cube,
+                max_range_m=self.max_range_m,
+                azimuth_fov_deg=self.point_cloud_fov_deg,
+                elevation_fov_deg=self.point_cloud_fov_deg,
+            )
+            clusters = cluster_point_cloud(
+                points,
+                eps_m=self.cluster_eps_m,
+                min_samples=self.cluster_min_samples,
+            )
+            target_range_m = None
+            if points.size:
+                strongest_point = points[int(np.argmax(points[:, 3]))]
+                target_range_m = float(np.linalg.norm(strongest_point[:3]))
+            spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+                doppler_cube,
+                range_axis_m,
+                target_range_m=target_range_m,
+                range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+                max_range_m=self.max_range_m,
+            )
+            if spectrum_db.size:
+                self.micro_doppler_history.append(spectrum_db)
+            spectrogram_db = (
+                np.stack(tuple(self.micro_doppler_history), axis=1)
+                if self.micro_doppler_history
+                else np.empty((0, 0), dtype=np.float32)
+            )
+            payload = (points, clusters, spectrogram_db, selected_range_m)
         else:
             return
 
@@ -663,13 +707,18 @@ def _run_display_process(
         return
 
     plt.ion()
-    figure = plt.figure()
+    figure = plt.figure(figsize=(14, 6) if mode == COMBINED_DISPLAY_MODE else None)
+    micro_doppler_axis = None
     if mode == "point-cloud":
         axis = figure.add_subplot(111, projection="3d")
+    elif mode == COMBINED_DISPLAY_MODE:
+        axis = figure.add_subplot(121, projection="3d")
+        micro_doppler_axis = figure.add_subplot(122)
     else:
         axis = figure.add_subplot(111)
     line = None
     image = None
+    micro_doppler_image = None
     scatter = None
     cluster_scatter = None
 
@@ -690,7 +739,7 @@ def _run_display_process(
         axis.set_title("Live Range-Doppler Heatmap")
         axis.set_xlabel("Range (m)")
         axis.set_ylabel("Doppler bin")
-    elif mode == "point-cloud":
+    elif mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
         scatter = axis.scatter([], [], [], c=[], s=18, cmap="viridis")
         scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
         cluster_scatter = axis.scatter(
@@ -715,6 +764,21 @@ def _run_display_process(
         axis.view_init(elev=24, azim=-60)
         axis.grid(True, alpha=0.3)
         axis.legend(loc="upper right")
+        if micro_doppler_axis is not None:
+            micro_doppler_image = micro_doppler_axis.imshow(
+                np.zeros((1, 1)),
+                aspect="auto",
+                origin="lower",
+                interpolation="nearest",
+            )
+            figure.colorbar(
+                micro_doppler_image,
+                ax=micro_doppler_axis,
+                label="Power (dB)",
+            )
+            micro_doppler_axis.set_title("Live Micro-Doppler Spectrogram")
+            micro_doppler_axis.set_xlabel("Display updates (newest at 0)")
+            micro_doppler_axis.set_ylabel("Centered Doppler bin")
     figure.tight_layout()
     plt.show(block=False)
 
@@ -754,6 +818,29 @@ def _run_display_process(
                         clusters,
                         point_cloud_range_m,
                         point_cloud_fov_deg,
+                    )
+                elif (
+                    mode == COMBINED_DISPLAY_MODE
+                    and scatter is not None
+                    and cluster_scatter is not None
+                    and micro_doppler_axis is not None
+                    and micro_doppler_image is not None
+                ):
+                    points, clusters, spectrogram_db, selected_range_m = payload
+                    _draw_point_cloud(
+                        axis,
+                        scatter,
+                        cluster_scatter,
+                        points,
+                        clusters,
+                        point_cloud_range_m,
+                        point_cloud_fov_deg,
+                    )
+                    _draw_micro_doppler(
+                        micro_doppler_axis,
+                        micro_doppler_image,
+                        spectrogram_db,
+                        selected_range_m,
                     )
                 figure.canvas.draw()
             except queue.Empty:
@@ -796,6 +883,38 @@ def _draw_range_doppler(
     image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
     axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
     axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
+
+
+def _draw_micro_doppler(
+    axis: Any,
+    image: Any,
+    spectrogram_db: np.ndarray,
+    selected_range_m: Optional[float],
+) -> None:
+    if spectrogram_db.ndim != 2 or spectrogram_db.size == 0:
+        return
+
+    doppler_bins, history_updates = spectrogram_db.shape
+    first_update = -max(history_updates - 1, 1)
+    first_doppler_bin = -(doppler_bins // 2)
+    last_doppler_bin = first_doppler_bin + doppler_bins - 1
+    image.set_data(spectrogram_db)
+    image.set_extent((first_update, 0, first_doppler_bin, last_doppler_bin))
+    finite_values = spectrogram_db[np.isfinite(spectrogram_db)]
+    if finite_values.size:
+        lower = float(np.percentile(finite_values, 5.0))
+        upper = float(np.percentile(finite_values, 99.0))
+        if upper <= lower:
+            upper = lower + 1.0
+        image.set_clim(lower, upper)
+    axis.set_xlim(first_update, 0)
+    axis.set_ylim(first_doppler_bin, max(last_doppler_bin, first_doppler_bin + 1))
+    range_text = (
+        f" — gate {selected_range_m:.2f} m"
+        if selected_range_m is not None
+        else ""
+    )
+    axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}")
 
 
 def _draw_point_cloud(
@@ -1178,7 +1297,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--display",
-        choices=("none", "range", "range-doppler", "point-cloud"),
+        choices=(
+            "none",
+            "range",
+            "range-doppler",
+            "point-cloud",
+            COMBINED_DISPLAY_MODE,
+        ),
         default="none",
         help="Optional live display mode.",
     )

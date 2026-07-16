@@ -91,6 +91,7 @@ def compute_point_cloud(
     range_axis: Optional[np.ndarray],
     config: RadarDspConfig,
     *,
+    doppler_cube: Optional[np.ndarray] = None,
     max_points: Optional[int] = None,
     false_alarm_rate: float = 1e-2,
     range_guard_cells: int = 2,
@@ -105,8 +106,9 @@ def compute_point_cloud(
     if max_points is not None and max_points <= 0:
         return np.empty((0, 4), dtype=np.float32)
 
-    doppler_fft = compute_range_doppler_fft(range_fft, config)
-    detection_power = np.mean(np.abs(doppler_fft) ** 2, axis=(1, 2))
+    if doppler_cube is None:
+        doppler_cube = compute_range_doppler_fft(range_fft, config)
+    detection_power = np.mean(np.abs(doppler_cube) ** 2, axis=(1, 2))
     if detection_power.size == 0:
         return np.empty((0, 4), dtype=np.float32)
 
@@ -151,7 +153,7 @@ def compute_point_cloud(
     if target_ranges_m.size == 0:
         return np.empty((0, 4), dtype=np.float32)
 
-    virtual_samples = doppler_fft[doppler_bins, :, :, range_bins]
+    virtual_samples = doppler_cube[doppler_bins, :, :, range_bins]
     xyz_m, angle_valid = estimate_xyz_from_virtual_arrays(
         virtual_samples,
         target_ranges_m,
@@ -172,6 +174,81 @@ def compute_point_cloud(
 
     magnitude_db = 10.0 * np.log10(candidate_powers + 1e-12)
     return np.column_stack((xyz_m, magnitude_db)).astype(np.float32, copy=False)
+
+
+def compute_micro_doppler_spectrum(
+    doppler_cube: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    *,
+    target_range_m: Optional[float] = None,
+    range_half_width_bins: int = 2,
+    min_range_m: float = 0.25,
+    max_range_m: float = 10.0,
+) -> tuple[np.ndarray, Optional[float]]:
+    """Return one range-gated Doppler spectrum and its selected range.
+
+    The input layout is [doppler, tx, rx, range]. When no target range is
+    supplied, the range gate follows the strongest non-zero-Doppler return in
+    the requested range interval. Power is combined before converting to dB.
+    """
+    if doppler_cube.ndim != 4:
+        raise ValueError("Doppler cube must have shape [doppler, tx, rx, range]")
+
+    doppler_bins, _tx_count, _rx_count, range_bins = doppler_cube.shape
+    if doppler_bins == 0 or range_bins == 0:
+        return np.empty((0,), dtype=np.float32), None
+
+    power_map = np.sum(np.abs(doppler_cube) ** 2, axis=(1, 2))
+    physical_range_axis = (
+        np.asarray(range_axis, dtype=np.float64)
+        if range_axis is not None and range_axis.size == range_bins
+        else None
+    )
+    valid_ranges = np.ones(range_bins, dtype=bool)
+    if physical_range_axis is not None:
+        valid_ranges &= physical_range_axis >= max(float(min_range_m), 0.0)
+        if max_range_m > 0.0:
+            valid_ranges &= physical_range_axis <= max_range_m
+    else:
+        valid_ranges[0] = False
+
+    if not np.any(valid_ranges):
+        return np.empty((0,), dtype=np.float32), None
+
+    if target_range_m is not None and physical_range_axis is not None:
+        candidate_bins = np.flatnonzero(valid_ranges)
+        center_bin = int(
+            candidate_bins[
+                np.argmin(np.abs(physical_range_axis[candidate_bins] - target_range_m))
+            ]
+        )
+    else:
+        dynamic_power = power_map.copy()
+        zero_doppler_bin = doppler_bins // 2
+        dynamic_power[
+            max(zero_doppler_bin - 1, 0) : min(zero_doppler_bin + 2, doppler_bins),
+            :,
+        ] = 0.0
+        range_scores = np.max(dynamic_power, axis=0)
+        if not np.any(range_scores[valid_ranges] > 0.0):
+            range_scores = np.max(power_map, axis=0)
+        range_scores[~valid_ranges] = -np.inf
+        center_bin = int(np.argmax(range_scores))
+
+    half_width = max(int(range_half_width_bins), 0)
+    gate_start = max(center_bin - half_width, 0)
+    gate_end = min(center_bin + half_width + 1, range_bins)
+    spectrum_power = np.sum(
+        np.abs(doppler_cube[..., gate_start:gate_end]) ** 2,
+        axis=(1, 2, 3),
+    )
+    spectrum_db = 10.0 * np.log10(spectrum_power + 1e-12)
+    selected_range_m = (
+        float(physical_range_axis[center_bin])
+        if physical_range_axis is not None
+        else None
+    )
+    return spectrum_db.astype(np.float32, copy=False), selected_range_m
 
 
 def cluster_point_cloud(

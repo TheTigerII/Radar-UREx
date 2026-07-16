@@ -9,8 +9,8 @@ through `openradar_backend.py`. OS-CFAR uses a local vectorized ordered-window
 implementation to keep up with the live stream. Raw DCA1000 decoding and the
 IWR6843ISK-ODS-specific planar antenna mapping remain local because OpenRadar's
 generic XYZ implementation assumes a different virtual antenna layout.
-All live plots, including the 3D point cloud, run with Matplotlib in the display
-child process.
+All live plots, including the 3D point cloud and combined point-cloud/
+micro-Doppler view, run with Matplotlib in the display child process.
 
 ## Runtime Components
 
@@ -184,6 +184,22 @@ For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and
 RX3. Other layouts fall back to a generic grid. Returned coordinates use
 X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
+
+### Combined point cloud and micro-Doppler
+
+The `point-cloud-micro-doppler` display computes one Doppler cube for each
+display update and reuses it for both outputs. The point-cloud path runs as
+described above. Its strongest point supplies the center of a five-bin range
+gate; when no point is detected, the gate follows the strongest
+non-zero-Doppler range inside the configured range limit.
+
+Power is summed over the gated range bins, TX channels, and RX channels before
+conversion to dB. Each resulting Doppler spectrum is appended to a 150-update
+history in the frame-processing process. Sending the complete history through
+the latest-only display queue prevents GUI queue replacement from creating
+holes in the visible spectrogram. The spectrogram is an automatic strongest-
+target view and may change targets because the current pipeline has no
+persistent tracker.
 
 ## Raw Recording and Logging
 

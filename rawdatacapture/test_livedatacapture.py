@@ -19,6 +19,7 @@ from rawdatacapture.livedatacapture import (
     RadarCaptureConfig,
     _capture_error_counts,
     _draw_point_cloud,
+    _draw_micro_doppler,
     _draw_range_doppler,
     _draw_range_profile,
     _point_cloud_range_limit_m,
@@ -229,6 +230,23 @@ class RangeDisplayBoundsTests(unittest.TestCase):
         )
 
         axis.set_xlim.assert_called_once_with(0.0, 10.0)
+
+
+class MicroDopplerDisplayTests(unittest.TestCase):
+    def test_draw_sets_centered_doppler_and_history_axes(self) -> None:
+        axis = Mock()
+        image = Mock()
+        spectrogram = np.arange(12, dtype=np.float32).reshape(4, 3)
+
+        _draw_micro_doppler(axis, image, spectrogram, 2.5)
+
+        image.set_data.assert_called_once_with(spectrogram)
+        image.set_extent.assert_called_once_with((-2, 0, -2, 1))
+        axis.set_xlim.assert_called_once_with(-2, 0)
+        axis.set_ylim.assert_called_once_with(-2, 1)
+        axis.set_title.assert_called_once_with(
+            "Live Micro-Doppler Spectrogram — gate 2.50 m"
+        )
 
 if __name__ == "__main__":
     unittest.main()

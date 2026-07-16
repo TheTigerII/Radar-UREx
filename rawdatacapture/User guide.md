@@ -38,7 +38,8 @@ Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
 local implementation for real-time performance. The IWR6843ISK-ODS planar-array
 coordinate mapping remains in the local DSP adapter because
 OpenRadar's supplied XYZ helper targets the AWR1843 virtual antenna layout.
-Range, range-Doppler, and 3D point-cloud displays use Matplotlib.
+Range, range-Doppler, and 3D point-cloud displays use Matplotlib. The combined
+point-cloud/micro-Doppler mode shows both plots in one window.
 
 ## Recommended: Integrated Run
 
@@ -67,6 +68,7 @@ python run.py --display none
 python run.py --display range
 python run.py --display range-doppler
 python run.py --display point-cloud
+python run.py --display point-cloud-micro-doppler
 ```
 
 Temporarily zoom a live display to the first 0.5 m with:
@@ -177,6 +179,25 @@ Use `--cluster-eps-m` and `--cluster-min-samples` to tune DBSCAN. Set
 python run.py --display point-cloud --cluster-eps-m 0.4 --cluster-min-samples 3
 ```
 
+### Point cloud with micro-Doppler
+
+```powershell
+python run.py --display point-cloud-micro-doppler
+```
+
+This mode places the 3D point cloud and a rolling 150-update micro-Doppler
+spectrogram side by side. It reuses one Doppler cube for both plots. The
+spectrogram uses a five-range-bin gate centered on the strongest point-cloud
+return. If the point cloud is empty, it selects the strongest non-zero-Doppler
+range inside `--max-range-m`. The current gate range is shown in the
+spectrogram title.
+
+The horizontal spectrogram axis is measured in display updates, with the newest
+column at zero. The vertical axis is centered Doppler bin because velocity is
+not yet calibrated. Automatic gating can switch between targets when multiple
+strong objects are present; it is a visualization aid rather than persistent
+target tracking.
+
 ### Display performance
 
 Display rendering is a separate process and receives only the latest result.
@@ -186,6 +207,9 @@ If processing cannot keep up, reduce display frequency:
 python rawdatacapture\livedatacapture.py `
   --display range-doppler --display-update-every 3 --display-pause 0.05
 ```
+
+The combined display is the most computationally expensive mode. Use
+`--display-update-every 2` or higher if `processing_drops` increases.
 
 Use `--display none` for packet-loss testing or headless operation.
 

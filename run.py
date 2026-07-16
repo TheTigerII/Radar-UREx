@@ -25,7 +25,13 @@ DEFAULT_DURATION_MINUTES = 3.0
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_CLUSTER_EPS_M = 0.5
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
-DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
+DISPLAY_CHOICES = (
+    "none",
+    "range",
+    "range-doppler",
+    "point-cloud",
+    "point-cloud-micro-doppler",
+)
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
 
@@ -110,6 +116,7 @@ def choose_display(display_arg: Optional[str]) -> str:
     print("  2. range")
     print("  3. range-doppler")
     print("  4. point-cloud")
+    print("  5. point-cloud + micro-doppler")
     while True:
         choice = input("Select display type [2]: ").strip()
         if not choice:
@@ -122,7 +129,16 @@ def choose_display(display_arg: Optional[str]) -> str:
             return "range-doppler"
         if choice in {"4", "point-cloud", "point_cloud"}:
             return "point-cloud"
-        print("Choose 1, 2, 3, 4, none, range, range-doppler, or point-cloud.")
+        if choice in {
+            "5",
+            "point-cloud-micro-doppler",
+            "point_cloud_micro_doppler",
+        }:
+            return "point-cloud-micro-doppler"
+        print(
+            "Choose 1, 2, 3, 4, 5, none, range, range-doppler, point-cloud, "
+            "or point-cloud-micro-doppler."
+        )
 
 
 def choose_duration_minutes(duration_arg: Optional[float]) -> float:
