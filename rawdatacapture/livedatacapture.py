@@ -83,7 +83,6 @@ class DCA1000PacketHeader:
 @dataclass
 class CaptureStats:
     packets_received: int = 0
-    payload_bytes_received: int = 0
     frames_emitted: int = 0
     malformed_packets: int = 0
     lost_packets: int = 0
@@ -1074,7 +1073,6 @@ def listen_for_frames(
                 synthetic_byte_count += len(payload)
 
             stats.packets_received += 1
-            stats.payload_bytes_received += len(payload)
 
             for frame in frame_buffer.add_payload(
                 header,

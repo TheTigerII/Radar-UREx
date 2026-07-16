@@ -21,8 +21,8 @@ DEFAULT_RADAR_BAUD = 115200
 DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
-DEFAULT_POINT_CLOUD_DISPLAY_UPDATE_EVERY = 1
 DEFAULT_DURATION_MINUTES = 3.0
+DEFAULT_MAX_RANGE_M = 10.0
 DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
@@ -54,6 +54,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dca-timeout", type=float, default=DEFAULT_DCA_TIMEOUT)
     parser.add_argument("--dca-retries", type=int, default=DEFAULT_DCA_RETRIES)
     parser.add_argument("--display", choices=DISPLAY_CHOICES)
+    parser.add_argument(
+        "--max-range-m",
+        type=float,
+        default=DEFAULT_MAX_RANGE_M,
+        help=(
+            "Maximum range shown by the live display. "
+            "Defaults to 10 m; use 0 for the full computed range."
+        ),
+    )
     parser.add_argument(
         "--duration-minutes",
         type=float,
@@ -274,11 +283,7 @@ def build_capture_command(
 ) -> list[str]:
     display_update_every = args.display_update_every
     if display_update_every is None:
-        display_update_every = (
-            DEFAULT_POINT_CLOUD_DISPLAY_UPDATE_EVERY
-            if display == "point-cloud"
-            else 1
-        )
+        display_update_every = 1
 
     return [
         sys.executable,
@@ -295,6 +300,8 @@ def build_capture_command(
         display,
         "--display-update-every",
         str(max(display_update_every, 1)),
+        "--max-range-m",
+        str(max(args.max_range_m, 0.0)),
         "--raw-output",
         str(raw_output),
     ]

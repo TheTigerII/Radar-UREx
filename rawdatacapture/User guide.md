@@ -69,6 +69,12 @@ python run.py --display range-doppler
 python run.py --display point-cloud
 ```
 
+Temporarily zoom a live display to the first 0.5 m with:
+
+```powershell
+python run.py --display range --max-range-m 0.5
+```
+
 Skip the duration prompt with an explicit value:
 
 ```powershell
@@ -151,7 +157,7 @@ python rawdatacapture\livedatacapture.py --display point-cloud
 ```
 
 The diagnostic point cloud uses OS-CFAR, local-peak filtering, and a virtual
-antenna 2D FFT. It shows at most 50 points within a 10 m radial range and a
+antenna 2D FFT. It shows all detected points within a 10 m radial range and a
 ±60-degree azimuth/elevation field of view. Coordinates are X left/right, Y
 forward, and Z elevation. The plot spans 0 to 10 m forward and approximately
 -8.66 to +8.66 m across X and Z. Color is fixed from 40 to 120 dB. Angle output

@@ -78,7 +78,6 @@ def compute_range_doppler_fft(
     loops = config.num_loops or config.num_chirps_per_frame
     chirps_per_loop = config.num_chirps_per_loop or 1
     if loops * chirps_per_loop != range_fft.shape[0]:
-        loops = range_fft.shape[0]
         chirps_per_loop = 1
 
     return openradar_doppler_fft(
@@ -92,13 +91,13 @@ def compute_point_cloud(
     range_axis: Optional[np.ndarray],
     config: RadarDspConfig,
     *,
-    max_points: int = 50,
-    false_alarm_rate: float = 1e-3,
+    max_points: Optional[int] = None,
+    false_alarm_rate: float = 1e-2,
     range_guard_cells: int = 2,
     doppler_guard_cells: int = 1,
     range_training_cells: int = 4,
     doppler_training_cells: int = 2,
-    min_range_m: float = 0.15,
+    min_range_m: float = 0.25,
     max_range_m: float = 10.0,
     azimuth_fov_deg: float = 60.0,
     elevation_fov_deg: float = 60.0,
@@ -155,7 +154,7 @@ def compute_point_cloud(
         ):
             continue
         points.append((x_m, y_m, z_m, float(magnitude_db)))
-        if len(points) >= max_points:
+        if max_points is not None and len(points) >= max_points:
             break
 
     if not points:
@@ -209,7 +208,6 @@ def local_peak_mask(power_map: np.ndarray) -> np.ndarray:
     if power_map.ndim != 2 or power_map.size == 0:
         return np.zeros_like(power_map, dtype=bool)
 
-    doppler_bins, range_bins = power_map.shape
     peaks = np.ones_like(power_map, dtype=bool)
     for doppler_offset in (-1, 0, 1):
         for range_offset in (-1, 0, 1):

@@ -98,7 +98,6 @@ class RuntimeOptions:
 @dataclass(frozen=True)
 class RadarDeviceSetup:
     device: Optional[str]
-    operating_frequency_ghz: Optional[float]
     control_port: Optional[str]
     baud_rate: Optional[int]
     radar_ss_firmware: Optional[Path]
@@ -307,7 +306,6 @@ class DCA1000UdpClient:
         emit: EmitFunc = print,
     ) -> None:
         self.address = (ip, port)
-        self.timeout_s = timeout_s
         self.retries = max(retries, 0)
         self.emit = emit
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -378,7 +376,7 @@ class DirectUdpDCA1000Control:
             _build_dca1000_packet_payload(config),
         )
 
-    def arm(self, config: StartupConfig) -> None:
+    def arm(self, _config: StartupConfig) -> None:
         self._send(DCA1000Command.RECORD_START)
         self.armed = True
         self.emit("DCA1000 UDP record start acknowledged")
@@ -571,8 +569,7 @@ class SdkCliRadarControl:
         deadline = time.monotonic() + self.options.radar_command_timeout_s
         chunks: list[bytes] = []
         while time.monotonic() < deadline:
-            waiting = getattr(self.serial, "in_waiting", 0)
-            line = self.serial.readline() if waiting else self.serial.readline()
+            line = self.serial.readline()
             if line:
                 chunks.append(line)
                 text = b"".join(chunks).decode("utf-8", errors="replace")
@@ -765,7 +762,6 @@ def _parse_radar_device_setup(setup_json: dict[str, Any]) -> RadarDeviceSetup:
     device_config = _as_mapping(setup_json.get("mmWaveDeviceConfig")) or {}
     return RadarDeviceSetup(
         device=_optional_string(setup_json, "mmWaveDevice"),
-        operating_frequency_ghz=_optional_float(setup_json, "operatingFreq"),
         control_port=_optional_string(device_config, "RS232COMPort"),
         baud_rate=_optional_int(device_config, "RS232BaudRate"),
         radar_ss_firmware=_optional_path(device_config, "radarSSFirmware"),
@@ -1024,11 +1020,6 @@ def _optional_int(data: dict[str, Any], *names: str) -> Optional[int]:
     if isinstance(value, int):
         return value
     return int(str(value).strip(), 0)
-
-
-def _optional_float(data: dict[str, Any], *names: str) -> Optional[float]:
-    value = _optional_value(data, *names)
-    return None if value is None else float(value)
 
 
 def _optional_path(data: dict[str, Any], *names: str) -> Optional[Path]:
