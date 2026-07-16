@@ -34,8 +34,9 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-Live range, Doppler, and CFAR processing uses OpenRadar. The IWR6843ISK-ODS
-planar-array coordinate mapping remains in the local DSP adapter because
+Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
+local implementation for real-time performance. The IWR6843ISK-ODS planar-array
+coordinate mapping remains in the local DSP adapter because
 OpenRadar's supplied XYZ helper targets the AWR1843 virtual antenna layout.
 Range, range-Doppler, and 3D point-cloud displays use Matplotlib.
 

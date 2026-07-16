@@ -5,6 +5,7 @@ import numpy as np
 
 from rawdatacapture.openradar_backend import (
     _os_scale,
+    _os_thresholds_along_axis,
     doppler_fft,
     os_cfar_2d,
     range_fft,
@@ -30,6 +31,37 @@ class OsCfarParameterTests(unittest.TestCase):
 
         self.assertAlmostEqual(actual_pfa, expected_pfa, places=12)
 
+    def test_vectorized_windows_exclude_cut_and_guard_cells(self) -> None:
+        power = np.arange(12, dtype=np.float64)[np.newaxis, :]
+
+        thresholds = _os_thresholds_along_axis(
+            power,
+            axis=1,
+            guard_cells=1,
+            training_cells=2,
+            rank_index=2,
+            scale=1.0,
+        )
+
+        # CUT 5 trains on [2, 3, 7, 8], whose zero-based rank 2 is 7.
+        self.assertEqual(thresholds[0, 5], 7.0)
+        # CUT 0 wraps and trains on [9, 10, 2, 3], whose rank 2 is 9.
+        self.assertEqual(thresholds[0, 0], 9.0)
+
+    def test_vectorized_thresholds_support_doppler_axis(self) -> None:
+        power = np.arange(12, dtype=np.float64)[:, np.newaxis]
+
+        thresholds = _os_thresholds_along_axis(
+            power,
+            axis=0,
+            guard_cells=1,
+            training_cells=2,
+            rank_index=2,
+            scale=1.0,
+        )
+
+        self.assertEqual(thresholds[5, 0], 7.0)
+
 
 @unittest.skipUnless(OPENRADAR_AVAILABLE, "OpenRadar is not installed")
 class OpenRadarBackendTests(unittest.TestCase):
@@ -46,7 +78,7 @@ class OpenRadarBackendTests(unittest.TestCase):
         self.assertEqual(range_cube.shape, (6, 4, 8))
         self.assertEqual(doppler_cube.shape, (2, 3, 4, 8))
 
-    def test_cfar_detects_an_isolated_strong_cell(self) -> None:
+    def test_os_cfar_detects_an_isolated_strong_cell(self) -> None:
         power_map = np.ones((16, 32), dtype=np.float64)
         power_map[8, 16] = 1e8
 

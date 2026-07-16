@@ -21,7 +21,7 @@ DEFAULT_RADAR_BAUD = 115200
 DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
-DEFAULT_POINT_CLOUD_DISPLAY_UPDATE_EVERY = 2
+DEFAULT_POINT_CLOUD_DISPLAY_UPDATE_EVERY = 1
 DEFAULT_DURATION_MINUTES = 3.0
 DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help=(
             "Update the live display every N valid frames. "
-            "Defaults to 2 for point-cloud and 1 for other display modes."
+            "Defaults to 1 for all display modes."
         ),
     )
     parser.add_argument("--capture-dir", type=Path, default=DEFAULT_CAPTURE_DIR)

@@ -4,8 +4,9 @@ This document describes the code currently implemented for live raw ADC capture
 from a TI IWR6843ISK-ODS through a DCA1000EVM. It is an implementation guide,
 not a description of TI UART TLV output or mmWave Studio post-processing.
 
-Range FFT, TDM separation, Doppler FFT, and OS-CFAR use the pinned OpenRadar
-dependency through `openradar_backend.py`. Raw DCA1000 decoding and the
+Range FFT, TDM separation, and Doppler FFT use the pinned OpenRadar dependency
+through `openradar_backend.py`. OS-CFAR uses a local vectorized ordered-window
+implementation to keep up with the live stream. Raw DCA1000 decoding and the
 IWR6843ISK-ODS-specific planar antenna mapping remain local because OpenRadar's
 generic XYZ implementation assumes a different virtual antenna layout.
 All live plots, including the 3D point cloud, run with Matplotlib in the display

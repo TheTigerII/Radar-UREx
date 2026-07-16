@@ -97,7 +97,7 @@ def os_cfar_2d(
     range_training_cells: int,
     doppler_training_cells: int,
 ) -> np.ndarray:
-    """Apply OpenRadar OS-CFAR independently in range and Doppler."""
+    """Apply vectorized OS-CFAR independently in range and Doppler."""
     if power_map.ndim != 2 or power_map.size == 0:
         return np.zeros_like(power_map, dtype=bool)
 
@@ -107,7 +107,6 @@ def os_cfar_2d(
     if range_bins <= 2 * range_margin or doppler_bins <= 2 * doppler_margin:
         return np.zeros_like(power_map, dtype=bool)
 
-    openradar_dsp = _openradar_dsp()
     power = np.maximum(power_map.astype(np.float64), 0.0)
     pfa = min(max(false_alarm_rate, 1e-9), 0.5)
 
@@ -118,39 +117,62 @@ def os_cfar_2d(
         rank = max(1, int(np.ceil(0.75 * total_training_cells)))
         return rank - 1, _os_scale(total_training_cells, rank, pfa)
 
-    def range_threshold(row: np.ndarray) -> np.ndarray:
-        rank, scale = os_parameters(range_training_cells)
-        threshold, _noise = openradar_dsp.os_(
-            row,
-            guard_len=range_guard_cells,
-            noise_len=range_training_cells,
-            k=rank,
-            scale=scale,
-        )
-        return threshold
-
-    def doppler_threshold(column: np.ndarray) -> np.ndarray:
-        rank, scale = os_parameters(doppler_training_cells)
-        threshold, _noise = openradar_dsp.os_(
-            column,
-            guard_len=doppler_guard_cells,
-            noise_len=doppler_training_cells,
-            k=rank,
-            scale=scale,
-        )
-        return threshold
-
-    range_thresholds = np.apply_along_axis(range_threshold, 1, power)
-    doppler_thresholds = np.apply_along_axis(doppler_threshold, 0, power)
-    detections = (power > range_thresholds) & (
-        power > doppler_thresholds
+    range_rank, range_scale = os_parameters(range_training_cells)
+    doppler_rank, doppler_scale = os_parameters(doppler_training_cells)
+    range_thresholds = _os_thresholds_along_axis(
+        power,
+        axis=1,
+        guard_cells=range_guard_cells,
+        training_cells=range_training_cells,
+        rank_index=range_rank,
+        scale=range_scale,
     )
+    doppler_thresholds = _os_thresholds_along_axis(
+        power,
+        axis=0,
+        guard_cells=doppler_guard_cells,
+        training_cells=doppler_training_cells,
+        rank_index=doppler_rank,
+        scale=doppler_scale,
+    )
+    detections = (power > range_thresholds) & (power > doppler_thresholds)
 
-    # OpenRadar OS-CFAR wraps its training window. Range is not cyclic, so keep
-    # edge bins disabled where a complete range training window is unavailable.
+    # Doppler is cyclic. Range uses the same wrapped calculation internally,
+    # then disables cells where a complete non-cyclic window is unavailable.
     detections[:, :range_margin] = False
     detections[:, range_bins - range_margin :] = False
     return detections
+
+
+def _os_thresholds_along_axis(
+    power: np.ndarray,
+    *,
+    axis: int,
+    guard_cells: int,
+    training_cells: int,
+    rank_index: int,
+    scale: float,
+) -> np.ndarray:
+    """Calculate cyclic OS-CFAR thresholds for every cell without Python loops."""
+    offsets = np.concatenate(
+        (
+            np.arange(-guard_cells - training_cells, -guard_cells),
+            np.arange(guard_cells + 1, guard_cells + training_cells + 1),
+        )
+    )
+    axis_size = power.shape[axis]
+    window_indices = (
+        np.arange(axis_size, dtype=np.intp)[:, np.newaxis] + offsets
+    ) % axis_size
+
+    oriented_power = np.moveaxis(power, axis, -1)
+    training_windows = np.take(oriented_power, window_indices, axis=-1)
+    ordered_noise = np.partition(
+        training_windows,
+        rank_index,
+        axis=-1,
+    )[..., rank_index]
+    return np.moveaxis(ordered_noise, -1, axis) * scale
 
 
 def _os_scale(total_training_cells: int, rank: int, pfa: float) -> float:
