@@ -1,8 +1,19 @@
 import importlib.util
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
+from rawdatacapture.dsp import (
+    build_virtual_antenna_grid,
+    build_virtual_antenna_grids,
+    cluster_point_cloud,
+    compute_point_cloud,
+    doppler_peak_mask,
+    estimate_xyz_from_virtual_array,
+    estimate_xyz_from_virtual_arrays,
+)
 from rawdatacapture.openradar_backend import (
     _os_scale,
     _os_thresholds_along_axis,
@@ -13,6 +24,192 @@ from rawdatacapture.openradar_backend import (
 
 
 OPENRADAR_AVAILABLE = importlib.util.find_spec("mmwave") is not None
+
+
+class BatchedAngleFftTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = SimpleNamespace(tx_channel_masks=(1, 4, 2))
+
+    def test_batched_virtual_grids_match_single_cell_mapping(self) -> None:
+        rng = np.random.default_rng(11)
+        samples = (
+            rng.normal(size=(7, 3, 4))
+            + 1j * rng.normal(size=(7, 3, 4))
+        ).astype(np.complex64)
+
+        batched = build_virtual_antenna_grids(samples, self.config)
+        singles = np.stack(
+            [build_virtual_antenna_grid(cell, self.config) for cell in samples]
+        )
+
+        np.testing.assert_array_equal(batched, singles)
+
+    def test_batched_angle_fft_matches_single_cell_results(self) -> None:
+        rng = np.random.default_rng(17)
+        samples = (
+            rng.normal(size=(9, 3, 4))
+            + 1j * rng.normal(size=(9, 3, 4))
+        ).astype(np.complex64)
+        ranges_m = np.linspace(0.25, 2.25, samples.shape[0])
+
+        batched_xyz, batched_valid = estimate_xyz_from_virtual_arrays(
+            samples,
+            ranges_m,
+            self.config,
+        )
+        single_results = [
+            estimate_xyz_from_virtual_array(cell, range_m, self.config)
+            for cell, range_m in zip(samples, ranges_m)
+        ]
+        single_valid = np.asarray([result is not None for result in single_results])
+
+        np.testing.assert_array_equal(batched_valid, single_valid)
+        for index in np.flatnonzero(single_valid):
+            np.testing.assert_allclose(batched_xyz[index], single_results[index])
+
+    def test_zero_virtual_arrays_point_forward(self) -> None:
+        samples = np.zeros((3, 3, 4), dtype=np.complex64)
+        ranges_m = np.asarray((0.25, 1.0, 2.0))
+
+        xyz_m, valid = estimate_xyz_from_virtual_arrays(
+            samples,
+            ranges_m,
+            self.config,
+        )
+
+        np.testing.assert_array_equal(valid, np.ones(3, dtype=bool))
+        np.testing.assert_allclose(
+            xyz_m,
+            np.column_stack((np.zeros(3), ranges_m, np.zeros(3))),
+        )
+
+
+class PointCloudCandidateOrderingTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.config = SimpleNamespace(tx_channel_masks=(1, 4, 2))
+        self.doppler_cube = np.ones((2, 3, 4, 3), dtype=np.complex64)
+        self.doppler_cube[0, :, :, 0] *= 1.0
+        self.doppler_cube[0, :, :, 1] *= 3.0
+        self.doppler_cube[1, :, :, 2] *= 2.0
+        self.detections = np.zeros((2, 3), dtype=bool)
+        self.detections[0, 0] = True
+        self.detections[0, 1] = True
+        self.detections[1, 2] = True
+
+    @staticmethod
+    def _forward_xyz(samples, ranges_m, config):
+        del samples, config
+        return (
+            np.column_stack(
+                (np.zeros(ranges_m.size), ranges_m, np.zeros(ranges_m.size))
+            ),
+            np.ones(ranges_m.size, dtype=bool),
+        )
+
+    def test_unlimited_points_bypass_power_sorting(self) -> None:
+        with (
+            patch(
+                "rawdatacapture.dsp.compute_range_doppler_fft",
+                return_value=self.doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.dsp.os_cfar_2d",
+                return_value=self.detections.copy(),
+            ),
+            patch(
+                "rawdatacapture.dsp.doppler_peak_mask",
+                return_value=np.ones_like(self.detections),
+            ),
+            patch(
+                "rawdatacapture.dsp.estimate_xyz_from_virtual_arrays",
+                side_effect=self._forward_xyz,
+            ),
+            patch("rawdatacapture.dsp.np.argsort") as argsort,
+        ):
+            points = compute_point_cloud(
+                np.empty((0,)),
+                np.asarray((0.25, 0.5, 0.75)),
+                self.config,
+                max_points=None,
+            )
+
+        argsort.assert_not_called()
+        np.testing.assert_allclose(points[:, 1], (0.25, 0.5, 0.75))
+
+    def test_finite_point_cap_keeps_strongest_first(self) -> None:
+        with (
+            patch(
+                "rawdatacapture.dsp.compute_range_doppler_fft",
+                return_value=self.doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.dsp.os_cfar_2d",
+                return_value=self.detections.copy(),
+            ),
+            patch(
+                "rawdatacapture.dsp.doppler_peak_mask",
+                return_value=np.ones_like(self.detections),
+            ),
+            patch(
+                "rawdatacapture.dsp.estimate_xyz_from_virtual_arrays",
+                side_effect=self._forward_xyz,
+            ),
+        ):
+            points = compute_point_cloud(
+                np.empty((0,)),
+                np.asarray((0.25, 0.5, 0.75)),
+                self.config,
+                max_points=2,
+            )
+
+        np.testing.assert_allclose(points[:, 1], (0.5, 0.75))
+
+
+class DopplerPeakMaskTests(unittest.TestCase):
+    def test_preserves_adjacent_range_peaks(self) -> None:
+        power = np.ones((5, 4), dtype=np.float64)
+        power[2, 1] = 10.0
+        power[2, 2] = 9.0
+
+        peaks = doppler_peak_mask(power)
+
+        self.assertTrue(peaks[2, 1])
+        self.assertTrue(peaks[2, 2])
+
+    def test_rejects_weaker_cyclic_doppler_neighbor(self) -> None:
+        power = np.ones((5, 1), dtype=np.float64)
+        power[0, 0] = 2.0
+        power[-1, 0] = 3.0
+
+        peaks = doppler_peak_mask(power)
+
+        self.assertFalse(peaks[0, 0])
+        self.assertTrue(peaks[-1, 0])
+
+
+class PointCloudClusteringTests(unittest.TestCase):
+    def test_dbscan_returns_cluster_centers_and_ignores_noise(self) -> None:
+        points = np.asarray(
+            (
+                (0.0, 1.0, 0.0, 50.0),
+                (0.1, 1.1, 0.0, 55.0),
+                (3.0, 3.0, 0.0, 60.0),
+            ),
+            dtype=np.float32,
+        )
+
+        clusters = cluster_point_cloud(points, eps_m=0.25, min_samples=2)
+
+        self.assertEqual(clusters.shape, (1, 4))
+        np.testing.assert_allclose(clusters[0, :3], (0.05, 1.05, 0.0))
+        self.assertEqual(clusters[0, 3], 2.0)
+
+    def test_zero_radius_disables_clustering(self) -> None:
+        points = np.ones((2, 4), dtype=np.float32)
+
+        clusters = cluster_point_cloud(points, eps_m=0.0)
+
+        self.assertEqual(clusters.shape, (0, 4))
 
 
 class OsCfarParameterTests(unittest.TestCase):

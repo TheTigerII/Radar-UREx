@@ -13,6 +13,7 @@ import numpy as np
 
 try:
     from .dsp import (
+        cluster_point_cloud,
         compute_range_doppler_heatmap,
         compute_point_cloud,
         compute_range_fft,
@@ -24,6 +25,7 @@ try:
     )
 except ImportError:
     from dsp import (
+        cluster_point_cloud,
         compute_range_doppler_heatmap,
         compute_point_cloud,
         compute_range_fft,
@@ -49,6 +51,8 @@ DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
+DEFAULT_CLUSTER_EPS_M = 0.5
+DEFAULT_CLUSTER_MIN_SAMPLES = 2
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -476,6 +480,8 @@ class DisplayPayloadSink:
         config: RadarCaptureConfig,
         max_range_m: float = DEFAULT_MAX_RANGE_M,
         point_cloud_fov_deg: float = DEFAULT_POINT_CLOUD_FOV_DEG,
+        cluster_eps_m: float = DEFAULT_CLUSTER_EPS_M,
+        cluster_min_samples: int = DEFAULT_CLUSTER_MIN_SAMPLES,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -483,6 +489,8 @@ class DisplayPayloadSink:
         self.config = config
         self.max_range_m = max(float(max_range_m), 0.0)
         self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
+        self.cluster_eps_m = max(float(cluster_eps_m), 0.0)
+        self.cluster_min_samples = max(int(cluster_min_samples), 1)
         self.frame_count = 0
 
     def update(
@@ -511,15 +519,21 @@ class DisplayPayloadSink:
                 compute_range_doppler_heatmap(range_fft, self.config),
             )
         elif self.mode == "point-cloud":
+            points = compute_point_cloud(
+                range_fft,
+                range_axis_m,
+                self.config,
+                max_range_m=self.max_range_m,
+                azimuth_fov_deg=self.point_cloud_fov_deg,
+                elevation_fov_deg=self.point_cloud_fov_deg,
+            )
             payload = (
                 frame_first_byte_at_s,
-                compute_point_cloud(
-                    range_fft,
-                    range_axis_m,
-                    self.config,
-                    max_range_m=self.max_range_m,
-                    azimuth_fov_deg=self.point_cloud_fov_deg,
-                    elevation_fov_deg=self.point_cloud_fov_deg,
+                points,
+                cluster_point_cloud(
+                    points,
+                    eps_m=self.cluster_eps_m,
+                    min_samples=self.cluster_min_samples,
                 ),
             )
         else:
@@ -682,6 +696,7 @@ def _run_display_process(
     line = None
     image = None
     scatter = None
+    cluster_scatter = None
 
     if mode == "range":
         line = axis.plot([], [], lw=1.5)[0]
@@ -703,6 +718,16 @@ def _run_display_process(
     elif mode == "point-cloud":
         scatter = axis.scatter([], [], [], c=[], s=18, cmap="viridis")
         scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
+        cluster_scatter = axis.scatter(
+            [],
+            [],
+            [],
+            c="red",
+            marker="x",
+            s=70,
+            linewidths=2,
+            label="Cluster centers",
+        )
         figure.colorbar(scatter, ax=axis, label="Magnitude (dB)", pad=0.12)
         axis.set_title(
             "Live 3D Point Cloud "
@@ -714,6 +739,7 @@ def _run_display_process(
         _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
         axis.view_init(elev=24, azim=-60)
         axis.grid(True, alpha=0.3)
+        axis.legend(loc="upper right")
     figure.tight_layout()
     plt.show(block=False)
 
@@ -739,12 +765,18 @@ def _run_display_process(
                 elif mode == "range-doppler" and image is not None:
                     frame_first_byte_at_s, range_axis_m, heatmap = payload
                     _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
-                elif mode == "point-cloud" and scatter is not None:
-                    frame_first_byte_at_s, points = payload
+                elif (
+                    mode == "point-cloud"
+                    and scatter is not None
+                    and cluster_scatter is not None
+                ):
+                    frame_first_byte_at_s, points, clusters = payload
                     _draw_point_cloud(
                         axis,
                         scatter,
+                        cluster_scatter,
                         points,
+                        clusters,
                         point_cloud_range_m,
                         point_cloud_fov_deg,
                     )
@@ -809,7 +841,9 @@ def _draw_range_doppler(
 def _draw_point_cloud(
     axis: Any,
     scatter: Any,
+    cluster_scatter: Any,
     points: np.ndarray,
+    clusters: np.ndarray,
     point_cloud_range_m: float,
     point_cloud_fov_deg: float,
 ) -> None:
@@ -823,6 +857,19 @@ def _draw_point_cloud(
         scatter.set_clim(
             POINT_CLOUD_MAGNITUDE_DB_MIN,
             POINT_CLOUD_MAGNITUDE_DB_MAX,
+        )
+
+    if clusters.size == 0:
+        cluster_scatter._offsets3d = (empty, empty, empty)
+        cluster_scatter.set_sizes(empty)
+    else:
+        cluster_scatter._offsets3d = (
+            clusters[:, 0],
+            clusters[:, 1],
+            clusters[:, 2],
+        )
+        cluster_scatter.set_sizes(
+            np.clip(40.0 + (clusters[:, 3] * 10.0), 50.0, 180.0)
         )
 
     _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
@@ -952,6 +999,8 @@ def _run_frame_processor(
     display_update_every: int,
     max_range_m: float,
     point_cloud_fov_deg: float,
+    cluster_eps_m: float,
+    cluster_min_samples: int,
 ) -> None:
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
@@ -964,6 +1013,8 @@ def _run_frame_processor(
         config,
         max_range_m,
         point_cloud_fov_deg,
+        cluster_eps_m,
+        cluster_min_samples,
     )
 
     try:
@@ -1218,6 +1269,21 @@ def parse_args() -> argparse.Namespace:
             "Point-cloud azimuth/elevation half-FOV in degrees. "
             "Defaults to ±60 degrees."
         ),
+    )
+    parser.add_argument(
+        "--cluster-eps-m",
+        type=float,
+        default=DEFAULT_CLUSTER_EPS_M,
+        help=(
+            "DBSCAN XYZ neighborhood radius in meters for point-cloud clustering. "
+            "Defaults to 0.5 m; use 0 to disable clustering."
+        ),
+    )
+    parser.add_argument(
+        "--cluster-min-samples",
+        type=int,
+        default=DEFAULT_CLUSTER_MIN_SAMPLES,
+        help="Minimum points required for a DBSCAN cluster. Defaults to 2.",
     )
     return parser.parse_args()
 
@@ -1715,6 +1781,8 @@ def main() -> None:
                 args.display_update_every,
                 args.max_range_m,
                 args.point_cloud_fov_deg,
+                args.cluster_eps_m,
+                args.cluster_min_samples,
             ),
             name="RadarFrameProcessor",
         )

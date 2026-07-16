@@ -23,6 +23,8 @@ DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
 DEFAULT_DURATION_MINUTES = 3.0
 DEFAULT_MAX_RANGE_M = 10.0
+DEFAULT_CLUSTER_EPS_M = 0.5
+DEFAULT_CLUSTER_MIN_SAMPLES = 2
 DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
@@ -62,6 +64,21 @@ def parse_args() -> argparse.Namespace:
             "Maximum range shown by the live display. "
             "Defaults to 10 m; use 0 for the full computed range."
         ),
+    )
+    parser.add_argument(
+        "--cluster-eps-m",
+        type=float,
+        default=DEFAULT_CLUSTER_EPS_M,
+        help=(
+            "DBSCAN XYZ neighborhood radius for point-cloud clustering. "
+            "Defaults to 0.5 m; use 0 to disable clustering."
+        ),
+    )
+    parser.add_argument(
+        "--cluster-min-samples",
+        type=int,
+        default=DEFAULT_CLUSTER_MIN_SAMPLES,
+        help="Minimum points required for a DBSCAN cluster. Defaults to 2.",
     )
     parser.add_argument(
         "--duration-minutes",
@@ -302,6 +319,10 @@ def build_capture_command(
         str(max(display_update_every, 1)),
         "--max-range-m",
         str(max(args.max_range_m, 0.0)),
+        "--cluster-eps-m",
+        str(max(args.cluster_eps_m, 0.0)),
+        "--cluster-min-samples",
+        str(max(args.cluster_min_samples, 1)),
         "--raw-output",
         str(raw_output),
     ]

@@ -102,6 +102,9 @@ def compute_point_cloud(
     azimuth_fov_deg: float = 60.0,
     elevation_fov_deg: float = 60.0,
 ) -> np.ndarray:
+    if max_points is not None and max_points <= 0:
+        return np.empty((0, 4), dtype=np.float32)
+
     doppler_fft = compute_range_doppler_fft(range_fft, config)
     detection_power = np.mean(np.abs(doppler_fft) ** 2, axis=(1, 2))
     if detection_power.size == 0:
@@ -115,51 +118,90 @@ def compute_point_cloud(
         range_training_cells=range_training_cells,
         doppler_training_cells=doppler_training_cells,
     )
-    detections &= local_peak_mask(detection_power)
+    detections &= doppler_peak_mask(detection_power)
     detections = _apply_min_range_gate(detections, range_axis, min_range_m)
 
     candidate_indices = np.argwhere(detections)
     if candidate_indices.size == 0:
         return np.empty((0, 4), dtype=np.float32)
 
-    candidate_powers = detection_power[candidate_indices[:, 0], candidate_indices[:, 1]]
-    order = np.argsort(candidate_powers)[::-1]
+    doppler_bins = candidate_indices[:, 0]
+    range_bins = candidate_indices[:, 1]
+    candidate_powers = detection_power[doppler_bins, range_bins]
 
-    points = []
-    for candidate_index in order:
-        doppler_bin, range_bin = candidate_indices[candidate_index]
-        magnitude_db = 10.0 * np.log10(candidate_powers[candidate_index] + 1e-12)
-        if range_axis is not None and range_axis.size == detection_power.shape[1]:
-            target_range_m = float(range_axis[range_bin])
-        else:
-            target_range_m = float(range_bin)
+    # Unlimited displays do not need strongest-first ordering. Retain it only
+    # when a finite point cap makes candidate priority observable.
+    if max_points is not None:
+        order = np.argsort(candidate_powers)[::-1]
+        doppler_bins = doppler_bins[order]
+        range_bins = range_bins[order]
+        candidate_powers = candidate_powers[order]
 
-        if max_range_m > 0.0 and target_range_m > max_range_m:
-            continue
+    if range_axis is not None and range_axis.size == detection_power.shape[1]:
+        target_ranges_m = np.asarray(range_axis[range_bins], dtype=np.float64)
+    else:
+        target_ranges_m = range_bins.astype(np.float64)
 
-        xyz_m = estimate_xyz_from_virtual_array(
-            doppler_fft[int(doppler_bin), :, :, int(range_bin)],
-            target_range_m,
-            config,
-        )
-        if xyz_m is None:
-            continue
-        x_m, y_m, z_m = xyz_m
-        if not _point_is_within_fov(
-            x_m,
-            y_m,
-            z_m,
-            azimuth_fov_deg=azimuth_fov_deg,
-            elevation_fov_deg=elevation_fov_deg,
-        ):
-            continue
-        points.append((x_m, y_m, z_m, float(magnitude_db)))
-        if max_points is not None and len(points) >= max_points:
-            break
-
-    if not points:
+    if max_range_m > 0.0:
+        in_range = target_ranges_m <= max_range_m
+        doppler_bins = doppler_bins[in_range]
+        range_bins = range_bins[in_range]
+        candidate_powers = candidate_powers[in_range]
+        target_ranges_m = target_ranges_m[in_range]
+    if target_ranges_m.size == 0:
         return np.empty((0, 4), dtype=np.float32)
-    return np.asarray(points, dtype=np.float32)
+
+    virtual_samples = doppler_fft[doppler_bins, :, :, range_bins]
+    xyz_m, angle_valid = estimate_xyz_from_virtual_arrays(
+        virtual_samples,
+        target_ranges_m,
+        config,
+    )
+    valid = angle_valid & _points_are_within_fov(
+        xyz_m,
+        azimuth_fov_deg=azimuth_fov_deg,
+        elevation_fov_deg=elevation_fov_deg,
+    )
+    xyz_m = xyz_m[valid]
+    candidate_powers = candidate_powers[valid]
+    if max_points is not None:
+        xyz_m = xyz_m[:max_points]
+        candidate_powers = candidate_powers[:max_points]
+    if xyz_m.size == 0:
+        return np.empty((0, 4), dtype=np.float32)
+
+    magnitude_db = 10.0 * np.log10(candidate_powers + 1e-12)
+    return np.column_stack((xyz_m, magnitude_db)).astype(np.float32, copy=False)
+
+
+def cluster_point_cloud(
+    points: np.ndarray,
+    *,
+    eps_m: float = 0.5,
+    min_samples: int = 2,
+) -> np.ndarray:
+    """Return DBSCAN cluster centers as [x, y, z, point_count]."""
+    if points.ndim != 2 or (points.size and points.shape[1] < 3):
+        raise ValueError("Point cloud must have shape [point, at least 3 values]")
+    if points.size == 0 or eps_m <= 0.0:
+        return np.empty((0, 4), dtype=np.float32)
+    if min_samples < 1:
+        raise ValueError("DBSCAN min_samples must be at least 1")
+
+    from sklearn.cluster import DBSCAN
+
+    labels = DBSCAN(eps=float(eps_m), min_samples=int(min_samples)).fit_predict(
+        points[:, :3]
+    )
+    centers = []
+    for label in sorted(set(int(label) for label in labels if label >= 0)):
+        members = points[labels == label, :3]
+        center = members.mean(axis=0)
+        centers.append((center[0], center[1], center[2], members.shape[0]))
+
+    if not centers:
+        return np.empty((0, 4), dtype=np.float32)
+    return np.asarray(centers, dtype=np.float32)
 
 
 def _point_is_within_fov(
@@ -171,17 +213,34 @@ def _point_is_within_fov(
     elevation_fov_deg: float,
 ) -> bool:
     """Gate XYZ coordinates using the array's azimuth/elevation direction cosines."""
-    range_m = float(np.sqrt(x_m**2 + y_m**2 + z_m**2))
-    if range_m <= 0.0:
-        return True
+    point = np.asarray(((x_m, y_m, z_m),), dtype=np.float64)
+    return bool(
+        _points_are_within_fov(
+            point,
+            azimuth_fov_deg=azimuth_fov_deg,
+            elevation_fov_deg=elevation_fov_deg,
+        )[0]
+    )
 
+
+def _points_are_within_fov(
+    xyz_m: np.ndarray,
+    *,
+    azimuth_fov_deg: float,
+    elevation_fov_deg: float,
+) -> np.ndarray:
+    """Vectorized FOV gate for an [point, xyz] array."""
+    ranges_m = np.linalg.norm(xyz_m, axis=1)
+    nonzero = ranges_m > 0.0
+    safe_ranges_m = np.where(nonzero, ranges_m, 1.0)
     azimuth_limit = np.sin(np.deg2rad(np.clip(azimuth_fov_deg, 0.0, 90.0)))
     elevation_limit = np.sin(np.deg2rad(np.clip(elevation_fov_deg, 0.0, 90.0)))
     tolerance = 1e-9
-    return (
-        abs(x_m / range_m) <= azimuth_limit + tolerance
-        and abs(z_m / range_m) <= elevation_limit + tolerance
+    within = (
+        (np.abs(xyz_m[:, 0] / safe_ranges_m) <= azimuth_limit + tolerance)
+        & (np.abs(xyz_m[:, 2] / safe_ranges_m) <= elevation_limit + tolerance)
     )
+    return ~nonzero | within
 
 
 def os_cfar_2d(
@@ -204,28 +263,14 @@ def os_cfar_2d(
     )
 
 
-def local_peak_mask(power_map: np.ndarray) -> np.ndarray:
+def doppler_peak_mask(power_map: np.ndarray) -> np.ndarray:
+    """Keep cells that are not weaker than either cyclic Doppler neighbor."""
     if power_map.ndim != 2 or power_map.size == 0:
         return np.zeros_like(power_map, dtype=bool)
 
-    peaks = np.ones_like(power_map, dtype=bool)
-    for doppler_offset in (-1, 0, 1):
-        for range_offset in (-1, 0, 1):
-            if doppler_offset == 0 and range_offset == 0:
-                continue
-            shifted = np.roll(power_map, shift=doppler_offset, axis=0)
-            if range_offset < 0:
-                neighbor = np.empty_like(power_map)
-                neighbor[:, :-1] = shifted[:, 1:]
-                neighbor[:, -1] = -np.inf
-            elif range_offset > 0:
-                neighbor = np.empty_like(power_map)
-                neighbor[:, 1:] = shifted[:, :-1]
-                neighbor[:, 0] = -np.inf
-            else:
-                neighbor = shifted
-            peaks &= power_map >= neighbor
-    return peaks
+    previous_doppler = np.roll(power_map, shift=1, axis=0)
+    next_doppler = np.roll(power_map, shift=-1, axis=0)
+    return (power_map >= previous_doppler) & (power_map >= next_doppler)
 
 
 def _apply_min_range_gate(
@@ -255,53 +300,95 @@ def estimate_xyz_from_virtual_array(
     The returned coordinate system is x=left/right, y=forward range, z=elevation.
     This is an uncalibrated planar-array estimate intended for live visualization.
     """
-    virtual_array = build_virtual_antenna_grid(virtual_samples, config)
+    xyz_m, valid = estimate_xyz_from_virtual_arrays(
+        virtual_samples[np.newaxis, ...],
+        np.asarray((target_range_m,)),
+        config,
+        angle_fft_size=angle_fft_size,
+    )
+    if not valid[0]:
+        return None
+    return tuple(float(value) for value in xyz_m[0])
+
+
+def estimate_xyz_from_virtual_arrays(
+    virtual_samples: np.ndarray,
+    target_ranges_m: np.ndarray,
+    config: RadarDspConfig,
+    *,
+    angle_fft_size: int = 32,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate XYZ for many range-Doppler cells with one batched 2D FFT."""
+    virtual_arrays = build_virtual_antenna_grids(virtual_samples, config)
+    target_ranges_m = np.asarray(target_ranges_m, dtype=np.float64)
+    if target_ranges_m.shape != (virtual_arrays.shape[0],):
+        raise ValueError("Target ranges must contain one value per virtual array")
+
     angle_response = np.fft.fftshift(
-        np.fft.fft2(virtual_array, s=(angle_fft_size, angle_fft_size)),
+        np.fft.fft2(
+            virtual_arrays,
+            s=(angle_fft_size, angle_fft_size),
+            axes=(-2, -1),
+        ),
+        axes=(-2, -1),
     )
     magnitude = np.abs(angle_response)
-    if not np.any(magnitude):
-        return 0.0, max(target_range_m, 0.0), 0.0
-
-    elevation_bin, azimuth_bin = np.unravel_index(
-        int(np.argmax(magnitude)),
-        magnitude.shape,
-    )
-    azimuth_u = _spatial_bin_to_direction_cosine(azimuth_bin, angle_fft_size)
-    elevation_u = _spatial_bin_to_direction_cosine(elevation_bin, angle_fft_size)
+    has_signal = np.any(magnitude, axis=(-2, -1))
+    peak_indices = np.argmax(magnitude.reshape(magnitude.shape[0], -1), axis=1)
+    elevation_bins, azimuth_bins = np.divmod(peak_indices, angle_fft_size)
+    azimuth_u = _spatial_bins_to_direction_cosines(azimuth_bins, angle_fft_size)
+    elevation_u = _spatial_bins_to_direction_cosines(elevation_bins, angle_fft_size)
+    azimuth_u = np.where(has_signal, azimuth_u, 0.0)
+    elevation_u = np.where(has_signal, elevation_u, 0.0)
 
     direction_norm_sq = azimuth_u**2 + elevation_u**2
-    if direction_norm_sq > 1.0:
-        return None
-
-    radial_scale = (1.0 - direction_norm_sq) ** 0.5
-    x_m = target_range_m * azimuth_u
-    z_m = -target_range_m * elevation_u
-    y_m = target_range_m * radial_scale
-    return float(x_m), float(y_m), float(z_m)
+    valid = direction_norm_sq <= 1.0
+    radial_scale = np.sqrt(np.maximum(0.0, 1.0 - direction_norm_sq))
+    ranges_m = np.maximum(target_ranges_m, 0.0)
+    xyz_m = np.column_stack(
+        (
+            ranges_m * azimuth_u,
+            ranges_m * radial_scale,
+            -ranges_m * elevation_u,
+        )
+    )
+    return xyz_m, valid
 
 
 def build_virtual_antenna_grid(
     virtual_samples: np.ndarray,
     config: RadarDspConfig,
 ) -> np.ndarray:
-    chirps_per_loop = virtual_samples.shape[0]
-    rx_count = virtual_samples.shape[1]
+    return build_virtual_antenna_grids(virtual_samples[np.newaxis, ...], config)[0]
+
+
+def build_virtual_antenna_grids(
+    virtual_samples: np.ndarray,
+    config: RadarDspConfig,
+) -> np.ndarray:
+    """Map [point, tx chirp, rx] samples into planar virtual-array grids."""
+    if virtual_samples.ndim != 3:
+        raise ValueError("Virtual samples must have shape [point, tx chirp, rx]")
+
+    point_count, chirps_per_loop, rx_count = virtual_samples.shape
     tx_indices = _tx_indices_for_chirps(config, chirps_per_loop)
-    ods_grid = _build_iwr6843isk_ods_virtual_antenna_grid(
+    ods_grids = _build_iwr6843isk_ods_virtual_antenna_grids(
         virtual_samples,
         tx_indices,
         rx_count,
     )
-    if ods_grid is not None:
-        return ods_grid
+    if ods_grids is not None:
+        return ods_grids
 
     elevation_size = max(max(tx_indices, default=0) + 1, chirps_per_loop)
-    grid = np.zeros((elevation_size, rx_count), dtype=np.complex64)
+    grids = np.zeros(
+        (point_count, elevation_size, rx_count),
+        dtype=np.complex64,
+    )
 
     for chirp_index, tx_index in enumerate(tx_indices[:chirps_per_loop]):
-        grid[tx_index, :rx_count] = virtual_samples[chirp_index, :rx_count]
-    return grid
+        grids[:, tx_index, :rx_count] = virtual_samples[:, chirp_index, :rx_count]
+    return grids
 
 
 def _tx_indices_for_chirps(
@@ -319,13 +406,17 @@ def _tx_indices_for_chirps(
     return list(range(chirps_per_loop))
 
 
-def _spatial_bin_to_direction_cosine(bin_index: int, fft_size: int) -> float:
-    # For half-wavelength antenna spacing, direction cosine is 2 * FFT frequency.
-    direction_cosine = 2.0 * ((bin_index - (fft_size // 2)) / float(fft_size))
-    return float(np.clip(direction_cosine, -1.0, 1.0))
+def _spatial_bins_to_direction_cosines(
+    bin_indices: np.ndarray,
+    fft_size: int,
+) -> np.ndarray:
+    direction_cosines = 2.0 * (
+        (bin_indices - (fft_size // 2)) / float(fft_size)
+    )
+    return np.clip(direction_cosines, -1.0, 1.0)
 
 
-def _build_iwr6843isk_ods_virtual_antenna_grid(
+def _build_iwr6843isk_ods_virtual_antenna_grids(
     virtual_samples: np.ndarray,
     tx_indices: list[int],
     rx_count: int,
@@ -360,14 +451,15 @@ def _build_iwr6843isk_ods_virtual_antenna_grid(
         4: 1.0,
     }
 
-    grid = np.zeros((4, 4), dtype=np.complex64)
-    for chirp_index, tx_number in enumerate(tx_numbers[: virtual_samples.shape[0]]):
+    grids = np.zeros((virtual_samples.shape[0], 4, 4), dtype=np.complex64)
+    for chirp_index, tx_number in enumerate(tx_numbers[: virtual_samples.shape[1]]):
         for rx_number in range(1, rx_count + 1):
             row, col = positions[(tx_number, rx_number)]
-            grid[row, col] = (
-                rx_phase[rx_number] * virtual_samples[chirp_index, rx_number - 1]
+            grids[:, row, col] = (
+                rx_phase[rx_number]
+                * virtual_samples[:, chirp_index, rx_number - 1]
             )
-    return grid
+    return grids
 
 
 def frame_bytes_to_radar_cube(

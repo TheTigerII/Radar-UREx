@@ -156,15 +156,26 @@ and receivers.
 python rawdatacapture\livedatacapture.py --display point-cloud
 ```
 
-The diagnostic point cloud uses OS-CFAR, local-peak filtering, and a virtual
-antenna 2D FFT. It shows all detected points within a 10 m radial range and a
-±60-degree azimuth/elevation field of view. Coordinates are X left/right, Y
+The diagnostic point cloud uses OS-CFAR, Doppler-only peak filtering, and a
+batched virtual antenna 2D FFT. It shows all detected points within a 10 m
+radial range and a ±60-degree azimuth/elevation field of view. Spatial DBSCAN
+runs after XYZ
+generation with a default 0.5 m neighborhood and two-point minimum. Original
+points remain visible, while red crosses mark cluster centers and cross size
+indicates the number of cluster members. Coordinates are X left/right, Y
 forward, and Z elevation. The plot spans 0 to 10 m forward and approximately
--8.66 to +8.66 m across X and Z. Color is fixed from 40 to 120 dB. Angle output
-is not calibrated.
+-8.66 to +8.66 m across X and Z. Point color is fixed from 40 to 120 dB. Angle
+output is not calibrated.
 
 Use `--max-range-m` to change the shared range limit for any display, and use
 `--point-cloud-fov-deg` to change the point-cloud half-FOV.
+
+Use `--cluster-eps-m` and `--cluster-min-samples` to tune DBSCAN. Set
+`--cluster-eps-m 0` to disable cluster-center generation:
+
+```powershell
+python run.py --display point-cloud --cluster-eps-m 0.4 --cluster-min-samples 3
+```
 
 ### Display performance
 

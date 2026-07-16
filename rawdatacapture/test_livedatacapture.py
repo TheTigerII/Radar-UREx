@@ -8,11 +8,14 @@ from rawdatacapture.dsp import _point_is_within_fov
 
 from rawdatacapture.livedatacapture import (
     CaptureStats,
+    DEFAULT_CLUSTER_EPS_M,
+    DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
     DEFAULT_POINT_CLOUD_FOV_DEG,
     DCA1000PacketHeader,
     FrameBuffer,
     RadarCaptureConfig,
+    _draw_point_cloud,
     _draw_range_doppler,
     _draw_range_profile,
     _point_cloud_range_limit_m,
@@ -55,6 +58,8 @@ class PointCloudBoundsTests(unittest.TestCase):
     def test_display_defaults_are_ten_meters_and_sixty_degrees(self) -> None:
         self.assertEqual(DEFAULT_MAX_RANGE_M, 10.0)
         self.assertEqual(DEFAULT_POINT_CLOUD_FOV_DEG, 60.0)
+        self.assertEqual(DEFAULT_CLUSTER_EPS_M, 0.5)
+        self.assertEqual(DEFAULT_CLUSTER_MIN_SAMPLES, 2)
 
     def test_point_cloud_axes_match_ten_meter_sixty_degree_fov(self) -> None:
         axis = Mock()
@@ -110,6 +115,29 @@ class PointCloudBoundsTests(unittest.TestCase):
         assert limit_m is not None
         assert range_axis_m is not None
         self.assertGreater(limit_m, float(range_axis_m[-1]))
+
+    def test_draw_updates_points_and_cluster_centers(self) -> None:
+        axis = Mock()
+        scatter = Mock()
+        cluster_scatter = Mock()
+        points = np.asarray(((1.0, 2.0, 3.0, 50.0),), dtype=np.float32)
+        clusters = np.asarray(((1.0, 2.0, 3.0, 2.0),), dtype=np.float32)
+
+        _draw_point_cloud(
+            axis,
+            scatter,
+            cluster_scatter,
+            points,
+            clusters,
+            10.0,
+            60.0,
+        )
+
+        for actual, expected in zip(scatter._offsets3d, points[:, :3].T):
+            np.testing.assert_array_equal(actual, expected)
+        for actual, expected in zip(cluster_scatter._offsets3d, clusters[:, :3].T):
+            np.testing.assert_array_equal(actual, expected)
+        cluster_scatter.set_sizes.assert_called_once()
 
 
 class RangeDisplayBoundsTests(unittest.TestCase):

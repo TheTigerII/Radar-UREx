@@ -167,11 +167,16 @@ The point-cloud path:
 
 1. Forms mean range-Doppler power.
 2. Runs two-dimensional OS-CFAR with Doppler wrapping.
-3. Keeps local peaks and removes detections below 0.25 m.
+3. Keeps Doppler-local peaks without suppressing adjacent range detections, then
+   removes detections below 0.25 m.
 4. Rejects detections beyond 10 m.
-5. Estimates direction using a 32-by-32 2D FFT of a virtual antenna grid.
+5. Maps all candidate cells into virtual antenna grids and estimates their
+   directions with one batched 32-by-32 2D FFT. Unlimited point-cloud output
+   preserves detection order and skips the unnecessary power sort.
 6. Applies ±60-degree azimuth and elevation gates and keeps all in-FOV
    detections.
+7. Runs spatial DBSCAN on XYZ points and sends both the original points and
+   cluster centers to the display process.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and
