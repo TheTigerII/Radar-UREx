@@ -1,4 +1,5 @@
 import math
+import queue
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -10,16 +11,21 @@ from rawdatacapture.dsp import _point_is_within_fov
 from rawdatacapture.livedatacapture import (
     CaptureStats,
     CapturedFrame,
+    COMBINED_DISPLAY_MODE,
     DEFAULT_CLUSTER_EPS_M,
     DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
     DEFAULT_POINT_CLOUD_FOV_DEG,
     DCA1000PacketHeader,
+    DisplayPayloadSink,
     FrameBuffer,
     RadarCaptureConfig,
+    SingleTargetTracker,
+    TargetTrack,
     _capture_error_counts,
     _draw_point_cloud,
     _draw_micro_doppler,
+    _point_cloud_track_candidates,
     _draw_range_doppler,
     _draw_range_profile,
     _point_cloud_range_limit_m,
@@ -198,6 +204,157 @@ class PointCloudBoundsTests(unittest.TestCase):
         for actual, expected in zip(cluster_scatter._offsets3d, clusters[:, :3].T):
             np.testing.assert_array_equal(actual, expected)
         cluster_scatter.set_sizes.assert_called_once()
+
+    def test_draw_updates_tracked_target_marker(self) -> None:
+        axis = Mock()
+        scatter = Mock()
+        cluster_scatter = Mock()
+        target_scatter = Mock()
+        track = TargetTrack(
+            position_m=(1.0, 2.0, 3.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=4,
+            hits=3,
+            missed_updates=0,
+            confirmed=True,
+        )
+
+        _draw_point_cloud(
+            axis,
+            scatter,
+            cluster_scatter,
+            np.empty((0, 4), dtype=np.float32),
+            np.empty((0, 4), dtype=np.float32),
+            10.0,
+            60.0,
+            target_scatter,
+            track,
+        )
+
+        np.testing.assert_array_equal(target_scatter._offsets3d[0], (1.0,))
+        np.testing.assert_array_equal(target_scatter._offsets3d[1], (2.0,))
+        np.testing.assert_array_equal(target_scatter._offsets3d[2], (3.0,))
+        target_scatter.set_alpha.assert_called_once_with(1.0)
+
+
+class SingleTargetTrackerTests(unittest.TestCase):
+    @staticmethod
+    def _candidates(*rows: tuple[float, float, float, float]) -> np.ndarray:
+        return np.asarray(rows, dtype=np.float32).reshape((-1, 4))
+
+    def test_acquires_strongest_then_follows_nearest_candidate(self) -> None:
+        tracker = SingleTargetTracker(
+            association_distance_m=0.5,
+            confirmation_hits=2,
+            position_gain=1.0,
+            velocity_gain=0.0,
+        )
+
+        first = tracker.update(
+            self._candidates((0.0, 2.0, 0.0, 80.0), (3.0, 3.0, 0.0, 60.0))
+        )
+        second = tracker.update(
+            self._candidates((0.1, 2.0, 0.0, 50.0), (3.0, 3.0, 0.0, 120.0))
+        )
+
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        assert first is not None
+        assert second is not None
+        self.assertFalse(first.confirmed)
+        self.assertTrue(second.confirmed)
+        np.testing.assert_allclose(second.position_m, (0.1, 2.0, 0.0))
+
+    def test_coasts_through_miss_and_reassociates(self) -> None:
+        tracker = SingleTargetTracker(
+            association_distance_m=0.5,
+            max_missed_updates=2,
+            confirmation_hits=1,
+            position_gain=1.0,
+            velocity_gain=1.0,
+        )
+        tracker.update(self._candidates((0.0, 2.0, 0.0, 80.0)))
+        moving = tracker.update(self._candidates((0.1, 2.0, 0.0, 80.0)))
+        predicted = tracker.update(self._candidates())
+        recovered = tracker.update(self._candidates((0.3, 2.0, 0.0, 70.0)))
+
+        assert moving is not None
+        assert predicted is not None
+        assert recovered is not None
+        self.assertTrue(predicted.is_predicted)
+        np.testing.assert_allclose(predicted.position_m, (0.2, 2.0, 0.0))
+        self.assertFalse(recovered.is_predicted)
+        np.testing.assert_allclose(recovered.position_m, (0.3, 2.0, 0.0))
+
+    def test_drops_track_after_missed_update_limit(self) -> None:
+        tracker = SingleTargetTracker(
+            max_missed_updates=1,
+            confirmation_hits=1,
+        )
+        tracker.update(self._candidates((0.0, 2.0, 0.0, 80.0)))
+
+        self.assertIsNotNone(tracker.update(self._candidates()))
+        self.assertIsNone(tracker.update(self._candidates()))
+
+    def test_cluster_candidates_use_assigned_point_magnitude(self) -> None:
+        points = self._candidates(
+            (0.0, 2.0, 0.0, 50.0),
+            (0.1, 2.0, 0.0, 70.0),
+            (3.0, 4.0, 0.0, 90.0),
+        )
+        clusters = np.asarray(
+            ((0.05, 2.0, 0.0, 2.0), (3.0, 4.0, 0.0, 1.0)),
+            dtype=np.float32,
+        )
+
+        candidates = _point_cloud_track_candidates(points, clusters)
+
+        np.testing.assert_allclose(candidates[:, :3], clusters[:, :3])
+        np.testing.assert_allclose(candidates[:, 3], (70.0, 90.0))
+
+
+class TrackedDisplayPayloadTests(unittest.TestCase):
+    def test_combined_display_uses_tracked_range_for_micro_doppler(self) -> None:
+        payload_queue = queue.Queue(maxsize=1)
+        config = SimpleNamespace()
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            payload_queue,
+            config,
+        )
+        points = np.asarray(((0.0, 2.0, 0.0, 80.0),), dtype=np.float32)
+        clusters = np.asarray(((0.0, 2.0, 0.0, 1.0),), dtype=np.float32)
+        doppler_cube = np.zeros((4, 1, 1, 4), dtype=np.complex64)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=clusters,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
+                return_value=(np.ones(4, dtype=np.float32), 2.0),
+            ) as micro_doppler,
+        ):
+            sink.update(np.empty((0,), dtype=np.complex64), np.arange(4))
+
+        micro_doppler.assert_called_once()
+        self.assertAlmostEqual(
+            micro_doppler.call_args.kwargs["target_range_m"],
+            2.0,
+        )
+        payload = payload_queue.get_nowait()
+        self.assertEqual(len(payload), 5)
+        self.assertIsNotNone(payload[2])
 
 
 class RangeDisplayBoundsTests(unittest.TestCase):

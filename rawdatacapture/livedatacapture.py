@@ -58,6 +58,9 @@ DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
 DEFAULT_CLUSTER_EPS_M = 0.5
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
+DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
+DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
+DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
 MICRO_DOPPLER_HISTORY_UPDATES = 150
 MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
@@ -118,6 +121,145 @@ class CapturedFrame:
     @property
     def is_valid(self) -> bool:
         return self.gap_bytes == 0
+
+
+@dataclass(frozen=True)
+class TargetTrack:
+    """Display-safe snapshot of the one persistent 3D target track."""
+
+    position_m: tuple[float, float, float]
+    velocity_m_per_update: tuple[float, float, float]
+    age_updates: int
+    hits: int
+    missed_updates: int
+    confirmed: bool
+
+    @property
+    def range_m(self) -> float:
+        return float(np.linalg.norm(self.position_m))
+
+    @property
+    def is_predicted(self) -> bool:
+        return self.missed_updates > 0
+
+
+class SingleTargetTracker:
+    """Track one 3D point-cloud target with gated nearest-neighbor updates.
+
+    Positions and velocity are expressed per processed display update because
+    the current capture configuration does not expose frame timestamps to this
+    stage. The tracker acquires the strongest candidate, then prioritizes
+    spatial continuity over candidate strength until the track is lost.
+    """
+
+    def __init__(
+        self,
+        *,
+        association_distance_m: float = DEFAULT_TRACK_ASSOCIATION_DISTANCE_M,
+        max_missed_updates: int = DEFAULT_TRACK_MAX_MISSED_UPDATES,
+        confirmation_hits: int = DEFAULT_TRACK_CONFIRMATION_HITS,
+        position_gain: float = 0.65,
+        velocity_gain: float = 0.35,
+    ) -> None:
+        if association_distance_m <= 0.0:
+            raise ValueError("Track association distance must be positive")
+        if max_missed_updates < 0:
+            raise ValueError("Maximum missed track updates cannot be negative")
+        if confirmation_hits < 1:
+            raise ValueError("Track confirmation hits must be at least one")
+        if not 0.0 < position_gain <= 1.0:
+            raise ValueError("Track position gain must be in (0, 1]")
+        if not 0.0 <= velocity_gain <= 1.0:
+            raise ValueError("Track velocity gain must be in [0, 1]")
+
+        self.association_distance_m = float(association_distance_m)
+        self.max_missed_updates = int(max_missed_updates)
+        self.confirmation_hits = int(confirmation_hits)
+        self.position_gain = float(position_gain)
+        self.velocity_gain = float(velocity_gain)
+        self._position_m: Optional[np.ndarray] = None
+        self._velocity_m_per_update = np.zeros(3, dtype=np.float64)
+        self._age_updates = 0
+        self._hits = 0
+        self._consecutive_hits = 0
+        self._missed_updates = 0
+        self._confirmed = False
+
+    def update(self, candidates: np.ndarray) -> Optional[TargetTrack]:
+        candidates = np.asarray(candidates, dtype=np.float64)
+        if candidates.ndim != 2 or (candidates.size and candidates.shape[1] < 4):
+            raise ValueError("Track candidates must have shape [candidate, >=4]")
+
+        if self._position_m is None:
+            if candidates.size == 0:
+                return None
+            strongest_index = int(np.argmax(candidates[:, 3]))
+            self._position_m = candidates[strongest_index, :3].copy()
+            self._velocity_m_per_update.fill(0.0)
+            self._age_updates = 1
+            self._hits = 1
+            self._consecutive_hits = 1
+            self._missed_updates = 0
+            self._confirmed = self.confirmation_hits == 1
+            return self._snapshot()
+
+        predicted_position = self._position_m + self._velocity_m_per_update
+        matched_position: Optional[np.ndarray] = None
+        if candidates.size:
+            distances_m = np.linalg.norm(candidates[:, :3] - predicted_position, axis=1)
+            match_index = int(np.argmin(distances_m))
+            expanded_gate_m = self.association_distance_m * (
+                1.0 + 0.25 * self._missed_updates
+            )
+            if distances_m[match_index] <= expanded_gate_m:
+                matched_position = candidates[match_index, :3]
+
+        self._age_updates += 1
+        if matched_position is None:
+            self._position_m = predicted_position
+            self._missed_updates += 1
+            self._consecutive_hits = 0
+            if self._missed_updates > self.max_missed_updates:
+                self.reset()
+                return None
+            return self._snapshot()
+
+        previous_position = self._position_m.copy()
+        innovation = matched_position - predicted_position
+        self._position_m = predicted_position + self.position_gain * innovation
+        measured_velocity = self._position_m - previous_position
+        self._velocity_m_per_update = (
+            (1.0 - self.velocity_gain) * self._velocity_m_per_update
+            + self.velocity_gain * measured_velocity
+        )
+        self._hits += 1
+        self._consecutive_hits += 1
+        self._missed_updates = 0
+        if self._consecutive_hits >= self.confirmation_hits:
+            self._confirmed = True
+        return self._snapshot()
+
+    def reset(self) -> None:
+        self._position_m = None
+        self._velocity_m_per_update.fill(0.0)
+        self._age_updates = 0
+        self._hits = 0
+        self._consecutive_hits = 0
+        self._missed_updates = 0
+        self._confirmed = False
+
+    def _snapshot(self) -> TargetTrack:
+        assert self._position_m is not None
+        return TargetTrack(
+            position_m=tuple(float(value) for value in self._position_m),
+            velocity_m_per_update=tuple(
+                float(value) for value in self._velocity_m_per_update
+            ),
+            age_updates=self._age_updates,
+            hits=self._hits,
+            missed_updates=self._missed_updates,
+            confirmed=self._confirmed,
+        )
 
 
 class SequenceTracker:
@@ -459,6 +601,42 @@ class LiveDisplay:
             self.payload_queue.join_thread()
 
 
+def _point_cloud_track_candidates(
+    points: np.ndarray,
+    clusters: np.ndarray,
+    *,
+    assignment_distance_m: Optional[float] = None,
+) -> np.ndarray:
+    """Return XYZ candidates with a magnitude score for track acquisition."""
+    if clusters.size == 0:
+        if points.size == 0:
+            return np.empty((0, 4), dtype=np.float32)
+        return np.asarray(points[:, :4], dtype=np.float32)
+
+    candidates = np.empty((clusters.shape[0], 4), dtype=np.float32)
+    candidates[:, :3] = clusters[:, :3]
+    if points.size == 0:
+        candidates[:, 3] = clusters[:, 3]
+        return candidates
+
+    distances = np.linalg.norm(
+        points[:, np.newaxis, :3] - clusters[np.newaxis, :, :3],
+        axis=2,
+    )
+    assigned_clusters = np.argmin(distances, axis=1)
+    for cluster_index in range(clusters.shape[0]):
+        assigned = assigned_clusters == cluster_index
+        if assignment_distance_m is not None:
+            assigned &= distances[:, cluster_index] <= assignment_distance_m
+        member_scores = points[assigned, 3]
+        candidates[cluster_index, 3] = (
+            float(np.max(member_scores))
+            if member_scores.size
+            else float(clusters[cluster_index, 3])
+        )
+    return candidates
+
+
 class DisplayPayloadSink:
     def __init__(
         self,
@@ -479,6 +657,7 @@ class DisplayPayloadSink:
         self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
         self.cluster_eps_m = max(float(cluster_eps_m), 0.0)
         self.cluster_min_samples = max(int(cluster_min_samples), 1)
+        self.target_tracker = SingleTargetTracker()
         self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
         self.frame_count = 0
 
@@ -513,13 +692,22 @@ class DisplayPayloadSink:
                 azimuth_fov_deg=self.point_cloud_fov_deg,
                 elevation_fov_deg=self.point_cloud_fov_deg,
             )
+            clusters = cluster_point_cloud(
+                points,
+                eps_m=self.cluster_eps_m,
+                min_samples=self.cluster_min_samples,
+            )
+            target_track = self.target_tracker.update(
+                _point_cloud_track_candidates(
+                    points,
+                    clusters,
+                    assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
+                )
+            )
             payload = (
                 points,
-                cluster_point_cloud(
-                    points,
-                    eps_m=self.cluster_eps_m,
-                    min_samples=self.cluster_min_samples,
-                ),
+                clusters,
+                target_track,
             )
         elif self.mode == COMBINED_DISPLAY_MODE:
             doppler_cube = compute_range_doppler_fft(range_fft, self.config)
@@ -537,10 +725,16 @@ class DisplayPayloadSink:
                 eps_m=self.cluster_eps_m,
                 min_samples=self.cluster_min_samples,
             )
-            target_range_m = None
-            if points.size:
-                strongest_point = points[int(np.argmax(points[:, 3]))]
-                target_range_m = float(np.linalg.norm(strongest_point[:3]))
+            target_track = self.target_tracker.update(
+                _point_cloud_track_candidates(
+                    points,
+                    clusters,
+                    assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
+                )
+            )
+            target_range_m = (
+                target_track.range_m if target_track is not None else None
+            )
             spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
                 doppler_cube,
                 range_axis_m,
@@ -555,7 +749,13 @@ class DisplayPayloadSink:
                 if self.micro_doppler_history
                 else np.empty((0, 0), dtype=np.float32)
             )
-            payload = (points, clusters, spectrogram_db, selected_range_m)
+            payload = (
+                points,
+                clusters,
+                target_track,
+                spectrogram_db,
+                selected_range_m,
+            )
         else:
             return
 
@@ -721,6 +921,7 @@ def _run_display_process(
     micro_doppler_image = None
     scatter = None
     cluster_scatter = None
+    target_scatter = None
 
     if mode == "range":
         line = axis.plot([], [], lw=1.5)[0]
@@ -751,6 +952,17 @@ def _run_display_process(
             s=70,
             linewidths=2,
             label="Cluster centers",
+        )
+        target_scatter = axis.scatter(
+            [],
+            [],
+            [],
+            c="lime",
+            edgecolors="black",
+            marker="*",
+            s=180,
+            linewidths=0.8,
+            label="Tracked target",
         )
         figure.colorbar(scatter, ax=axis, label="Magnitude (dB)", pad=0.12)
         axis.set_title(
@@ -808,8 +1020,9 @@ def _run_display_process(
                     mode == "point-cloud"
                     and scatter is not None
                     and cluster_scatter is not None
+                    and target_scatter is not None
                 ):
-                    points, clusters = payload
+                    points, clusters, target_track = payload
                     _draw_point_cloud(
                         axis,
                         scatter,
@@ -818,15 +1031,24 @@ def _run_display_process(
                         clusters,
                         point_cloud_range_m,
                         point_cloud_fov_deg,
+                        target_scatter,
+                        target_track,
                     )
                 elif (
                     mode == COMBINED_DISPLAY_MODE
                     and scatter is not None
                     and cluster_scatter is not None
+                    and target_scatter is not None
                     and micro_doppler_axis is not None
                     and micro_doppler_image is not None
                 ):
-                    points, clusters, spectrogram_db, selected_range_m = payload
+                    (
+                        points,
+                        clusters,
+                        target_track,
+                        spectrogram_db,
+                        selected_range_m,
+                    ) = payload
                     _draw_point_cloud(
                         axis,
                         scatter,
@@ -835,6 +1057,8 @@ def _run_display_process(
                         clusters,
                         point_cloud_range_m,
                         point_cloud_fov_deg,
+                        target_scatter,
+                        target_track,
                     )
                     _draw_micro_doppler(
                         micro_doppler_axis,
@@ -925,6 +1149,8 @@ def _draw_point_cloud(
     clusters: np.ndarray,
     point_cloud_range_m: float,
     point_cloud_fov_deg: float,
+    target_scatter: Optional[Any] = None,
+    target_track: Optional[TargetTrack] = None,
 ) -> None:
     empty = np.array([], dtype=np.float32)
     if points.size == 0:
@@ -950,6 +1176,22 @@ def _draw_point_cloud(
         cluster_scatter.set_sizes(
             np.clip(40.0 + (clusters[:, 3] * 10.0), 50.0, 180.0)
         )
+
+    if target_scatter is not None:
+        if target_track is None:
+            target_scatter._offsets3d = (empty, empty, empty)
+            target_scatter.set_sizes(empty)
+        else:
+            target_position = np.asarray(target_track.position_m, dtype=np.float32)
+            target_scatter._offsets3d = (
+                target_position[0:1],
+                target_position[1:2],
+                target_position[2:3],
+            )
+            target_scatter.set_sizes(
+                np.asarray((120.0 if target_track.is_predicted else 180.0,))
+            )
+            target_scatter.set_alpha(0.4 if target_track.is_predicted else 1.0)
 
     _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
 

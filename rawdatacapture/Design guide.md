@@ -179,6 +179,9 @@ The point-cloud path:
    detections.
 7. Runs spatial DBSCAN on XYZ points and sends both the original points and
    cluster centers to the display process.
+8. Updates one persistent 3D target track. Initial acquisition uses the
+   strongest cluster or point; later updates use gated nearest-neighbor
+   association against a constant-velocity prediction.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and
@@ -189,17 +192,20 @@ X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
 
 The `point-cloud-micro-doppler` display computes one Doppler cube for each
 display update and reuses it for both outputs. The point-cloud path runs as
-described above. Its strongest point supplies the center of a five-bin range
-gate; when no point is detected, the gate follows the strongest
-non-zero-Doppler range inside the configured range limit.
+described above. The tracked target supplies the center of a five-bin range
+gate. During a short detection gap, a constant-velocity prediction maintains
+the gate and the green tracked-target marker is shown smaller and translucent.
+The track is removed after 10 consecutive missed display updates. When no track
+exists, the gate follows the strongest non-zero-Doppler range inside the
+configured range limit.
 
 Power is summed over the gated range bins, TX channels, and RX channels before
 conversion to dB. Each resulting Doppler spectrum is appended to a 150-update
 history in the frame-processing process. Sending the complete history through
 the latest-only display queue prevents GUI queue replacement from creating
-holes in the visible spectrogram. The spectrogram is an automatic strongest-
-target view and may change targets because the current pipeline has no
-persistent tracker.
+holes in the visible spectrogram. The spectrogram follows the single tracked
+target while its association remains valid. It can still change targets after
+track loss and reacquisition.
 
 ## Raw Recording and Logging
 
@@ -216,8 +222,9 @@ space externally.
 
 - No packet reordering; only duplicate and overlap handling.
 - Only complex 16-bit, two-lane LVDS reshape is implemented.
-- No calibrated velocity axis, antenna calibration, phase calibration, or
-  target tracking.
+- No calibrated velocity axis, antenna calibration, or phase calibration.
+- Tracking supports one target only, uses uncalibrated XYZ positions, and has
+  no Doppler-assisted association or externally validated track identity.
 - Range FFT includes the full complex FFT rather than selecting only a
   physically useful half-spectrum.
 - The point cloud is a diagnostic visualization, not precision metrology.
