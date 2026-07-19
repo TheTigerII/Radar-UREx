@@ -1149,7 +1149,7 @@ def _run_display_process(
         return
 
     plt.ion()
-    figure = plt.figure(figsize=(14, 6) if mode == COMBINED_DISPLAY_MODE else None)
+    figure = plt.figure(figsize=(12, 5) if mode == COMBINED_DISPLAY_MODE else None)
     micro_doppler_axis = None
     magnitude_colorbar_axis = None
     if mode == "point-cloud":
@@ -1324,28 +1324,45 @@ def _run_display_process(
         for artist in dynamic_artists:
             artist.set_animated(True)
     figure.canvas.draw()
-    display_background = (
-        figure.canvas.copy_from_bbox(figure.bbox) if dynamic_artists else None
+    dynamic_axes = tuple(
+        dict.fromkeys(
+            artist.axes for artist in dynamic_artists if artist.axes is not None
+        )
     )
+    display_backgrounds = {
+        dynamic_axis: figure.canvas.copy_from_bbox(dynamic_axis.bbox)
+        for dynamic_axis in dynamic_axes
+    }
 
     def draw_dynamic_artists() -> None:
         for artist in dynamic_artists:
+            if not artist.get_visible():
+                continue
             if hasattr(artist, "do_3d_projection"):
                 artist.do_3d_projection()
             artist.axes.draw_artist(artist)
 
+    def blit_dynamic_axes() -> None:
+        for dynamic_axis in dynamic_axes:
+            figure.canvas.blit(dynamic_axis.bbox)
+
     def invalidate_display_background(_event: Any) -> None:
-        nonlocal display_background
-        display_background = None
+        display_backgrounds.clear()
 
     def restore_dynamic_artists_after_draw(_event: Any) -> None:
         """Keep animated artists visible after a GUI backend performs a redraw."""
-        nonlocal display_background
         if not dynamic_artists:
             return
-        display_background = figure.canvas.copy_from_bbox(figure.bbox)
+        display_backgrounds.clear()
+        display_backgrounds.update(
+            (
+                dynamic_axis,
+                figure.canvas.copy_from_bbox(dynamic_axis.bbox),
+            )
+            for dynamic_axis in dynamic_axes
+        )
         draw_dynamic_artists()
-        figure.canvas.blit(figure.bbox)
+        blit_dynamic_axes()
 
     figure.canvas.mpl_connect("resize_event", invalidate_display_background)
     figure.canvas.mpl_connect("draw_event", restore_dynamic_artists_after_draw)
@@ -1465,13 +1482,20 @@ def _run_display_process(
                         update_title=False,
                     )
                 if dynamic_artists:
-                    if display_background is None:
+                    if len(display_backgrounds) != len(dynamic_axes):
                         figure.canvas.draw()
-                    if display_background is None:
-                        display_background = figure.canvas.copy_from_bbox(figure.bbox)
-                    figure.canvas.restore_region(display_background)
+                    if len(display_backgrounds) != len(dynamic_axes):
+                        display_backgrounds.update(
+                            (
+                                dynamic_axis,
+                                figure.canvas.copy_from_bbox(dynamic_axis.bbox),
+                            )
+                            for dynamic_axis in dynamic_axes
+                        )
+                    for dynamic_axis, background in display_backgrounds.items():
+                        figure.canvas.restore_region(background)
                     draw_dynamic_artists()
-                    figure.canvas.blit(figure.bbox)
+                    blit_dynamic_axes()
                     figure.canvas.flush_events()
                     figure.stale = False
                 else:
@@ -1665,6 +1689,7 @@ def _draw_point_cloud(
     update_static_artists: bool = True,
 ) -> None:
     empty = np.array([], dtype=np.float32)
+    scatter.set_visible(bool(points.size))
     if points.size == 0:
         scatter._offsets3d = (empty, empty, empty)
         scatter.set_array(empty)
@@ -1677,6 +1702,7 @@ def _draw_point_cloud(
                 POINT_CLOUD_MAGNITUDE_DB_MAX,
             )
 
+    cluster_scatter.set_visible(bool(clusters.size))
     if clusters.size == 0:
         cluster_scatter._offsets3d = (empty, empty, empty)
         cluster_scatter.set_sizes(empty)
@@ -1691,6 +1717,7 @@ def _draw_point_cloud(
         )
 
     if target_scatter is not None:
+        target_scatter.set_visible(target_track is not None)
         if target_track is None:
             target_scatter._offsets3d = (empty, empty, empty)
             target_scatter.set_sizes(empty)
