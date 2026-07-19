@@ -201,16 +201,23 @@ X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
 
 The `point-cloud-micro-doppler` display computes one Doppler cube for each
 display update and reuses it for both outputs. The point-cloud path runs as
-described above. The tracked target supplies the center of a five-bin range
+described above. The tracked target supplies the center of a three-bin range
 gate. During a short detection gap, a constant-velocity prediction maintains
 the gate and the green tracked-target marker is shown smaller and translucent.
 The track is removed after 10 consecutive missed display updates. When no track
 exists, the gate follows the strongest non-zero-Doppler range inside the
 configured range limit.
 
-Power is summed over the gated range bins, TX channels, and RX channels before
-conversion to dB. Each resulting Doppler spectrum is appended to a 150-update
-history in the frame-processing process. Sending the complete history through
+The micro-Doppler branch phase-aligns the chronological TDM chirps to the TX1
+phase center and applies adaptive complex equalization to the repeating TX-slot
+gains. Every STFT window also aligns the three static complex slot means. This
+suppresses the two one-third-sampling-rate replicas that unequal TX phase or
+amplitude produces for a static return. It then applies 96-sample Hann
+windows with a 48-sample hop and a 128-point FFT. Power is summed over the gated
+range bins and RX channels before conversion to dB. Each short-time spectrum is
+appended to a 60-window history in the frame-processing process. There is no
+per-TX micro-Doppler fallback; before a track exists, nominal phase alignment
+uses a boresight direction. Sending the complete history through
 the latest-only display queue prevents GUI queue replacement from creating
 holes in the visible spectrogram. The spectrogram follows the single tracked
 target while its association remains valid. It can still change targets after
@@ -219,14 +226,28 @@ track loss and reacquisition. The Matplotlib image uses the point cloud's fixed
 and the combined layout uses one shared magnitude colorbar for both axes.
 The colorbar occupies a dedicated narrow grid column between the point cloud
 and micro-Doppler axes, with a spacer on its right so it does not crowd the
-spectrogram's Doppler-axis label.
+spectrogram's Doppler-axis label. The point-cloud title reports measured plot
+updates per second. The micro-Doppler title reports both plot updates per second
+and generated STFT windows per second. Supported Matplotlib backends use
+artist-level blitting for the dynamic scatters, spectrogram, and titles so the
+static 3D axes and colorbar do not require a full redraw every update.
 
-## Raw Recording and Logging
+## Processed and Raw Recording
+
+`--processed-output` streams newline-delimited JSON. Its first record describes
+the radar configuration and data axes. Each subsequent update contains the
+post-CFAR XYZ point cloud, DBSCAN clusters, target-track state, current
+micro-Doppler spectrum, every short-time window generated from the frame, and
+the selected range gate. The writer does not duplicate the rolling display
+history. When it
+is enabled, combined point-cloud/micro-Doppler processing runs even with a
+different display mode or `--display none`.
 
 `--raw-output` writes only complete valid frames, consecutively and without
 DCA1000 headers. At normal shutdown a JSON sidecar records dimensions, sample
 format, processing parameters, counts, and paths. An explicit `--raw-metadata`
-overrides the sidecar name.
+overrides the sidecar name. Integrated `run.py` enables processed output by
+default and leaves raw recording disabled unless `--raw-output` is supplied.
 
 Terminal messages are appended to `livedatacapture.log` by default. Raw files
 and logs have no rotation or size limit, so long deployments must monitor disk

@@ -1,6 +1,10 @@
+import json
 import math
 import queue
+import tempfile
 import unittest
+from collections import deque
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -16,11 +20,14 @@ from rawdatacapture.livedatacapture import (
     DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
     DEFAULT_POINT_CLOUD_FOV_DEG,
+    MICRO_DOPPLER_HISTORY_UPDATES,
+    MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
     POINT_CLOUD_MAGNITUDE_DB_MAX,
     POINT_CLOUD_MAGNITUDE_DB_MIN,
     DCA1000PacketHeader,
     DisplayPayloadSink,
     FrameBuffer,
+    ProcessedOutputWriter,
     RadarCaptureConfig,
     SingleTargetTracker,
     TargetTrack,
@@ -31,6 +38,7 @@ from rawdatacapture.livedatacapture import (
     _draw_range_doppler,
     _draw_range_profile,
     _point_cloud_range_limit_m,
+    _record_event_rate,
     _set_point_cloud_axes,
     process_complete_frame,
 )
@@ -122,6 +130,54 @@ class FrameDiagnosticsTests(unittest.TestCase):
         )
 
 
+class ProcessedOutputWriterTests(unittest.TestCase):
+    def test_writes_metadata_point_cloud_and_micro_doppler_jsonl(self) -> None:
+        config = RadarCaptureConfig.from_dimensions(
+            num_adc_samples=64,
+            num_rx_channels=4,
+            num_chirps_per_frame=384,
+            num_loops=128,
+            num_chirps_per_loop=3,
+            sample_rate_ksps=5000.0,
+            frequency_slope_mhz_per_us=60.0,
+        )
+        track = TargetTrack(
+            position_m=(0.0, 2.0, 0.0),
+            velocity_m_per_update=(0.1, 0.0, 0.0),
+            age_updates=3,
+            hits=3,
+            missed_updates=0,
+            confirmed=True,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "processed.jsonl"
+            writer = ProcessedOutputWriter(output_path, config, 1)
+            writer.write_update(
+                frame_index=7,
+                points=np.asarray(((1.0, 2.0, 3.0, 50.0),), dtype=np.float32),
+                clusters=np.asarray(((1.0, 2.0, 3.0, 1.0),), dtype=np.float32),
+                target_track=track,
+                micro_doppler_db=np.asarray((10.0, 20.0), dtype=np.float32),
+                selected_range_m=2.0,
+            )
+            writer.close()
+
+            records = [json.loads(line) for line in output_path.read_text().splitlines()]
+
+        self.assertEqual(records[0]["record_type"], "metadata")
+        self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
+        self.assertEqual(
+            records[0]["micro_doppler_processing"]["window_samples"],
+            96,
+        )
+        self.assertEqual(records[1]["record_type"], "update")
+        self.assertEqual(records[1]["processed_frame_index"], 7)
+        self.assertEqual(records[1]["points"], [[1.0, 2.0, 3.0, 50.0]])
+        self.assertEqual(records[1]["micro_doppler_db"], [10.0, 20.0])
+        self.assertEqual(records[1]["micro_doppler_windows_db"], [[10.0, 20.0]])
+        self.assertTrue(records[1]["target_track"]["confirmed"])
+
+
 class PointCloudBoundsTests(unittest.TestCase):
     def test_display_defaults_are_ten_meters_and_sixty_degrees(self) -> None:
         self.assertEqual(DEFAULT_MAX_RANGE_M, 10.0)
@@ -199,6 +255,7 @@ class PointCloudBoundsTests(unittest.TestCase):
             clusters,
             10.0,
             60.0,
+            update_rate_hz=29.8,
         )
 
         for actual, expected in zip(scatter._offsets3d, points[:, :3].T):
@@ -206,6 +263,9 @@ class PointCloudBoundsTests(unittest.TestCase):
         for actual, expected in zip(cluster_scatter._offsets3d, clusters[:, :3].T):
             np.testing.assert_array_equal(actual, expected)
         cluster_scatter.set_sizes.assert_called_once()
+        axis.set_title.assert_called_once_with(
+            "Live 3D Point Cloud (±60° FOV, 10 m, 29.8 Hz)"
+        )
 
     def test_draw_updates_tracked_target_marker(self) -> None:
         axis = Mock()
@@ -346,6 +406,11 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
                 return_value=(np.ones(4, dtype=np.float32), 2.0),
             ) as micro_doppler,
+            patch(
+                "rawdatacapture.livedatacapture."
+                "compute_compensated_micro_doppler_spectrogram",
+                return_value=np.arange(12, dtype=np.float32).reshape(4, 3),
+            ) as short_time_micro_doppler,
         ):
             sink.update(np.empty((0,), dtype=np.complex64), np.arange(4))
 
@@ -354,9 +419,91 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
             micro_doppler.call_args.kwargs["target_range_m"],
             2.0,
         )
+        short_time_micro_doppler.assert_called_once()
+        np.testing.assert_array_equal(
+            sink.latest_micro_doppler_db,
+            np.asarray((2.0, 5.0, 8.0, 11.0)),
+        )
+        self.assertEqual(len(sink.micro_doppler_history), 3)
         payload = payload_queue.get_nowait()
-        self.assertEqual(len(payload), 5)
+        self.assertEqual(len(payload), 6)
+        self.assertEqual(payload[5], 3)
         self.assertIsNotNone(payload[2])
+
+    def test_combined_display_uses_merged_tx_before_track_acquisition(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            queue.Queue(maxsize=1),
+            SimpleNamespace(),
+        )
+        merged_spectra = np.arange(8, dtype=np.float32).reshape(4, 2)
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=np.zeros((4, 1, 1, 4), dtype=np.complex64),
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=np.empty((0, 4), dtype=np.float32),
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=np.empty((0, 4), dtype=np.float32),
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
+                return_value=(np.full(4, -100.0, dtype=np.float32), 2.0),
+            ),
+            patch(
+                "rawdatacapture.livedatacapture."
+                "compute_compensated_micro_doppler_spectrogram",
+                return_value=merged_spectra,
+            ) as merged,
+        ):
+            sink.update(np.empty((0,), dtype=np.complex64), np.arange(4))
+
+        self.assertEqual(
+            merged.call_args.kwargs["target_position_m"],
+            (0.0, 2.0, 0.0),
+        )
+        np.testing.assert_array_equal(
+            sink.latest_micro_doppler_db,
+            merged_spectra[:, -1],
+        )
+        self.assertEqual(sink.micro_doppler_windows_generated, 2)
+
+    def test_processed_writer_runs_without_a_display_queue(self) -> None:
+        writer = Mock(spec=ProcessedOutputWriter)
+        writer.enabled = True
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            processed_writer=writer,
+        )
+        points = np.asarray(((0.0, 2.0, 0.0, 80.0),), dtype=np.float32)
+        clusters = np.asarray(((0.0, 2.0, 0.0, 1.0),), dtype=np.float32)
+        spectrum = np.arange(4, dtype=np.float32)
+
+        with patch.object(
+            sink,
+            "_compute_combined_payload",
+            return_value=(points, clusters, None, spectrum[:, None], 2.0, 1),
+        ):
+            sink.latest_micro_doppler_db = spectrum
+            sink.update(np.empty((0,), dtype=np.complex64), np.arange(4))
+
+        writer.write_update.assert_called_once()
+        np.testing.assert_array_equal(
+            writer.write_update.call_args.kwargs["points"],
+            points,
+        )
+        np.testing.assert_array_equal(
+            writer.write_update.call_args.kwargs["micro_doppler_db"],
+            spectrum,
+        )
 
 
 class RangeDisplayBoundsTests(unittest.TestCase):
@@ -392,12 +539,18 @@ class RangeDisplayBoundsTests(unittest.TestCase):
 
 
 class MicroDopplerDisplayTests(unittest.TestCase):
+    def test_live_history_keeps_sixty_stft_windows(self) -> None:
+        self.assertEqual(MICRO_DOPPLER_HISTORY_UPDATES, 60)
+
+    def test_live_range_gate_uses_three_bins(self) -> None:
+        self.assertEqual(2 * MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS + 1, 3)
+
     def test_draw_sets_centered_doppler_and_history_axes(self) -> None:
         axis = Mock()
         image = Mock()
         spectrogram = np.arange(12, dtype=np.float32).reshape(4, 3)
 
-        _draw_micro_doppler(axis, image, spectrogram, 2.5)
+        _draw_micro_doppler(axis, image, spectrogram, 2.5, 29.8, 208.6)
 
         image.set_data.assert_called_once_with(spectrogram)
         image.set_extent.assert_called_once_with((-2, 0, -2, 1))
@@ -409,7 +562,15 @@ class MicroDopplerDisplayTests(unittest.TestCase):
         axis.set_ylim.assert_called_once_with(-2, 1)
         axis.set_title.assert_called_once_with(
             "Live Micro-Doppler Spectrogram — gate 2.50 m"
+            " — plot 29.8 Hz, STFT 208.6 windows/s"
         )
+
+    def test_event_rate_counts_units_after_initial_timestamp(self) -> None:
+        events = deque()
+
+        self.assertIsNone(_record_event_rate(events, 10.0, 7.0))
+        self.assertEqual(_record_event_rate(events, 10.5, 7.0), 14.0)
+        self.assertEqual(_record_event_rate(events, 11.0, 7.0), 14.0)
 
 if __name__ == "__main__":
     unittest.main()

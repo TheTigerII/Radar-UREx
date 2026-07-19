@@ -124,7 +124,19 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--capture-dir", type=Path, default=DEFAULT_CAPTURE_DIR)
-    parser.add_argument("--raw-output", type=Path)
+    parser.add_argument(
+        "--processed-output",
+        type=Path,
+        help=(
+            "Processed point-cloud and micro-Doppler JSONL output. Defaults "
+            "to a timestamped file in --capture-dir."
+        ),
+    )
+    parser.add_argument(
+        "--raw-output",
+        type=Path,
+        help="Optional raw ADC output. Raw recording is disabled by default.",
+    )
     return parser.parse_args()
 
 
@@ -266,9 +278,9 @@ def default_radar_port() -> Optional[str]:
     return LINUX_DEFAULT_RADAR_PORT
 
 
-def default_raw_output(capture_dir: Path) -> Path:
+def default_processed_output(capture_dir: Path) -> Path:
     timestamp = datetime.now().astimezone().strftime("%Y_%m_%dT%H_%M_%S")
-    return capture_dir / f"raw_capture_{timestamp}.bin"
+    return capture_dir / f"processed_capture_{timestamp}.jsonl"
 
 
 def start_process(label: str, command: list[str]) -> subprocess.Popen:
@@ -333,13 +345,14 @@ def kill_process(process: subprocess.Popen) -> None:
 def build_capture_command(
     args: argparse.Namespace,
     display: str,
-    raw_output: Path,
+    processed_output: Path,
+    raw_output: Optional[Path] = None,
 ) -> list[str]:
     display_update_every = args.display_update_every
     if display_update_every is None:
         display_update_every = 1
 
-    return [
+    command = [
         sys.executable,
         str(RAW_DATA_DIR / "livedatacapture.py"),
         "--config",
@@ -366,9 +379,12 @@ def build_capture_command(
         str(max(args.clutter_map_warmup_frames, 1)),
         "--clutter-map-min-snr-db",
         str(max(args.clutter_map_min_snr_db, 0.0)),
-        "--raw-output",
-        str(raw_output),
+        "--processed-output",
+        str(processed_output),
     ]
+    if raw_output is not None:
+        command.extend(("--raw-output", str(raw_output)))
+    return command
 
 
 def build_startup_command(args: argparse.Namespace, radar_port: str) -> list[str]:
@@ -416,9 +432,17 @@ def main() -> int:
         print("No radar command UART port was provided.", file=sys.stderr)
         return 2
 
-    raw_output = args.raw_output or default_raw_output(args.capture_dir)
-    raw_output = raw_output if raw_output.is_absolute() else ROOT / raw_output
-    raw_output.parent.mkdir(parents=True, exist_ok=True)
+    processed_output = args.processed_output or default_processed_output(
+        args.capture_dir
+    )
+    processed_output = (
+        processed_output if processed_output.is_absolute() else ROOT / processed_output
+    )
+    processed_output.parent.mkdir(parents=True, exist_ok=True)
+    raw_output = args.raw_output
+    if raw_output is not None:
+        raw_output = raw_output if raw_output.is_absolute() else ROOT / raw_output
+        raw_output.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Display mode: {display}")
     duration_text = (
@@ -426,14 +450,15 @@ def main() -> int:
     )
     print(f"Run duration: {duration_text}")
     print(f"Radar command UART: {radar_port}")
-    print(f"Raw output: {raw_output}")
+    print(f"Processed output: {processed_output}")
+    print(f"Raw output: {raw_output if raw_output is not None else 'disabled'}")
 
     capture_process: Optional[subprocess.Popen] = None
     startup_process: Optional[subprocess.Popen] = None
     try:
         capture_process = start_process(
             "live capture",
-            build_capture_command(args, display, raw_output),
+            build_capture_command(args, display, processed_output, raw_output),
         )
         time.sleep(1.0)
         if capture_process.poll() is not None:
@@ -477,8 +502,10 @@ def main() -> int:
     finally:
         stop_process("startup", startup_process)
         stop_process("live capture", capture_process)
-        print(f"Raw data file: {raw_output}")
-        print(f"Raw metadata file: {raw_output}.json")
+        print(f"Processed data file: {processed_output}")
+        if raw_output is not None:
+            print(f"Raw data file: {raw_output}")
+            print(f"Raw metadata file: {raw_output}.json")
 
 
 if __name__ == "__main__":

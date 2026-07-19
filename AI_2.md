@@ -35,7 +35,7 @@ IWR6843ISK-ODS
     -> OS-CFAR point detections and angle estimation
     -> single-target 3D association and predicted range gate
     -> one micro-Doppler spectrum per display update
-    -> rolling 150-update spectrogram for visualization
+    -> rolling 60-update spectrogram (approximately 2 seconds) for visualization
 ```
 
 `run.py` launches the live receiver and hardware controller. Capture,

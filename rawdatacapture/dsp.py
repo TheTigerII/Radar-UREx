@@ -321,7 +321,7 @@ def compute_micro_doppler_spectrum(
     range_axis: Optional[np.ndarray],
     *,
     target_range_m: Optional[float] = None,
-    range_half_width_bins: int = 2,
+    range_half_width_bins: int = 1,
     min_range_m: float = 0.25,
     max_range_m: float = 10.0,
 ) -> tuple[np.ndarray, Optional[float]]:
@@ -389,6 +389,194 @@ def compute_micro_doppler_spectrum(
         else None
     )
     return spectrum_db.astype(np.float32, copy=False), selected_range_m
+
+
+def compute_compensated_micro_doppler_spectrogram(
+    range_fft: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    config: RadarDspConfig,
+    *,
+    target_position_m: tuple[float, float, float],
+    target_range_m: float,
+    range_half_width_bins: int = 1,
+    window_length: int = 96,
+    hop_length: int = 48,
+    fft_size: int = 128,
+) -> np.ndarray:
+    """Return short-window spectra from a phase-aligned ODS TDM sequence.
+
+    The IWR6843ISK-ODS transmitters occupy different phase centers. For a
+    tracked far-field point, rotate every chronological chirp to the TX1 phase
+    center, then apply overlapping slow-time FFTs without separating the TDM
+    transmitters. This changes the effective sample spacing from one complete
+    TDM loop to one chirp interval. The nominal geometry correction does not
+    include measured per-channel RF calibration.
+
+    Output layout is [centered Doppler bin, short-time window]. An empty array
+    is returned when the frame/configuration cannot support merged-TX
+    processing.
+    """
+    if range_fft.ndim != 3 or range_fft.size == 0:
+        return np.empty((0, 0), dtype=np.float32)
+    if window_length <= 0 or hop_length <= 0 or fft_size < window_length:
+        raise ValueError(
+            "Micro-Doppler window/hop must be positive and FFT size must "
+            "cover the window"
+        )
+
+    chirps_per_loop = config.num_chirps_per_loop or 1
+    if chirps_per_loop != 3 or range_fft.shape[0] < window_length:
+        return np.empty((0, 0), dtype=np.float32)
+
+    tx_indices = _tx_indices_for_chirps(config, chirps_per_loop)
+    if set(tx_indices) != {0, 1, 2}:
+        return np.empty((0, 0), dtype=np.float32)
+
+    target_position = np.asarray(target_position_m, dtype=np.float64)
+    target_norm = float(np.linalg.norm(target_position))
+    if target_position.shape != (3,) or not np.all(np.isfinite(target_position)):
+        return np.empty((0, 0), dtype=np.float32)
+    if target_norm <= 0.0 or not np.isfinite(target_range_m):
+        return np.empty((0, 0), dtype=np.float32)
+    direction = target_position / target_norm
+
+    range_bins = range_fft.shape[-1]
+    physical_range_axis = (
+        np.asarray(range_axis, dtype=np.float64)
+        if range_axis is not None and range_axis.size == range_bins
+        else None
+    )
+    if physical_range_axis is None:
+        return np.empty((0, 0), dtype=np.float32)
+    center_bin = int(np.argmin(np.abs(physical_range_axis - target_range_m)))
+    half_width = max(int(range_half_width_bins), 0)
+    gate_start = max(center_bin - half_width, 0)
+    gate_end = min(center_bin + half_width + 1, range_bins)
+
+    # Positions are relative to TX1 and expressed in wavelengths. The ODS
+    # page-40 layout places TX2 one wavelength in +azimuth from TX1 and TX3
+    # one wavelength below TX2 in elevation.
+    tx_positions_wavelengths = np.asarray(
+        (
+            (0.0, 0.0, 0.0),  # TX1
+            (1.0, 0.0, 0.0),  # TX2
+            (1.0, 0.0, -1.0),  # TX3
+        ),
+        dtype=np.float64,
+    )
+    tx_phase = 2.0 * np.pi * (tx_positions_wavelengths @ direction)
+    chirp_tx_indices = np.resize(
+        np.asarray(tx_indices, dtype=np.intp),
+        range_fft.shape[0],
+    )
+    phase_correction = np.exp(-1j * tx_phase[chirp_tx_indices])
+    gated_sequence = (
+        range_fft[:, :, gate_start:gate_end]
+        * phase_correction[:, np.newaxis, np.newaxis]
+    )
+    gated_sequence = _equalize_tdm_slots(gated_sequence, chirps_per_loop)
+
+    hann = np.hanning(window_length).astype(np.float32)
+    spectra = []
+    for start in range(0, range_fft.shape[0] - window_length + 1, hop_length):
+        segment = _remove_tdm_slot_static_offsets(
+            gated_sequence[start : start + window_length],
+            chirps_per_loop,
+        )
+        windowed = segment * hann[:, None, None]
+        transformed = np.fft.fftshift(
+            np.fft.fft(windowed, n=fft_size, axis=0),
+            axes=0,
+        )
+        power = np.sum(np.abs(transformed) ** 2, axis=(1, 2))
+        spectra.append(10.0 * np.log10(power + 1e-12))
+
+    if not spectra:
+        return np.empty((fft_size, 0), dtype=np.float32)
+    return np.stack(spectra, axis=1).astype(np.float32, copy=False)
+
+
+def _equalize_tdm_slots(sequence: np.ndarray, slot_count: int) -> np.ndarray:
+    """Remove a repeating TDM-slot complex gain without erasing mean Doppler.
+
+    A static return with unequal TX gains has a period-three discontinuity and
+    therefore creates replicas at +/- one third of the merged sampling rate.
+    Estimate one amplitude and phase offset per slot and channel. The phase
+    estimator first finds the common adjacent-chirp phase step, so a moving
+    target's mean Doppler progression remains in the corrected sequence.
+    """
+    if slot_count != 3 or sequence.shape[0] < 2 * slot_count:
+        return sequence
+
+    complete_samples = (sequence.shape[0] // slot_count) * slot_count
+    slots = sequence[:complete_samples].reshape(
+        -1,
+        slot_count,
+        *sequence.shape[1:],
+    )
+    slot_0 = slots[:, 0]
+    slot_1 = slots[:, 1]
+    slot_2 = slots[:, 2]
+    cross_01 = np.sum(np.conj(slot_0) * slot_1, axis=0)
+    cross_12 = np.sum(np.conj(slot_1) * slot_2, axis=0)
+    cross_20 = np.sum(np.conj(slot_2[:-1]) * slot_0[1:], axis=0)
+
+    common_phase_step = np.angle(cross_01 * cross_12 * cross_20) / 3.0
+    slot_1_offset = np.angle(cross_01) - common_phase_step
+    slot_2_offset = (
+        slot_1_offset + np.angle(cross_12) - common_phase_step
+    )
+    phase_offsets = np.stack(
+        (
+            np.zeros_like(common_phase_step),
+            slot_1_offset,
+            slot_2_offset,
+        ),
+        axis=0,
+    )
+
+    slot_rms = np.sqrt(np.mean(np.abs(slots) ** 2, axis=0))
+    target_rms = np.mean(slot_rms, axis=0, keepdims=True)
+    amplitude_scale = np.divide(
+        target_rms,
+        slot_rms,
+        out=np.ones_like(slot_rms, dtype=np.float64),
+        where=slot_rms > np.finfo(np.float32).eps,
+    )
+    amplitude_scale = np.clip(amplitude_scale, 0.25, 4.0)
+    slot_correction = amplitude_scale * np.exp(-1j * phase_offsets)
+
+    corrected = np.array(sequence, copy=True)
+    correction_by_chirp = slot_correction[
+        np.arange(complete_samples, dtype=np.intp) % slot_count
+    ]
+    corrected[:complete_samples] *= correction_by_chirp
+    return corrected
+
+
+def _remove_tdm_slot_static_offsets(
+    sequence: np.ndarray,
+    slot_count: int,
+) -> np.ndarray:
+    """Force the static complex mean to be identical in every TDM slot.
+
+    This local operation complements frame-level gain equalization. Any
+    constant return becomes one common DC value rather than a repeating
+    three-value sequence, so it cannot generate the +/- fs/3 replica rows.
+    Variations around each slot mean, including micro-Doppler modulation, are
+    retained.
+    """
+    if slot_count <= 1 or sequence.shape[0] < slot_count:
+        return sequence
+    slot_means = np.stack(
+        [np.mean(sequence[index::slot_count], axis=0) for index in range(slot_count)],
+        axis=0,
+    )
+    common_mean = np.mean(slot_means, axis=0)
+    corrected = np.array(sequence, copy=True)
+    for index in range(slot_count):
+        corrected[index::slot_count] += common_mean - slot_means[index]
+    return corrected
 
 
 def cluster_point_cloud(

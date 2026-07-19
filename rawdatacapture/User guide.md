@@ -86,8 +86,9 @@ point-cloud/micro-Doppler mode shows both plots in one window.
    or enter `0` for an unlimited run.
 3. Detects serial ports and asks which command UART to use when needed.
 4. Starts `livedatacapture.py` with `profile.cfg` and `setup.json` by default.
-5. Saves valid frames to a timestamped `.bin` under
-   `rawdatacapture\captures` unless `--raw-output` is given.
+5. Streams processed 3D point clouds and micro-Doppler spectra to a timestamped
+   `.jsonl` file under `rawdatacapture\captures`. Raw ADC recording is disabled
+   unless `--raw-output` is explicitly given.
 6. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
    control.
 7. Stops hardware control before capture when the duration expires or Ctrl+C
@@ -232,21 +233,38 @@ magnitude, the range-Doppler display, and micro-Doppler retain raw power.
 python run.py --display point-cloud-micro-doppler
 ```
 
-This mode places the 3D point cloud and a rolling 150-update micro-Doppler
-spectrogram side by side. It reuses one Doppler cube for both plots. The
-spectrogram uses a five-range-bin gate centered on the strongest point-cloud
+This mode places the 3D point cloud and a rolling 60-window micro-Doppler
+spectrogram side by side. It reuses one Doppler cube for tracking and range-gate
+selection. Once a 3D target track is available, the micro-Doppler path uses the
+nominal IWR6843ISK-ODS TX geometry to align the chronological TDM chirps to the
+TX1 phase center. It then calculates 96-sample Hann-windowed FFTs with a
+48-sample hop and a 128-point FFT. A complete 384-chirp frame produces seven
+short-time spectra. Frame-adaptive complex equalization plus window-local static
+offset cancellation removes the repeating TX-slot phase and amplitude
+discontinuity that would otherwise create two replicas of a static return. This
+display uses only the merged-TX path; before
+track acquisition it uses a boresight direction for nominal phase alignment. The
+spectrogram uses a three-range-bin gate centered on the strongest point-cloud
 return. If the point cloud is empty, it selects the strongest non-zero-Doppler
 range inside `--max-range-m`. The current gate range is shown in the
 spectrogram title.
 
-The horizontal spectrogram axis is measured in display updates, with the newest
-column at zero. The vertical axis is centered Doppler bin because velocity is
-not yet calibrated. Its magnitude color scale uses the same fixed 40 to 120 dB
+The horizontal spectrogram axis is measured in STFT windows, with the newest
+column at zero. Within an active chirp burst, compensated samples are spaced by
+one chirp interval; the frame still contains a gap before the next burst. The
+vertical axis is centered Doppler bin because velocity is not yet calibrated.
+Its magnitude color scale uses the same fixed 40 to 120 dB
 limits as the 3D point cloud, so colors remain comparable between updates and
 the two plots. One shared magnitude colorbar sits between both plots. Automatic
 gating can switch between targets when multiple
 strong objects are present; it is a visualization aid rather than persistent
 target tracking.
+
+The point-cloud title shows its measured plot refresh rate. The micro-Doppler
+title shows both its measured plot refresh rate and the rate at which new STFT
+windows enter the spectrogram. On Matplotlib backends that support it, the
+combined view blits only the changing scatter, image, and title artists rather
+than redrawing the full 3D axes and colorbar for every frame.
 
 ### Display performance
 
@@ -263,7 +281,30 @@ The combined display is the most computationally expensive mode. Use
 
 Use `--display none` for packet-loss testing or headless operation.
 
-## Save Raw Frames
+## Processed Output
+
+The integrated launcher saves processed data by default. Override its path with:
+
+```powershell
+python run.py --processed-output .\rawdatacapture\captures\processed.jsonl
+```
+
+The first JSONL record contains the radar configuration and column definitions.
+Each following record contains one processed update with:
+
+- `points`: `[x_m, y_m, z_m, magnitude_db]` rows;
+- `clusters`: `[x_m, y_m, z_m, point_count]` rows;
+- the current target-track state;
+- the newest complete centered-bin micro-Doppler spectrum in dB;
+- all short-time micro-Doppler windows generated from that frame, laid out as
+  `[window][centered_doppler_bin]`;
+- the selected micro-Doppler range gate.
+
+Updates are written incrementally, so a clean shutdown is not required to read
+the records already saved. Processed output is generated even when
+`--display none` is used.
+
+## Optional Raw Frames
 
 ```powershell
 python rawdatacapture\livedatacapture.py `
@@ -274,9 +315,10 @@ Only valid complete frames are written, without DCA1000 headers. The default
 metadata path is `test_capture.bin.json`; override it with `--raw-metadata`.
 The sidecar is written during clean shutdown.
 
-Raw files have no file-size limit. A `run.py` session is limited to 3 minutes by
+Raw recording is opt-in because its files are much larger than processed JSONL
+output. Files have no size limit. A `run.py` session is limited to 3 minutes by
 default, but `livedatacapture.py` alone and `run.py --duration-minutes 0` run
-until stopped. Monitor free disk space during long captures.
+until stopped.
 
 ## Logging and Statistics
 

@@ -17,6 +17,7 @@ try:
         AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
+        compute_compensated_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
         compute_point_cloud,
@@ -32,6 +33,7 @@ except ImportError:
         AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
+        compute_compensated_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
         compute_point_cloud,
@@ -67,8 +69,11 @@ DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
-MICRO_DOPPLER_HISTORY_UPDATES = 150
-MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
+MICRO_DOPPLER_HISTORY_UPDATES = 60
+MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 1
+MICRO_DOPPLER_WINDOW_SAMPLES = 96
+MICRO_DOPPLER_HOP_SAMPLES = 48
+MICRO_DOPPLER_FFT_SIZE = 128
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -642,6 +647,129 @@ def _point_cloud_track_candidates(
     return candidates
 
 
+class ProcessedOutputWriter:
+    """Stream processed point-cloud and micro-Doppler updates as JSON Lines."""
+
+    def __init__(
+        self,
+        output_path: Optional[Path],
+        config: RadarCaptureConfig,
+        update_every: int,
+        emit_func: Optional[EmitFunc] = None,
+    ) -> None:
+        self.emit = emit_func or emit
+        self.output_path = _resolve_output_path(output_path) if output_path else None
+        self.file: Optional[TextIO] = None
+        self.updates_saved = 0
+
+        if self.output_path is None:
+            return
+
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = self.output_path.open("w", encoding="utf-8", buffering=1)
+        metadata = {
+            "record_type": "metadata",
+            "format": "radar-processed-jsonl",
+            "version": 1,
+            "created_at": _timestamp(),
+            "display_update_every": max(int(update_every), 1),
+            "point_columns": ["x_m", "y_m", "z_m", "magnitude_db"],
+            "cluster_columns": ["x_m", "y_m", "z_m", "point_count"],
+            "micro_doppler_units": "dB power",
+            "micro_doppler_axis": "centered Doppler bin",
+            "micro_doppler_windows_layout": ["window", "centered_doppler_bin"],
+            "micro_doppler_processing": {
+                "mode": "phase-compensated merged-TX TDM STFT",
+                "window": "Hann",
+                "window_samples": MICRO_DOPPLER_WINDOW_SAMPLES,
+                "hop_samples": MICRO_DOPPLER_HOP_SAMPLES,
+                "fft_size": MICRO_DOPPLER_FFT_SIZE,
+                "phase_reference": "TX1",
+                "rf_channel_calibrated": False,
+                "adaptive_tx_slot_equalization": True,
+            },
+            "radar_config": {
+                "num_adc_samples": config.num_adc_samples,
+                "num_rx_channels": config.num_rx_channels,
+                "num_chirps_per_frame": config.num_chirps_per_frame,
+                "num_loops": config.num_loops,
+                "num_chirps_per_loop": config.num_chirps_per_loop,
+                "tx_channel_masks": config.tx_channel_masks,
+                "sample_rate_ksps": config.sample_rate_ksps,
+                "frequency_slope_mhz_per_us": config.frequency_slope_mhz_per_us,
+                "range_resolution_m": config.range_resolution_m,
+            },
+        }
+        self.file.write(json.dumps(metadata, separators=(",", ":")) + "\n")
+        self.emit(f"Saving processed radar output to {self.output_path}")
+
+    @property
+    def enabled(self) -> bool:
+        return self.file is not None
+
+    def write_update(
+        self,
+        *,
+        frame_index: int,
+        points: np.ndarray,
+        clusters: np.ndarray,
+        target_track: Optional[TargetTrack],
+        micro_doppler_db: np.ndarray,
+        selected_range_m: Optional[float],
+        micro_doppler_windows_db: Optional[np.ndarray] = None,
+    ) -> None:
+        if self.file is None:
+            return
+
+        track = None
+        if target_track is not None:
+            track = {
+                "position_m": list(target_track.position_m),
+                "velocity_m_per_update": list(target_track.velocity_m_per_update),
+                "age_updates": target_track.age_updates,
+                "hits": target_track.hits,
+                "missed_updates": target_track.missed_updates,
+                "confirmed": target_track.confirmed,
+                "predicted": target_track.is_predicted,
+            }
+        record = {
+            "record_type": "update",
+            "update_index": self.updates_saved,
+            "processed_frame_index": int(frame_index),
+            "recorded_at": datetime.now().astimezone().isoformat(
+                timespec="milliseconds"
+            ),
+            "points": np.asarray(points, dtype=np.float32).tolist(),
+            "clusters": np.asarray(clusters, dtype=np.float32).tolist(),
+            "target_track": track,
+            "micro_doppler_db": np.asarray(
+                micro_doppler_db,
+                dtype=np.float32,
+            ).tolist(),
+            "micro_doppler_windows_db": np.asarray(
+                micro_doppler_windows_db
+                if micro_doppler_windows_db is not None
+                else np.asarray(micro_doppler_db)[:, np.newaxis],
+                dtype=np.float32,
+            ).T.tolist(),
+            "selected_range_m": (
+                float(selected_range_m) if selected_range_m is not None else None
+            ),
+        }
+        self.file.write(json.dumps(record, separators=(",", ":")) + "\n")
+        self.updates_saved += 1
+
+    def close(self) -> None:
+        if self.file is None:
+            return
+        self.file.close()
+        self.file = None
+        self.emit(
+            f"Processed radar output saved: updates={self.updates_saved}, "
+            f"path={self.output_path}"
+        )
+
+
 class DisplayPayloadSink:
     def __init__(
         self,
@@ -656,6 +784,7 @@ class DisplayPayloadSink:
         clutter_map_update_rate: float = DEFAULT_CLUTTER_MAP_UPDATE_RATE,
         clutter_map_warmup_frames: int = DEFAULT_CLUTTER_MAP_WARMUP_FRAMES,
         clutter_map_min_snr_db: float = DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
+        processed_writer: Optional[ProcessedOutputWriter] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -665,6 +794,7 @@ class DisplayPayloadSink:
         self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
         self.cluster_eps_m = max(float(cluster_eps_m), 0.0)
         self.cluster_min_samples = max(int(cluster_min_samples), 1)
+        self.processed_writer = processed_writer
         self.clutter_map = (
             AdaptiveClutterMap(
                 update_rate=clutter_map_update_rate,
@@ -676,6 +806,9 @@ class DisplayPayloadSink:
         )
         self.target_tracker = SingleTargetTracker()
         self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
+        self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
+        self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
+        self.micro_doppler_windows_generated = 0
         self.frame_count = 0
 
     def update(
@@ -683,13 +816,48 @@ class DisplayPayloadSink:
         range_fft: np.ndarray,
         range_axis_m: Optional[np.ndarray],
     ) -> None:
-        if self.mode == "none" or self.payload_queue is None:
+        save_processed = bool(
+            self.processed_writer is not None and self.processed_writer.enabled
+        )
+        if self.mode == "none" and not save_processed:
+            return
+        if self.payload_queue is None and not save_processed:
             return
 
         self.frame_count += 1
         if self.frame_count % self.update_every != 0:
             return
 
+        combined_payload = None
+        if save_processed or self.mode == COMBINED_DISPLAY_MODE:
+            combined_payload = self._compute_combined_payload(
+                range_fft,
+                range_axis_m,
+            )
+            if save_processed:
+                assert self.processed_writer is not None
+                (
+                    points,
+                    clusters,
+                    target_track,
+                    _history,
+                    selected_range_m,
+                    _window_count,
+                ) = (
+                    combined_payload
+                )
+                self.processed_writer.write_update(
+                    frame_index=self.frame_count,
+                    points=points,
+                    clusters=clusters,
+                    target_track=target_track,
+                    micro_doppler_db=self.latest_micro_doppler_db,
+                    micro_doppler_windows_db=self.latest_micro_doppler_windows_db,
+                    selected_range_m=selected_range_m,
+                )
+
+        if self.mode == "none":
+            return
         if self.mode == "range":
             payload = (
                 range_axis_m,
@@ -701,84 +869,139 @@ class DisplayPayloadSink:
                 compute_range_doppler_heatmap(range_fft, self.config),
             )
         elif self.mode == "point-cloud":
-            points = compute_point_cloud(
-                range_fft,
-                range_axis_m,
-                self.config,
-                clutter_map=self.clutter_map,
-                max_range_m=self.max_range_m,
-                azimuth_fov_deg=self.point_cloud_fov_deg,
-                elevation_fov_deg=self.point_cloud_fov_deg,
-            )
-            clusters = cluster_point_cloud(
-                points,
-                eps_m=self.cluster_eps_m,
-                min_samples=self.cluster_min_samples,
-            )
-            target_track = self.target_tracker.update(
-                _point_cloud_track_candidates(
+            if combined_payload is not None:
+                payload = combined_payload[:3]
+            else:
+                points = compute_point_cloud(
+                    range_fft,
+                    range_axis_m,
+                    self.config,
+                    clutter_map=self.clutter_map,
+                    max_range_m=self.max_range_m,
+                    azimuth_fov_deg=self.point_cloud_fov_deg,
+                    elevation_fov_deg=self.point_cloud_fov_deg,
+                )
+                clusters = cluster_point_cloud(
+                    points,
+                    eps_m=self.cluster_eps_m,
+                    min_samples=self.cluster_min_samples,
+                )
+                target_track = self.target_tracker.update(
+                    _point_cloud_track_candidates(
+                        points,
+                        clusters,
+                        assignment_distance_m=max(
+                            2.0 * self.cluster_eps_m,
+                            1e-6,
+                        ),
+                    )
+                )
+                payload = (
                     points,
                     clusters,
-                    assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
+                    target_track,
                 )
-            )
-            payload = (
-                points,
-                clusters,
-                target_track,
-            )
         elif self.mode == COMBINED_DISPLAY_MODE:
-            doppler_cube = compute_range_doppler_fft(range_fft, self.config)
-            points = compute_point_cloud(
-                range_fft,
-                range_axis_m,
-                self.config,
-                doppler_cube=doppler_cube,
-                clutter_map=self.clutter_map,
-                max_range_m=self.max_range_m,
-                azimuth_fov_deg=self.point_cloud_fov_deg,
-                elevation_fov_deg=self.point_cloud_fov_deg,
-            )
-            clusters = cluster_point_cloud(
-                points,
-                eps_m=self.cluster_eps_m,
-                min_samples=self.cluster_min_samples,
-            )
-            target_track = self.target_tracker.update(
-                _point_cloud_track_candidates(
-                    points,
-                    clusters,
-                    assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
-                )
-            )
-            target_range_m = (
-                target_track.range_m if target_track is not None else None
-            )
-            spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
-                doppler_cube,
-                range_axis_m,
-                target_range_m=target_range_m,
-                range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
-                max_range_m=self.max_range_m,
-            )
-            if spectrum_db.size:
-                self.micro_doppler_history.append(spectrum_db)
-            spectrogram_db = (
-                np.stack(tuple(self.micro_doppler_history), axis=1)
-                if self.micro_doppler_history
-                else np.empty((0, 0), dtype=np.float32)
-            )
-            payload = (
-                points,
-                clusters,
-                target_track,
-                spectrogram_db,
-                selected_range_m,
-            )
+            assert combined_payload is not None
+            payload = combined_payload
         else:
             return
 
-        _put_latest_queue_payload(self.payload_queue, payload)
+        if self.payload_queue is not None:
+            _put_latest_queue_payload(self.payload_queue, payload)
+
+    def _compute_combined_payload(
+        self,
+        range_fft: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+    ) -> tuple[
+        np.ndarray,
+        np.ndarray,
+        Optional[TargetTrack],
+        np.ndarray,
+        Optional[float],
+        int,
+    ]:
+        doppler_cube = compute_range_doppler_fft(range_fft, self.config)
+        points = compute_point_cloud(
+            range_fft,
+            range_axis_m,
+            self.config,
+            doppler_cube=doppler_cube,
+            clutter_map=self.clutter_map,
+            max_range_m=self.max_range_m,
+            azimuth_fov_deg=self.point_cloud_fov_deg,
+            elevation_fov_deg=self.point_cloud_fov_deg,
+        )
+        clusters = cluster_point_cloud(
+            points,
+            eps_m=self.cluster_eps_m,
+            min_samples=self.cluster_min_samples,
+        )
+        target_track = self.target_tracker.update(
+            _point_cloud_track_candidates(
+                points,
+                clusters,
+                assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
+            )
+        )
+        target_range_m = target_track.range_m if target_track is not None else None
+        _spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+            doppler_cube,
+            range_axis_m,
+            target_range_m=target_range_m,
+            range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+            max_range_m=self.max_range_m,
+        )
+        short_time_spectra = np.empty((0, 0), dtype=np.float32)
+        if selected_range_m is not None:
+            target_position_m = (
+                target_track.position_m
+                if target_track is not None
+                else (0.0, selected_range_m, 0.0)
+            )
+            short_time_spectra = compute_compensated_micro_doppler_spectrogram(
+                range_fft,
+                range_axis_m,
+                self.config,
+                target_position_m=target_position_m,
+                target_range_m=selected_range_m,
+                range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+                window_length=MICRO_DOPPLER_WINDOW_SAMPLES,
+                hop_length=MICRO_DOPPLER_HOP_SAMPLES,
+                fft_size=MICRO_DOPPLER_FFT_SIZE,
+            )
+        new_window_count = short_time_spectra.shape[1]
+        self.micro_doppler_windows_generated += new_window_count
+        if short_time_spectra.size:
+            self.latest_micro_doppler_db = short_time_spectra[:, -1]
+            self.latest_micro_doppler_windows_db = short_time_spectra
+            if (
+                self.micro_doppler_history
+                and self.micro_doppler_history[0].shape
+                != self.latest_micro_doppler_db.shape
+            ):
+                self.micro_doppler_history.clear()
+            self.micro_doppler_history.extend(
+                short_time_spectra[:, index]
+                for index in range(short_time_spectra.shape[1])
+            )
+        else:
+            self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
+            self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
+        spectrogram_db = (
+            np.stack(tuple(self.micro_doppler_history), axis=1)
+            if self.micro_doppler_history
+            else np.empty((0, 0), dtype=np.float32)
+        )
+        return (
+            points,
+            clusters,
+            target_track,
+            spectrogram_db,
+            selected_range_m,
+            self.micro_doppler_windows_generated,
+        )
 
 
 def _put_latest_queue_payload(payload_queue: mp.Queue, payload: Any) -> None:
@@ -1013,7 +1236,7 @@ def _run_display_process(
                 vmax=POINT_CLOUD_MAGNITUDE_DB_MAX,
             )
             micro_doppler_axis.set_title("Live Micro-Doppler Spectrogram")
-            micro_doppler_axis.set_xlabel("Display updates (newest at 0)")
+            micro_doppler_axis.set_xlabel("STFT windows (newest at 0)")
             micro_doppler_axis.set_ylabel("Centered Doppler bin")
         if magnitude_colorbar_axis is not None:
             figure.colorbar(
@@ -1034,6 +1257,34 @@ def _run_display_process(
         figure.tight_layout()
     plt.show(block=False)
 
+    dynamic_artists = []
+    if getattr(figure.canvas, "supports_blit", False) and mode in {
+        "point-cloud",
+        COMBINED_DISPLAY_MODE,
+    }:
+        dynamic_artists.extend(
+            artist
+            for artist in (scatter, cluster_scatter, target_scatter, axis.title)
+            if artist is not None
+        )
+        if micro_doppler_axis is not None and micro_doppler_image is not None:
+            dynamic_artists.extend((micro_doppler_image, micro_doppler_axis.title))
+        for artist in dynamic_artists:
+            artist.set_animated(True)
+    figure.canvas.draw()
+    display_background = (
+        figure.canvas.copy_from_bbox(figure.bbox) if dynamic_artists else None
+    )
+
+    def invalidate_display_background(_event: Any) -> None:
+        nonlocal display_background
+        display_background = None
+
+    figure.canvas.mpl_connect("resize_event", invalidate_display_background)
+    point_cloud_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
+    micro_doppler_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
+    previous_micro_doppler_window_count: Optional[int] = None
+
     try:
         while not stop_event.is_set():
             try:
@@ -1043,6 +1294,15 @@ def _run_display_process(
                         payload = payload_queue.get_nowait()
                     except queue.Empty:
                         break
+
+                displayed_at_s = time.perf_counter()
+                point_cloud_rate_hz = None
+                if mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
+                    point_cloud_rate_hz = _record_event_rate(
+                        point_cloud_rate_events,
+                        displayed_at_s,
+                        1.0,
+                    )
 
                 if mode == "range" and line is not None:
                     range_axis_m, range_profile = payload
@@ -1073,6 +1333,7 @@ def _run_display_process(
                         point_cloud_fov_deg,
                         target_scatter,
                         target_track,
+                        point_cloud_rate_hz,
                     )
                 elif (
                     mode == COMBINED_DISPLAY_MODE
@@ -1088,7 +1349,20 @@ def _run_display_process(
                         target_track,
                         spectrogram_db,
                         selected_range_m,
+                        micro_doppler_window_count,
                     ) = payload
+                    new_window_count = (
+                        micro_doppler_window_count
+                        - previous_micro_doppler_window_count
+                        if previous_micro_doppler_window_count is not None
+                        else 0
+                    )
+                    previous_micro_doppler_window_count = micro_doppler_window_count
+                    micro_doppler_rate_hz = _record_event_rate(
+                        micro_doppler_rate_events,
+                        displayed_at_s,
+                        float(new_window_count),
+                    )
                     _draw_point_cloud(
                         axis,
                         scatter,
@@ -1099,25 +1373,63 @@ def _run_display_process(
                         point_cloud_fov_deg,
                         target_scatter,
                         target_track,
+                        point_cloud_rate_hz,
                     )
                     _draw_micro_doppler(
                         micro_doppler_axis,
                         micro_doppler_image,
                         spectrogram_db,
                         selected_range_m,
+                        point_cloud_rate_hz,
+                        micro_doppler_rate_hz,
                     )
-                figure.canvas.draw()
+                if dynamic_artists:
+                    if display_background is None:
+                        figure.canvas.draw()
+                        display_background = figure.canvas.copy_from_bbox(figure.bbox)
+                    figure.canvas.restore_region(display_background)
+                    for artist in dynamic_artists:
+                        if hasattr(artist, "do_3d_projection"):
+                            artist.do_3d_projection()
+                        artist.axes.draw_artist(artist)
+                    figure.canvas.blit(figure.bbox)
+                    figure.canvas.flush_events()
+                    figure.stale = False
+                else:
+                    figure.canvas.draw()
             except queue.Empty:
                 pass
             except KeyboardInterrupt:
                 break
 
             try:
-                plt.pause(pause_seconds)
+                if dynamic_artists:
+                    figure.canvas.flush_events()
+                    time.sleep(pause_seconds)
+                else:
+                    plt.pause(pause_seconds)
             except KeyboardInterrupt:
                 break
     finally:
         plt.close(figure)
+
+
+def _record_event_rate(
+    events: deque[tuple[float, float]],
+    occurred_at_s: float,
+    event_units: float,
+) -> Optional[float]:
+    """Record an event and return its rolling unit rate over two seconds."""
+    events.append((float(occurred_at_s), max(float(event_units), 0.0)))
+    cutoff_s = occurred_at_s - 2.0
+    while len(events) > 2 and events[0][0] < cutoff_s:
+        events.popleft()
+    if len(events) < 2:
+        return None
+    elapsed_s = events[-1][0] - events[0][0]
+    if elapsed_s <= 0.0:
+        return None
+    return sum(units for _timestamp_s, units in tuple(events)[1:]) / elapsed_s
 
 
 def _draw_range_profile(
@@ -1154,6 +1466,8 @@ def _draw_micro_doppler(
     image: Any,
     spectrogram_db: np.ndarray,
     selected_range_m: Optional[float],
+    display_update_rate_hz: Optional[float] = None,
+    stft_window_rate_hz: Optional[float] = None,
 ) -> None:
     if spectrogram_db.ndim != 2 or spectrogram_db.size == 0:
         return
@@ -1175,7 +1489,13 @@ def _draw_micro_doppler(
         if selected_range_m is not None
         else ""
     )
-    axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}")
+    rate_text = (
+        f" — plot {display_update_rate_hz:.1f} Hz, "
+        f"STFT {stft_window_rate_hz:.1f} windows/s"
+        if display_update_rate_hz is not None and stft_window_rate_hz is not None
+        else ""
+    )
+    axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}{rate_text}")
 
 
 def _draw_point_cloud(
@@ -1188,6 +1508,7 @@ def _draw_point_cloud(
     point_cloud_fov_deg: float,
     target_scatter: Optional[Any] = None,
     target_track: Optional[TargetTrack] = None,
+    update_rate_hz: Optional[float] = None,
 ) -> None:
     empty = np.array([], dtype=np.float32)
     if points.size == 0:
@@ -1231,6 +1552,11 @@ def _draw_point_cloud(
             target_scatter.set_alpha(0.4 if target_track.is_predicted else 1.0)
 
     _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
+    rate_text = f", {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
+    axis.set_title(
+        "Live 3D Point Cloud "
+        f"(±{point_cloud_fov_deg:g}° FOV, {point_cloud_range_m:g} m{rate_text})"
+    )
 
 
 def _set_point_cloud_axes(
@@ -1335,6 +1661,7 @@ def _run_frame_processor(
     display_payload_queue: Optional[mp.Queue],
     raw_output: Optional[Path],
     raw_metadata: Optional[Path],
+    processed_output: Optional[Path],
     display_mode: str,
     display_update_every: int,
     max_range_m: float,
@@ -1349,6 +1676,12 @@ def _run_frame_processor(
         _queue_emit(log_queue, message)
 
     raw_writer = RawFrameWriter(raw_output, raw_metadata, config, worker_emit)
+    processed_writer = ProcessedOutputWriter(
+        processed_output,
+        config,
+        display_update_every,
+        worker_emit,
+    )
     display = DisplayPayloadSink(
         display_mode,
         display_update_every,
@@ -1361,11 +1694,12 @@ def _run_frame_processor(
         clutter_map_update_rate,
         clutter_map_warmup_frames,
         clutter_map_min_snr_db,
+        processed_writer,
     )
-    if display.clutter_map is not None and display_mode in {
-        "point-cloud",
-        COMBINED_DISPLAY_MODE,
-    }:
+    if display.clutter_map is not None and (
+        display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
+        or processed_writer.enabled
+    ):
         worker_emit(
             "Adaptive clutter map enabled: "
             f"update_rate={clutter_map_update_rate:g}, "
@@ -1386,6 +1720,7 @@ def _run_frame_processor(
         worker_emit(f"Frame processor stopped after error: {exc!r}")
     finally:
         raw_writer.close()
+        processed_writer.close()
 
 
 def listen_for_frames(
@@ -1588,6 +1923,14 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Write raw capture metadata to this JSON file. "
             "Defaults to '<raw-output>.json' when --raw-output is used."
+        ),
+    )
+    parser.add_argument(
+        "--processed-output",
+        type=Path,
+        help=(
+            "Stream processed 3D point clouds and micro-Doppler spectra to "
+            "this JSONL file."
         ),
     )
     parser.add_argument(
@@ -2183,6 +2526,7 @@ def main() -> None:
                 display.payload_queue if display is not None else None,
                 args.raw_output,
                 args.raw_metadata,
+                args.processed_output,
                 args.display,
                 args.display_update_every,
                 args.max_range_m,
