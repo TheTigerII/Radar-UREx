@@ -126,11 +126,11 @@ Terminal 1 so raw metadata is finalized.
 
 ## Linux / Jetson
 
-Install dependencies:
+Create the environment, then install the capture dependencies listed in
+[`User guide.md`](User%20guide.md):
 
 ```bash
 python3 -m venv --system-site-packages .venv
-.venv/bin/python -m pip install -r requirements.txt
 ```
 
 Grant serial access, then log out and back in:

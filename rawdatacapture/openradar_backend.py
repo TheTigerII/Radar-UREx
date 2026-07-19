@@ -11,8 +11,9 @@ import numpy as np
 
 OPENRADAR_INSTALL_HINT = (
     "OpenRadar DSP is required. Create the project virtual environment as "
-    "described in 'rawdatacapture/User guide.md', install requirements.txt, "
-    "and run the application with that environment's Python."
+    "described in 'rawdatacapture/User guide.md', install the capture "
+    "dependencies listed there, and run the application with that "
+    "environment's Python."
 )
 
 

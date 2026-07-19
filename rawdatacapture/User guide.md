@@ -5,7 +5,7 @@ for an IWR6843ISK-ODS connected to a DCA1000EVM.
 
 ## Prerequisites
 
-- Python 3 with the dependencies from the repository `requirements.txt`.
+- Python 3 with the capture dependencies installed as shown below.
 - Git, which pip uses to install the pinned OpenRadar dependency.
 - PC Ethernet interface configured as `192.168.33.30/24` by default.
 - DCA1000 reachable at `192.168.33.180`.
@@ -19,20 +19,52 @@ lvdsStreamCfg -1 0 1 0
 Run commands from the repository root. Windows examples use `python` and
 backslashes; Linux examples may use `python3` and forward slashes.
 
-Create a project virtual environment and install dependencies before the first
-run. On Linux:
+Create a project virtual environment and install the pinned capture dependencies
+before the first run. On Linux:
 
 ```bash
 python3 -m venv --system-site-packages .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install \
+  "numpy<2" scipy matplotlib pyserial "scikit-learn>=1.4,<2"
+.venv/bin/python -m pip install \
+  "openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94"
 ```
 
 On Windows PowerShell:
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m pip install `
+  'numpy<2' scipy matplotlib pyserial 'scikit-learn>=1.4,<2'
+.venv\Scripts\python -m pip install `
+  'openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94'
 ```
+
+The version bounds and OpenRadar commit are intentional. Use the same commands
+when recreating an environment so range/Doppler behavior and saved model
+metadata remain reproducible.
+
+### Optional classification notebook and CNN dependencies
+
+The live capture programs do not require PyTorch. To use
+`classification.ipynb`, install Jupyter in a separate ML environment. The
+implemented depthwise-separable CNN additionally requires PyTorch 2.6 or newer
+and below version 3:
+
+```bash
+.venv/bin/python -m pip install jupyter "torch>=2.6,<3"
+```
+
+```powershell
+.venv\Scripts\python -m pip install jupyter 'torch>=2.6,<3'
+```
+
+PyTorch builds depend on the operating system, Python version, and whether CPU
+or CUDA acceleration is required. Check the official
+[PyTorch installation selector](https://pytorch.org/get-started/locally/) and
+use its platform-specific command when it differs from the generic command
+above. The CNN cells in `classification.ipynb` are unexecuted by default and
+training starts only when the training cell is run manually.
 
 Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
 local implementation for real-time performance. The IWR6843ISK-ODS planar-array

@@ -1,6 +1,0 @@
-numpy<2
-scipy
-matplotlib
-pyserial
-scikit-learn>=1.4,<2
-openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94
