@@ -39,6 +39,7 @@ from rawdatacapture.livedatacapture import (
     _draw_range_profile,
     _point_cloud_range_limit_m,
     _record_event_rate,
+    _set_rate_indicator,
     _set_point_cloud_axes,
     process_complete_frame,
 )
@@ -298,6 +299,25 @@ class PointCloudBoundsTests(unittest.TestCase):
         np.testing.assert_array_equal(target_scatter._offsets3d[2], (3.0,))
         target_scatter.set_alpha.assert_called_once_with(1.0)
 
+    def test_blitted_point_cloud_draw_does_not_mutate_static_axes(self) -> None:
+        axis = Mock()
+
+        _draw_point_cloud(
+            axis,
+            Mock(),
+            Mock(),
+            np.empty((0, 4), dtype=np.float32),
+            np.empty((0, 4), dtype=np.float32),
+            10.0,
+            60.0,
+            update_static_artists=False,
+        )
+
+        axis.set_xlim.assert_not_called()
+        axis.set_ylim.assert_not_called()
+        axis.set_zlim.assert_not_called()
+        axis.set_title.assert_not_called()
+
 
 class SingleTargetTrackerTests(unittest.TestCase):
     @staticmethod
@@ -518,9 +538,11 @@ class RangeDisplayBoundsTests(unittest.TestCase):
             range_axis_m,
             np.ones(5, dtype=np.float32),
             DEFAULT_MAX_RANGE_M,
+            29.8,
         )
 
         axis.set_xlim.assert_called_once_with(0.0, 10.0)
+        axis.set_title.assert_called_once_with("Live Range Profile — 29.8 Hz")
 
     def test_range_doppler_uses_ten_meter_default_limit(self) -> None:
         axis = Mock()
@@ -533,9 +555,13 @@ class RangeDisplayBoundsTests(unittest.TestCase):
             range_axis_m,
             np.ones((4, 5), dtype=np.float32),
             DEFAULT_MAX_RANGE_M,
+            29.8,
         )
 
         axis.set_xlim.assert_called_once_with(0.0, 10.0)
+        axis.set_title.assert_called_once_with(
+            "Live Range-Doppler Heatmap — 29.8 Hz"
+        )
 
 
 class MicroDopplerDisplayTests(unittest.TestCase):
@@ -565,12 +591,53 @@ class MicroDopplerDisplayTests(unittest.TestCase):
             " — plot 29.8 Hz, STFT 208.6 windows/s"
         )
 
+    def test_blitted_draw_does_not_mutate_static_axes(self) -> None:
+        axis = Mock()
+        image = Mock()
+        spectrogram = np.arange(12, dtype=np.float32).reshape(4, 3)
+
+        _draw_micro_doppler(
+            axis,
+            image,
+            spectrogram,
+            2.5,
+            update_axes=False,
+            update_title=False,
+        )
+
+        axis.set_xlim.assert_not_called()
+        axis.set_ylim.assert_not_called()
+        axis.set_title.assert_not_called()
+
     def test_event_rate_counts_units_after_initial_timestamp(self) -> None:
         events = deque()
 
         self.assertIsNone(_record_event_rate(events, 10.0, 7.0))
         self.assertEqual(_record_event_rate(events, 10.5, 7.0), 14.0)
         self.assertEqual(_record_event_rate(events, 11.0, 7.0), 14.0)
+
+    def test_rate_indicator_formats_display_and_stft_rates(self) -> None:
+        artist = Mock()
+
+        _set_rate_indicator(
+            artist,
+            29.8,
+            208.6,
+            include_stft_rate=True,
+            range_gate_m=2.5,
+        )
+
+        artist.set_text.assert_called_once_with(
+            "Gate: 2.50 m\nRefresh rate: 29.8 Hz\n"
+            "STFT rate: 208.6 windows/s"
+        )
+
+    def test_rate_indicator_shows_measurement_pending(self) -> None:
+        artist = Mock()
+
+        _set_rate_indicator(artist, None)
+
+        artist.set_text.assert_called_once_with("Refresh rate: measuring...")
 
 if __name__ == "__main__":
     unittest.main()

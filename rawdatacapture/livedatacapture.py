@@ -1172,6 +1172,8 @@ def _run_display_process(
     scatter = None
     cluster_scatter = None
     target_scatter = None
+    point_cloud_rate_text = None
+    micro_doppler_rate_text = None
 
     if mode == "range":
         line = axis.plot([], [], lw=1.5)[0]
@@ -1225,19 +1227,57 @@ def _run_display_process(
         axis.view_init(elev=24, azim=-60)
         axis.grid(True, alpha=0.3)
         axis.legend(loc="upper right")
+        point_cloud_rate_text = axis.text2D(
+            0.02,
+            0.98,
+            "",
+            transform=axis.transAxes,
+            horizontalalignment="left",
+            verticalalignment="top",
+            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+        )
+        _set_rate_indicator(point_cloud_rate_text, None)
         if micro_doppler_axis is not None:
+            initial_micro_doppler = np.zeros(
+                (MICRO_DOPPLER_FFT_SIZE, MICRO_DOPPLER_HISTORY_UPDATES),
+                dtype=np.float32,
+            )
+            initial_micro_doppler_extent = _micro_doppler_extent(
+                *initial_micro_doppler.shape
+            )
             micro_doppler_image = micro_doppler_axis.imshow(
-                np.zeros((1, 1)),
+                initial_micro_doppler,
                 aspect="auto",
                 origin="lower",
                 interpolation="nearest",
                 cmap="viridis",
                 vmin=POINT_CLOUD_MAGNITUDE_DB_MIN,
                 vmax=POINT_CLOUD_MAGNITUDE_DB_MAX,
+                extent=initial_micro_doppler_extent,
             )
+            micro_doppler_axis.set_xlim(*initial_micro_doppler_extent[:2])
+            micro_doppler_axis.set_ylim(*initial_micro_doppler_extent[2:])
             micro_doppler_axis.set_title("Live Micro-Doppler Spectrogram")
             micro_doppler_axis.set_xlabel("STFT windows (newest at 0)")
             micro_doppler_axis.set_ylabel("Centered Doppler bin")
+            micro_doppler_rate_text = micro_doppler_axis.text(
+                0.02,
+                0.98,
+                "",
+                transform=micro_doppler_axis.transAxes,
+                horizontalalignment="left",
+                verticalalignment="top",
+                bbox={
+                    "facecolor": "white",
+                    "alpha": 0.75,
+                    "edgecolor": "none",
+                },
+            )
+            _set_rate_indicator(
+                micro_doppler_rate_text,
+                None,
+                include_stft_rate=True,
+            )
         if magnitude_colorbar_axis is not None:
             figure.colorbar(
                 scatter,
@@ -1264,11 +1304,23 @@ def _run_display_process(
     }:
         dynamic_artists.extend(
             artist
-            for artist in (scatter, cluster_scatter, target_scatter, axis.title)
+            for artist in (
+                scatter,
+                cluster_scatter,
+                target_scatter,
+                point_cloud_rate_text,
+            )
             if artist is not None
         )
         if micro_doppler_axis is not None and micro_doppler_image is not None:
-            dynamic_artists.extend((micro_doppler_image, micro_doppler_axis.title))
+            dynamic_artists.extend(
+                artist
+                for artist in (
+                    micro_doppler_image,
+                    micro_doppler_rate_text,
+                )
+                if artist is not None
+            )
         for artist in dynamic_artists:
             artist.set_animated(True)
     figure.canvas.draw()
@@ -1276,17 +1328,36 @@ def _run_display_process(
         figure.canvas.copy_from_bbox(figure.bbox) if dynamic_artists else None
     )
 
+    def draw_dynamic_artists() -> None:
+        for artist in dynamic_artists:
+            if hasattr(artist, "do_3d_projection"):
+                artist.do_3d_projection()
+            artist.axes.draw_artist(artist)
+
     def invalidate_display_background(_event: Any) -> None:
         nonlocal display_background
         display_background = None
 
+    def restore_dynamic_artists_after_draw(_event: Any) -> None:
+        """Keep animated artists visible after a GUI backend performs a redraw."""
+        nonlocal display_background
+        if not dynamic_artists:
+            return
+        display_background = figure.canvas.copy_from_bbox(figure.bbox)
+        draw_dynamic_artists()
+        figure.canvas.blit(figure.bbox)
+
     figure.canvas.mpl_connect("resize_event", invalidate_display_background)
-    point_cloud_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
+    figure.canvas.mpl_connect("draw_event", restore_dynamic_artists_after_draw)
+    display_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
     micro_doppler_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
     previous_micro_doppler_window_count: Optional[int] = None
+    display_refresh_rate_hz: Optional[float] = None
+    stft_window_rate_hz: Optional[float] = None
 
     try:
         while not stop_event.is_set():
+            refreshed_payload = False
             try:
                 payload = payload_queue.get(timeout=pause_seconds)
                 while True:
@@ -1295,13 +1366,11 @@ def _run_display_process(
                     except queue.Empty:
                         break
 
-                displayed_at_s = time.perf_counter()
-                point_cloud_rate_hz = None
-                if mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
-                    point_cloud_rate_hz = _record_event_rate(
-                        point_cloud_rate_events,
-                        displayed_at_s,
-                        1.0,
+                refreshed_stft_windows = None
+                if point_cloud_rate_text is not None:
+                    _set_rate_indicator(
+                        point_cloud_rate_text,
+                        display_refresh_rate_hz,
                     )
 
                 if mode == "range" and line is not None:
@@ -1312,10 +1381,18 @@ def _run_display_process(
                         range_axis_m,
                         range_profile,
                         max_range_m,
+                        display_refresh_rate_hz,
                     )
                 elif mode == "range-doppler" and image is not None:
                     range_axis_m, heatmap = payload
-                    _draw_range_doppler(axis, image, range_axis_m, heatmap, max_range_m)
+                    _draw_range_doppler(
+                        axis,
+                        image,
+                        range_axis_m,
+                        heatmap,
+                        max_range_m,
+                        display_refresh_rate_hz,
+                    )
                 elif (
                     mode == "point-cloud"
                     and scatter is not None
@@ -1333,7 +1410,7 @@ def _run_display_process(
                         point_cloud_fov_deg,
                         target_scatter,
                         target_track,
-                        point_cloud_rate_hz,
+                        update_static_artists=False,
                     )
                 elif (
                     mode == COMBINED_DISPLAY_MODE
@@ -1358,11 +1435,15 @@ def _run_display_process(
                         else 0
                     )
                     previous_micro_doppler_window_count = micro_doppler_window_count
-                    micro_doppler_rate_hz = _record_event_rate(
-                        micro_doppler_rate_events,
-                        displayed_at_s,
-                        float(new_window_count),
-                    )
+                    refreshed_stft_windows = float(new_window_count)
+                    if micro_doppler_rate_text is not None:
+                        _set_rate_indicator(
+                            micro_doppler_rate_text,
+                            display_refresh_rate_hz,
+                            stft_window_rate_hz,
+                            include_stft_rate=True,
+                            range_gate_m=selected_range_m,
+                        )
                     _draw_point_cloud(
                         axis,
                         scatter,
@@ -1373,30 +1454,42 @@ def _run_display_process(
                         point_cloud_fov_deg,
                         target_scatter,
                         target_track,
-                        point_cloud_rate_hz,
+                        update_static_artists=False,
                     )
                     _draw_micro_doppler(
                         micro_doppler_axis,
                         micro_doppler_image,
                         spectrogram_db,
                         selected_range_m,
-                        point_cloud_rate_hz,
-                        micro_doppler_rate_hz,
+                        update_axes=False,
+                        update_title=False,
                     )
                 if dynamic_artists:
                     if display_background is None:
                         figure.canvas.draw()
+                    if display_background is None:
                         display_background = figure.canvas.copy_from_bbox(figure.bbox)
                     figure.canvas.restore_region(display_background)
-                    for artist in dynamic_artists:
-                        if hasattr(artist, "do_3d_projection"):
-                            artist.do_3d_projection()
-                        artist.axes.draw_artist(artist)
+                    draw_dynamic_artists()
                     figure.canvas.blit(figure.bbox)
                     figure.canvas.flush_events()
                     figure.stale = False
                 else:
                     figure.canvas.draw()
+
+                refreshed_at_s = time.perf_counter()
+                display_refresh_rate_hz = _record_event_rate(
+                    display_rate_events,
+                    refreshed_at_s,
+                    1.0,
+                )
+                if refreshed_stft_windows is not None:
+                    stft_window_rate_hz = _record_event_rate(
+                        micro_doppler_rate_events,
+                        refreshed_at_s,
+                        refreshed_stft_windows,
+                    )
+                refreshed_payload = True
             except queue.Empty:
                 pass
             except KeyboardInterrupt:
@@ -1404,8 +1497,8 @@ def _run_display_process(
 
             try:
                 if dynamic_artists:
-                    figure.canvas.flush_events()
-                    time.sleep(pause_seconds)
+                    if not refreshed_payload:
+                        figure.canvas.flush_events()
                 else:
                     plt.pause(pause_seconds)
             except KeyboardInterrupt:
@@ -1432,18 +1525,48 @@ def _record_event_rate(
     return sum(units for _timestamp_s, units in tuple(events)[1:]) / elapsed_s
 
 
+def _set_rate_indicator(
+    artist: Any,
+    display_refresh_rate_hz: Optional[float],
+    stft_window_rate_hz: Optional[float] = None,
+    *,
+    include_stft_rate: bool = False,
+    range_gate_m: Optional[float] = None,
+) -> None:
+    display_rate_text = (
+        f"{display_refresh_rate_hz:.1f} Hz"
+        if display_refresh_rate_hz is not None
+        else "measuring..."
+    )
+    text = (
+        f"Gate: {range_gate_m:.2f} m\n" if range_gate_m is not None else ""
+    )
+    text += f"Refresh rate: {display_rate_text}"
+    if include_stft_rate:
+        stft_rate_text = (
+            f"{stft_window_rate_hz:.1f} windows/s"
+            if stft_window_rate_hz is not None
+            else "measuring..."
+        )
+        text += f"\nSTFT rate: {stft_rate_text}"
+    artist.set_text(text)
+
+
 def _draw_range_profile(
     axis: Any,
     line: Any,
     range_axis_m: Optional[np.ndarray],
     range_profile: np.ndarray,
     max_range_m: float,
+    update_rate_hz: Optional[float] = None,
 ) -> None:
     x_axis = _range_plot_axis(range_axis_m, range_profile.size)
     line.set_data(x_axis, range_profile)
     axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
     profile_max = float(np.max(range_profile)) if range_profile.size else 1.0
     axis.set_ylim(0, max(profile_max * 1.1, 1.0))
+    rate_text = f" — {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
+    axis.set_title(f"Live Range Profile{rate_text}")
 
 
 def _draw_range_doppler(
@@ -1452,6 +1575,7 @@ def _draw_range_doppler(
     range_axis_m: Optional[np.ndarray],
     heatmap: np.ndarray,
     max_range_m: float,
+    update_rate_hz: Optional[float] = None,
 ) -> None:
     x_axis = _range_plot_axis(range_axis_m, heatmap.shape[1])
     image.set_data(heatmap)
@@ -1459,6 +1583,8 @@ def _draw_range_doppler(
     image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
     axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
     axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
+    rate_text = f" — {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
+    axis.set_title(f"Live Range-Doppler Heatmap{rate_text}")
 
 
 def _draw_micro_doppler(
@@ -1468,34 +1594,60 @@ def _draw_micro_doppler(
     selected_range_m: Optional[float],
     display_update_rate_hz: Optional[float] = None,
     stft_window_rate_hz: Optional[float] = None,
+    *,
+    update_axes: bool = True,
+    update_title: bool = True,
 ) -> None:
     if spectrogram_db.ndim != 2 or spectrogram_db.size == 0:
         return
 
-    doppler_bins, history_updates = spectrogram_db.shape
+    extent = _micro_doppler_extent(*spectrogram_db.shape)
+    display_data = spectrogram_db
+    if not update_axes and spectrogram_db.shape[1] < MICRO_DOPPLER_HISTORY_UPDATES:
+        display_data = np.full(
+            (spectrogram_db.shape[0], MICRO_DOPPLER_HISTORY_UPDATES),
+            POINT_CLOUD_MAGNITUDE_DB_MIN,
+            dtype=np.float32,
+        )
+        display_data[:, -spectrogram_db.shape[1] :] = spectrogram_db
+    image.set_data(display_data)
+    if update_axes:
+        image.set_extent(extent)
+        image.set_clim(
+            POINT_CLOUD_MAGNITUDE_DB_MIN,
+            POINT_CLOUD_MAGNITUDE_DB_MAX,
+        )
+        axis.set_xlim(*extent[:2])
+        axis.set_ylim(*extent[2:])
+    if update_title:
+        range_text = (
+            f" — gate {selected_range_m:.2f} m"
+            if selected_range_m is not None
+            else ""
+        )
+        rate_text = (
+            f" — plot {display_update_rate_hz:.1f} Hz, "
+            f"STFT {stft_window_rate_hz:.1f} windows/s"
+            if display_update_rate_hz is not None
+            and stft_window_rate_hz is not None
+            else ""
+        )
+        axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}{rate_text}")
+
+
+def _micro_doppler_extent(
+    doppler_bins: int,
+    history_updates: int,
+) -> tuple[int, int, int, int]:
     first_update = -max(history_updates - 1, 1)
     first_doppler_bin = -(doppler_bins // 2)
     last_doppler_bin = first_doppler_bin + doppler_bins - 1
-    image.set_data(spectrogram_db)
-    image.set_extent((first_update, 0, first_doppler_bin, last_doppler_bin))
-    image.set_clim(
-        POINT_CLOUD_MAGNITUDE_DB_MIN,
-        POINT_CLOUD_MAGNITUDE_DB_MAX,
+    return (
+        first_update,
+        0,
+        first_doppler_bin,
+        max(last_doppler_bin, first_doppler_bin + 1),
     )
-    axis.set_xlim(first_update, 0)
-    axis.set_ylim(first_doppler_bin, max(last_doppler_bin, first_doppler_bin + 1))
-    range_text = (
-        f" — gate {selected_range_m:.2f} m"
-        if selected_range_m is not None
-        else ""
-    )
-    rate_text = (
-        f" — plot {display_update_rate_hz:.1f} Hz, "
-        f"STFT {stft_window_rate_hz:.1f} windows/s"
-        if display_update_rate_hz is not None and stft_window_rate_hz is not None
-        else ""
-    )
-    axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}{rate_text}")
 
 
 def _draw_point_cloud(
@@ -1509,6 +1661,8 @@ def _draw_point_cloud(
     target_scatter: Optional[Any] = None,
     target_track: Optional[TargetTrack] = None,
     update_rate_hz: Optional[float] = None,
+    *,
+    update_static_artists: bool = True,
 ) -> None:
     empty = np.array([], dtype=np.float32)
     if points.size == 0:
@@ -1517,10 +1671,11 @@ def _draw_point_cloud(
     else:
         scatter._offsets3d = (points[:, 0], points[:, 1], points[:, 2])
         scatter.set_array(points[:, 3])
-        scatter.set_clim(
-            POINT_CLOUD_MAGNITUDE_DB_MIN,
-            POINT_CLOUD_MAGNITUDE_DB_MAX,
-        )
+        if update_static_artists:
+            scatter.set_clim(
+                POINT_CLOUD_MAGNITUDE_DB_MIN,
+                POINT_CLOUD_MAGNITUDE_DB_MAX,
+            )
 
     if clusters.size == 0:
         cluster_scatter._offsets3d = (empty, empty, empty)
@@ -1551,12 +1706,16 @@ def _draw_point_cloud(
             )
             target_scatter.set_alpha(0.4 if target_track.is_predicted else 1.0)
 
-    _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
-    rate_text = f", {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
-    axis.set_title(
-        "Live 3D Point Cloud "
-        f"(±{point_cloud_fov_deg:g}° FOV, {point_cloud_range_m:g} m{rate_text})"
-    )
+    if update_static_artists:
+        _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
+        rate_text = (
+            f", {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
+        )
+        axis.set_title(
+            "Live 3D Point Cloud "
+            f"(±{point_cloud_fov_deg:g}° FOV, "
+            f"{point_cloud_range_m:g} m{rate_text})"
+        )
 
 
 def _set_point_cloud_axes(
