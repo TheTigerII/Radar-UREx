@@ -31,6 +31,13 @@ class ChooseDurationMinutesTests(unittest.TestCase):
 
 
 class ChooseDisplayTests(unittest.TestCase):
+    def test_blank_input_uses_combined_display_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(
+                run.choose_display(None),
+                "point-cloud-micro-doppler",
+            )
+
     def test_combined_display_menu_choice(self) -> None:
         with patch("builtins.input", return_value="5"):
             self.assertEqual(

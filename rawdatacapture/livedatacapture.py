@@ -14,6 +14,7 @@ import numpy as np
 
 try:
     from .dsp import (
+        AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
         compute_range_doppler_heatmap,
@@ -28,6 +29,7 @@ try:
     )
 except ImportError:
     from dsp import (
+        AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
         compute_range_doppler_heatmap,
@@ -58,6 +60,9 @@ DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
 DEFAULT_CLUSTER_EPS_M = 0.5
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
+DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
+DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
+DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
 DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
@@ -648,6 +653,9 @@ class DisplayPayloadSink:
         point_cloud_fov_deg: float = DEFAULT_POINT_CLOUD_FOV_DEG,
         cluster_eps_m: float = DEFAULT_CLUSTER_EPS_M,
         cluster_min_samples: int = DEFAULT_CLUSTER_MIN_SAMPLES,
+        clutter_map_update_rate: float = DEFAULT_CLUTTER_MAP_UPDATE_RATE,
+        clutter_map_warmup_frames: int = DEFAULT_CLUTTER_MAP_WARMUP_FRAMES,
+        clutter_map_min_snr_db: float = DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -657,6 +665,15 @@ class DisplayPayloadSink:
         self.point_cloud_fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
         self.cluster_eps_m = max(float(cluster_eps_m), 0.0)
         self.cluster_min_samples = max(int(cluster_min_samples), 1)
+        self.clutter_map = (
+            AdaptiveClutterMap(
+                update_rate=clutter_map_update_rate,
+                warmup_frames=clutter_map_warmup_frames,
+                minimum_snr_db=clutter_map_min_snr_db,
+            )
+            if clutter_map_update_rate > 0.0
+            else None
+        )
         self.target_tracker = SingleTargetTracker()
         self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
         self.frame_count = 0
@@ -688,6 +705,7 @@ class DisplayPayloadSink:
                 range_fft,
                 range_axis_m,
                 self.config,
+                clutter_map=self.clutter_map,
                 max_range_m=self.max_range_m,
                 azimuth_fov_deg=self.point_cloud_fov_deg,
                 elevation_fov_deg=self.point_cloud_fov_deg,
@@ -716,6 +734,7 @@ class DisplayPayloadSink:
                 range_axis_m,
                 self.config,
                 doppler_cube=doppler_cube,
+                clutter_map=self.clutter_map,
                 max_range_m=self.max_range_m,
                 azimuth_fov_deg=self.point_cloud_fov_deg,
                 elevation_fov_deg=self.point_cloud_fov_deg,
@@ -909,11 +928,19 @@ def _run_display_process(
     plt.ion()
     figure = plt.figure(figsize=(14, 6) if mode == COMBINED_DISPLAY_MODE else None)
     micro_doppler_axis = None
+    magnitude_colorbar_axis = None
     if mode == "point-cloud":
         axis = figure.add_subplot(111, projection="3d")
     elif mode == COMBINED_DISPLAY_MODE:
-        axis = figure.add_subplot(121, projection="3d")
-        micro_doppler_axis = figure.add_subplot(122)
+        layout = figure.add_gridspec(
+            1,
+            4,
+            width_ratios=(1.0, 0.04, 0.08, 1.0),
+            wspace=0.18,
+        )
+        axis = figure.add_subplot(layout[0, 0], projection="3d")
+        magnitude_colorbar_axis = figure.add_subplot(layout[0, 1])
+        micro_doppler_axis = figure.add_subplot(layout[0, 3])
     else:
         axis = figure.add_subplot(111)
     line = None
@@ -964,7 +991,6 @@ def _run_display_process(
             linewidths=0.8,
             label="Tracked target",
         )
-        figure.colorbar(scatter, ax=axis, label="Magnitude (dB)", pad=0.12)
         axis.set_title(
             "Live 3D Point Cloud "
             f"(±{point_cloud_fov_deg:g}° FOV, {point_cloud_range_m:g} m)"
@@ -982,16 +1008,30 @@ def _run_display_process(
                 aspect="auto",
                 origin="lower",
                 interpolation="nearest",
-            )
-            figure.colorbar(
-                micro_doppler_image,
-                ax=micro_doppler_axis,
-                label="Power (dB)",
+                cmap="viridis",
+                vmin=POINT_CLOUD_MAGNITUDE_DB_MIN,
+                vmax=POINT_CLOUD_MAGNITUDE_DB_MAX,
             )
             micro_doppler_axis.set_title("Live Micro-Doppler Spectrogram")
             micro_doppler_axis.set_xlabel("Display updates (newest at 0)")
             micro_doppler_axis.set_ylabel("Centered Doppler bin")
-    figure.tight_layout()
+        if magnitude_colorbar_axis is not None:
+            figure.colorbar(
+                scatter,
+                cax=magnitude_colorbar_axis,
+                label="Magnitude (dB)",
+            )
+        else:
+            figure.colorbar(
+                scatter,
+                ax=axis,
+                label="Magnitude (dB)",
+                pad=0.12,
+            )
+    if mode == COMBINED_DISPLAY_MODE:
+        figure.subplots_adjust(left=0.04, right=0.97, bottom=0.12, top=0.90)
+    else:
+        figure.tight_layout()
     plt.show(block=False)
 
     try:
@@ -1124,13 +1164,10 @@ def _draw_micro_doppler(
     last_doppler_bin = first_doppler_bin + doppler_bins - 1
     image.set_data(spectrogram_db)
     image.set_extent((first_update, 0, first_doppler_bin, last_doppler_bin))
-    finite_values = spectrogram_db[np.isfinite(spectrogram_db)]
-    if finite_values.size:
-        lower = float(np.percentile(finite_values, 5.0))
-        upper = float(np.percentile(finite_values, 99.0))
-        if upper <= lower:
-            upper = lower + 1.0
-        image.set_clim(lower, upper)
+    image.set_clim(
+        POINT_CLOUD_MAGNITUDE_DB_MIN,
+        POINT_CLOUD_MAGNITUDE_DB_MAX,
+    )
     axis.set_xlim(first_update, 0)
     axis.set_ylim(first_doppler_bin, max(last_doppler_bin, first_doppler_bin + 1))
     range_text = (
@@ -1304,6 +1341,9 @@ def _run_frame_processor(
     point_cloud_fov_deg: float,
     cluster_eps_m: float,
     cluster_min_samples: int,
+    clutter_map_update_rate: float,
+    clutter_map_warmup_frames: int,
+    clutter_map_min_snr_db: float,
 ) -> None:
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
@@ -1318,7 +1358,20 @@ def _run_frame_processor(
         point_cloud_fov_deg,
         cluster_eps_m,
         cluster_min_samples,
+        clutter_map_update_rate,
+        clutter_map_warmup_frames,
+        clutter_map_min_snr_db,
     )
+    if display.clutter_map is not None and display_mode in {
+        "point-cloud",
+        COMBINED_DISPLAY_MODE,
+    }:
+        worker_emit(
+            "Adaptive clutter map enabled: "
+            f"update_rate={clutter_map_update_rate:g}, "
+            f"warmup={clutter_map_warmup_frames} updates, "
+            f"minimum_snr={clutter_map_min_snr_db:g} dB"
+        )
 
     try:
         while True:
@@ -1593,6 +1646,33 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_CLUSTER_MIN_SAMPLES,
         help="Minimum points required for a DBSCAN cluster. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--clutter-map-update-rate",
+        type=float,
+        default=DEFAULT_CLUTTER_MAP_UPDATE_RATE,
+        help=(
+            "Adaptive clutter-map EMA update rate. Defaults to 0.02; "
+            "use 0 to disable clutter suppression."
+        ),
+    )
+    parser.add_argument(
+        "--clutter-map-warmup-frames",
+        type=int,
+        default=DEFAULT_CLUTTER_MAP_WARMUP_FRAMES,
+        help=(
+            "Frames used to learn the initial clutter map before detections. "
+            "Defaults to 30."
+        ),
+    )
+    parser.add_argument(
+        "--clutter-map-min-snr-db",
+        type=float,
+        default=DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
+        help=(
+            "Minimum target-to-background power ratio in dB after clutter "
+            "normalization. Defaults to 6 dB."
+        ),
     )
     return parser.parse_args()
 
@@ -2109,6 +2189,9 @@ def main() -> None:
                 args.point_cloud_fov_deg,
                 args.cluster_eps_m,
                 args.cluster_min_samples,
+                args.clutter_map_update_rate,
+                args.clutter_map_warmup_frames,
+                args.clutter_map_min_snr_db,
             ),
             name="RadarFrameProcessor",
         )

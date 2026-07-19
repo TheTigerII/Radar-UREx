@@ -1,11 +1,12 @@
 import importlib.util
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from rawdatacapture.dsp import (
+    AdaptiveClutterMap,
     build_virtual_antenna_grid,
     build_virtual_antenna_grids,
     cluster_point_cloud,
@@ -25,6 +26,113 @@ from rawdatacapture.openradar_backend import (
 
 
 OPENRADAR_AVAILABLE = importlib.util.find_spec("mmwave") is not None
+
+
+class AdaptiveClutterMapTests(unittest.TestCase):
+    def test_normalizes_background_after_warmup_and_preserves_new_target(self) -> None:
+        clutter = AdaptiveClutterMap(update_rate=0.5, warmup_frames=2)
+        background = np.full((5, 8), 10.0)
+
+        np.testing.assert_array_equal(clutter.normalize(background), 0.0)
+        clutter.update(background)
+        np.testing.assert_array_equal(clutter.normalize(background), 0.0)
+        clutter.update(background)
+
+        target_frame = background.copy()
+        target_frame[2, 4] = 30.0
+        normalized = clutter.normalize(target_frame)
+
+        self.assertTrue(clutter.is_ready)
+        self.assertEqual(normalized[2, 4], 3.0)
+        np.testing.assert_array_equal(normalized[normalized != 3.0], 1.0)
+
+    def test_detection_protection_prevents_target_absorption(self) -> None:
+        clutter = AdaptiveClutterMap(update_rate=1.0, warmup_frames=1)
+        background = np.ones((5, 8))
+        clutter.normalize(background)
+        clutter.update(background)
+
+        target_frame = background.copy()
+        target_frame[2, 4] = 20.0
+        detections = np.zeros_like(target_frame, dtype=bool)
+        detections[2, 4] = True
+        clutter.update(target_frame, detections)
+
+        self.assertEqual(clutter.normalize(target_frame)[2, 4], 20.0)
+
+    def test_shape_change_resets_warmup(self) -> None:
+        clutter = AdaptiveClutterMap(warmup_frames=1)
+        first = np.ones((2, 3))
+        clutter.normalize(first)
+        clutter.update(first)
+        self.assertTrue(clutter.is_ready)
+
+        np.testing.assert_array_equal(clutter.normalize(np.ones((3, 2))), 0.0)
+        self.assertFalse(clutter.is_ready)
+
+    def test_point_detection_uses_normalized_power_and_updates_map(self) -> None:
+        doppler_cube = np.full((5, 1, 1, 8), 2.0, dtype=np.complex64)
+        normalized_power = np.zeros((5, 8), dtype=np.float64)
+        detections = np.zeros((5, 8), dtype=bool)
+        clutter = Mock(spec=AdaptiveClutterMap)
+        clutter.normalize.return_value = normalized_power
+        clutter.minimum_snr_linear = 4.0
+
+        with patch(
+            "rawdatacapture.dsp.os_cfar_2d",
+            return_value=detections,
+        ) as cfar:
+            points = compute_point_cloud(
+                np.empty((0,)),
+                np.arange(8, dtype=np.float32),
+                SimpleNamespace(),
+                doppler_cube=doppler_cube,
+                clutter_map=clutter,
+                min_range_m=0.0,
+            )
+
+        self.assertEqual(points.shape, (0, 4))
+        np.testing.assert_array_equal(clutter.normalize.call_args.args[0], 4.0)
+        np.testing.assert_array_equal(cfar.call_args.args[0], normalized_power)
+        self.assertEqual(cfar.call_args.kwargs["false_alarm_rate"], 1e-3)
+        np.testing.assert_array_equal(clutter.update.call_args.args[0], 4.0)
+        np.testing.assert_array_equal(clutter.update.call_args.args[1], detections)
+
+    def test_minimum_snr_gate_rejects_normalized_background(self) -> None:
+        doppler_cube = np.full((5, 1, 1, 8), 2.0, dtype=np.complex64)
+        normalized_power = np.ones((5, 8), dtype=np.float64)
+        normalized_power[2, 4] = 5.0
+        clutter = Mock(spec=AdaptiveClutterMap)
+        clutter.normalize.return_value = normalized_power
+        clutter.minimum_snr_linear = 4.0
+
+        with (
+            patch(
+                "rawdatacapture.dsp.os_cfar_2d",
+                return_value=np.ones((5, 8), dtype=bool),
+            ),
+            patch(
+                "rawdatacapture.dsp.estimate_xyz_from_virtual_arrays",
+                return_value=(
+                    np.asarray(((0.0, 4.0, 0.0),)),
+                    np.asarray((True,)),
+                ),
+            ),
+        ):
+            points = compute_point_cloud(
+                np.empty((0,)),
+                np.arange(8, dtype=np.float32),
+                SimpleNamespace(tx_channel_masks=None),
+                doppler_cube=doppler_cube,
+                clutter_map=clutter,
+                min_range_m=0.0,
+            )
+
+        self.assertEqual(points.shape, (1, 4))
+        self.assertAlmostEqual(float(points[0, 3]), 10.0 * np.log10(4.0), places=5)
+        protected = clutter.update.call_args.args[1]
+        self.assertEqual(np.count_nonzero(protected), 1)
+        self.assertTrue(protected[2, 4])
 
 
 class BatchedAngleFftTests(unittest.TestCase):

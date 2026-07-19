@@ -168,18 +168,27 @@ bin index, not velocity in m/s.
 The point-cloud path:
 
 1. Forms mean range-Doppler power.
-2. Runs two-dimensional OS-CFAR with Doppler wrapping.
-3. Keeps Doppler-local peaks without suppressing adjacent range detections, then
+2. Applies an adaptive power-domain clutter map. During the initial warm-up it
+   learns every cell using an exponential moving average and emits no point
+   detections. It then divides every cell by its learned background power before
+   CFAR and applies a default 6 dB minimum target-to-background ratio. This
+   keeps the normalized background near one instead of producing large regions
+   of zero-valued CFAR training cells. Range and Doppler guard neighborhoods
+   around current detections are frozen during map updates so targets are not
+   immediately absorbed. An FFT-shape change resets the map.
+3. Runs two-dimensional OS-CFAR with Doppler wrapping and a default requested
+   false-alarm probability of `1e-3` per axis.
+4. Keeps Doppler-local peaks without suppressing adjacent range detections, then
    removes detections below 0.25 m.
-4. Rejects detections beyond 10 m.
-5. Maps all candidate cells into virtual antenna grids and estimates their
+5. Rejects detections beyond 10 m.
+6. Maps all candidate cells into virtual antenna grids and estimates their
    directions with one batched 32-by-32 2D FFT. Unlimited point-cloud output
    preserves detection order and skips the unnecessary power sort.
-6. Applies ±60-degree azimuth and elevation gates and keeps all in-FOV
+7. Applies ±60-degree azimuth and elevation gates and keeps all in-FOV
    detections.
-7. Runs spatial DBSCAN on XYZ points and sends both the original points and
+8. Runs spatial DBSCAN on XYZ points and sends both the original points and
    cluster centers to the display process.
-8. Updates one persistent 3D target track. Initial acquisition uses the
+9. Updates one persistent 3D target track. Initial acquisition uses the
    strongest cluster or point; later updates use gated nearest-neighbor
    association against a constant-velocity prediction.
 
@@ -205,7 +214,12 @@ history in the frame-processing process. Sending the complete history through
 the latest-only display queue prevents GUI queue replacement from creating
 holes in the visible spectrogram. The spectrogram follows the single tracked
 target while its association remains valid. It can still change targets after
-track loss and reacquisition.
+track loss and reacquisition. The Matplotlib image uses the point cloud's fixed
+40-to-120 dB magnitude color limits rather than rescaling each history update,
+and the combined layout uses one shared magnitude colorbar for both axes.
+The colorbar occupies a dedicated narrow grid column between the point cloud
+and micro-Doppler axes, with a spacer on its right so it does not crowd the
+spectrogram's Doppler-axis label.
 
 ## Raw Recording and Logging
 

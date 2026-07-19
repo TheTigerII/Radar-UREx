@@ -158,16 +158,24 @@ and receivers.
 python rawdatacapture\livedatacapture.py --display point-cloud
 ```
 
-The diagnostic point cloud uses OS-CFAR, Doppler-only peak filtering, and a
-batched virtual antenna 2D FFT. It shows all detected points within a 10 m
-radial range and a ±60-degree azimuth/elevation field of view. Spatial DBSCAN
-runs after XYZ
-generation with a default 0.5 m neighborhood and two-point minimum. Original
+The diagnostic point cloud uses an adaptive range-Doppler clutter map, OS-CFAR,
+Doppler-only peak filtering, and a batched virtual antenna 2D FFT. The first 30
+display updates learn the background and intentionally produce no point
+detections, so start capture with an empty scene when possible. After warm-up,
+each cell is divided by its learned background power before CFAR. A detection
+must also exceed the background by at least 6 dB. Neighborhoods around current
+detections are protected from map updates. The point cloud shows all
+detected points within a 10 m radial range and a ±60-degree azimuth/elevation
+field of view. Spatial DBSCAN runs after XYZ generation with a default 0.5 m
+neighborhood and two-point minimum. Original
 points remain visible, while red crosses mark cluster centers and cross size
 indicates the number of cluster members. Coordinates are X left/right, Y
 forward, and Z elevation. The plot spans 0 to 10 m forward and approximately
 -8.66 to +8.66 m across X and Z. Point color is fixed from 40 to 120 dB. Angle
 output is not calibrated.
+
+The software OS-CFAR requested probability of false alarm defaults to
+`1e-3` per axis.
 
 Use `--max-range-m` to change the shared range limit for any display, and use
 `--point-cloud-fov-deg` to change the point-cloud half-FOV.
@@ -178,6 +186,13 @@ Use `--cluster-eps-m` and `--cluster-min-samples` to tune DBSCAN. Set
 ```powershell
 python run.py --display point-cloud --cluster-eps-m 0.4 --cluster-min-samples 3
 ```
+
+The clutter-map update rate defaults to `0.02`. A smaller value adapts more
+slowly to environmental changes. Change the initial learning period and
+minimum target-to-background ratio with `--clutter-map-warmup-frames` and
+`--clutter-map-min-snr-db`. Use `--clutter-map-update-rate 0` to disable the
+software clutter map. These options affect point detection only; point-cloud
+magnitude, the range-Doppler display, and micro-Doppler retain raw power.
 
 ### Point cloud with micro-Doppler
 
@@ -194,7 +209,10 @@ spectrogram title.
 
 The horizontal spectrogram axis is measured in display updates, with the newest
 column at zero. The vertical axis is centered Doppler bin because velocity is
-not yet calibrated. Automatic gating can switch between targets when multiple
+not yet calibrated. Its magnitude color scale uses the same fixed 40 to 120 dB
+limits as the 3D point cloud, so colors remain comparable between updates and
+the two plots. One shared magnitude colorbar sits between both plots. Automatic
+gating can switch between targets when multiple
 strong objects are present; it is a visualization aid rather than persistent
 target tracking.
 

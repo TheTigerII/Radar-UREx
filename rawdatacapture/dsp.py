@@ -21,6 +21,135 @@ except ImportError:
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 
 
+class AdaptiveClutterMap:
+    """Normalize range-Doppler power with an adaptive background map.
+
+    The map is learned during an initial warm-up period. After warm-up, cells
+    around current detections are not updated, which prevents a persistent
+    target from being absorbed into the background. A shape change resets the
+    map so profiles with different FFT dimensions cannot be mixed.
+    """
+
+    def __init__(
+        self,
+        *,
+        update_rate: float = 0.02,
+        warmup_frames: int = 30,
+        minimum_snr_db: float = 6.0,
+        range_protection_cells: int = 2,
+        doppler_protection_cells: int = 1,
+    ) -> None:
+        if not 0.0 < update_rate <= 1.0:
+            raise ValueError("Clutter-map update rate must be in (0, 1]")
+        if warmup_frames < 1:
+            raise ValueError("Clutter-map warm-up must contain at least one frame")
+        if not np.isfinite(minimum_snr_db) or minimum_snr_db < 0.0:
+            raise ValueError("Clutter-map minimum SNR must be finite and non-negative")
+        if range_protection_cells < 0 or doppler_protection_cells < 0:
+            raise ValueError("Clutter-map protection sizes cannot be negative")
+
+        self.update_rate = float(update_rate)
+        self.warmup_frames = int(warmup_frames)
+        self.minimum_snr_db = float(minimum_snr_db)
+        self.range_protection_cells = int(range_protection_cells)
+        self.doppler_protection_cells = int(doppler_protection_cells)
+        self._background_power: Optional[np.ndarray] = None
+        self._frames_seen = 0
+
+    @property
+    def is_ready(self) -> bool:
+        return self._frames_seen >= self.warmup_frames
+
+    @property
+    def frames_seen(self) -> int:
+        return self._frames_seen
+
+    def reset(self) -> None:
+        self._background_power = None
+        self._frames_seen = 0
+
+    @property
+    def minimum_snr_linear(self) -> float:
+        return float(10.0 ** (self.minimum_snr_db / 10.0))
+
+    def normalize(self, power_map: np.ndarray) -> np.ndarray:
+        """Return target-to-background power ratio without modifying the map."""
+        power = self._validated_power(power_map)
+        self._ensure_shape(power.shape)
+        if not self.is_ready:
+            return np.zeros_like(power)
+
+        assert self._background_power is not None
+        positive_background = self._background_power[self._background_power > 0.0]
+        background_floor = (
+            max(float(np.median(positive_background)) * 1e-6, np.finfo(float).tiny)
+            if positive_background.size
+            else np.finfo(float).tiny
+        )
+        return power / np.maximum(self._background_power, background_floor)
+
+    def update(
+        self,
+        power_map: np.ndarray,
+        protected_detections: Optional[np.ndarray] = None,
+    ) -> None:
+        """Update the map, freezing detection neighborhoods after warm-up."""
+        power = self._validated_power(power_map)
+        self._ensure_shape(power.shape)
+        assert self._background_power is not None
+
+        if self._frames_seen == 0:
+            self._background_power[...] = power
+            self._frames_seen = 1
+            return
+
+        update_mask = np.ones(power.shape, dtype=bool)
+        if self.is_ready and protected_detections is not None:
+            protected = np.asarray(protected_detections, dtype=bool)
+            if protected.shape != power.shape:
+                raise ValueError(
+                    "Protected detections must match the clutter-map shape"
+                )
+            update_mask &= ~self._expanded_protection_mask(protected)
+
+        alpha = self.update_rate
+        background = self._background_power
+        background[update_mask] = (
+            (1.0 - alpha) * background[update_mask]
+            + alpha * power[update_mask]
+        )
+        self._frames_seen += 1
+
+    @staticmethod
+    def _validated_power(power_map: np.ndarray) -> np.ndarray:
+        power = np.asarray(power_map, dtype=np.float64)
+        if power.ndim != 2 or power.size == 0:
+            raise ValueError("Clutter-map power must be a non-empty 2D array")
+        return np.maximum(power, 0.0)
+
+    def _ensure_shape(self, shape: tuple[int, ...]) -> None:
+        if self._background_power is None or self._background_power.shape != shape:
+            self._background_power = np.zeros(shape, dtype=np.float64)
+            self._frames_seen = 0
+
+    def _expanded_protection_mask(self, detections: np.ndarray) -> np.ndarray:
+        expanded = np.zeros_like(detections, dtype=bool)
+        range_cells = self.range_protection_cells
+        for doppler_offset in range(
+            -self.doppler_protection_cells,
+            self.doppler_protection_cells + 1,
+        ):
+            doppler_shifted = np.roll(detections, doppler_offset, axis=0)
+            for range_offset in range(-range_cells, range_cells + 1):
+                shifted = np.roll(doppler_shifted, range_offset, axis=1)
+                if range_offset > 0:
+                    shifted[:, :range_offset] = False
+                elif range_offset < 0:
+                    shifted[:, range_offset:] = False
+                expanded |= shifted
+        return expanded
+
+
 class RadarDspConfig(Protocol):
     num_adc_samples: int
     num_rx_channels: int
@@ -92,8 +221,9 @@ def compute_point_cloud(
     config: RadarDspConfig,
     *,
     doppler_cube: Optional[np.ndarray] = None,
+    clutter_map: Optional[AdaptiveClutterMap] = None,
     max_points: Optional[int] = None,
-    false_alarm_rate: float = 1e-2,
+    false_alarm_rate: float = 1e-3,
     range_guard_cells: int = 2,
     doppler_guard_cells: int = 1,
     range_training_cells: int = 4,
@@ -108,9 +238,14 @@ def compute_point_cloud(
 
     if doppler_cube is None:
         doppler_cube = compute_range_doppler_fft(range_fft, config)
-    detection_power = np.mean(np.abs(doppler_cube) ** 2, axis=(1, 2))
-    if detection_power.size == 0:
+    raw_detection_power = np.mean(np.abs(doppler_cube) ** 2, axis=(1, 2))
+    if raw_detection_power.size == 0:
         return np.empty((0, 4), dtype=np.float32)
+    detection_power = (
+        clutter_map.normalize(raw_detection_power)
+        if clutter_map is not None
+        else raw_detection_power
+    )
 
     detections = os_cfar_2d(
         detection_power,
@@ -120,8 +255,12 @@ def compute_point_cloud(
         range_training_cells=range_training_cells,
         doppler_training_cells=doppler_training_cells,
     )
+    if clutter_map is not None:
+        detections &= detection_power >= clutter_map.minimum_snr_linear
     detections &= doppler_peak_mask(detection_power)
     detections = _apply_min_range_gate(detections, range_axis, min_range_m)
+    if clutter_map is not None:
+        clutter_map.update(raw_detection_power, detections)
 
     candidate_indices = np.argwhere(detections)
     if candidate_indices.size == 0:
@@ -129,12 +268,13 @@ def compute_point_cloud(
 
     doppler_bins = candidate_indices[:, 0]
     range_bins = candidate_indices[:, 1]
-    candidate_powers = detection_power[doppler_bins, range_bins]
+    candidate_scores = detection_power[doppler_bins, range_bins]
+    candidate_powers = raw_detection_power[doppler_bins, range_bins]
 
     # Unlimited displays do not need strongest-first ordering. Retain it only
     # when a finite point cap makes candidate priority observable.
     if max_points is not None:
-        order = np.argsort(candidate_powers)[::-1]
+        order = np.argsort(candidate_scores)[::-1]
         doppler_bins = doppler_bins[order]
         range_bins = range_bins[order]
         candidate_powers = candidate_powers[order]

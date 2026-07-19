@@ -16,6 +16,8 @@ from rawdatacapture.livedatacapture import (
     DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
     DEFAULT_POINT_CLOUD_FOV_DEG,
+    POINT_CLOUD_MAGNITUDE_DB_MAX,
+    POINT_CLOUD_MAGNITUDE_DB_MIN,
     DCA1000PacketHeader,
     DisplayPayloadSink,
     FrameBuffer,
@@ -399,6 +401,10 @@ class MicroDopplerDisplayTests(unittest.TestCase):
 
         image.set_data.assert_called_once_with(spectrogram)
         image.set_extent.assert_called_once_with((-2, 0, -2, 1))
+        image.set_clim.assert_called_once_with(
+            POINT_CLOUD_MAGNITUDE_DB_MIN,
+            POINT_CLOUD_MAGNITUDE_DB_MAX,
+        )
         axis.set_xlim.assert_called_once_with(-2, 0)
         axis.set_ylim.assert_called_once_with(-2, 1)
         axis.set_title.assert_called_once_with(

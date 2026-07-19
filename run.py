@@ -25,6 +25,9 @@ DEFAULT_DURATION_MINUTES = 3.0
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_CLUSTER_EPS_M = 0.5
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
+DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
+DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
+DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
 DISPLAY_CHOICES = (
     "none",
     "range",
@@ -87,6 +90,24 @@ def parse_args() -> argparse.Namespace:
         help="Minimum points required for a DBSCAN cluster. Defaults to 2.",
     )
     parser.add_argument(
+        "--clutter-map-update-rate",
+        type=float,
+        default=DEFAULT_CLUTTER_MAP_UPDATE_RATE,
+        help="Adaptive clutter-map EMA update rate; use 0 to disable.",
+    )
+    parser.add_argument(
+        "--clutter-map-warmup-frames",
+        type=int,
+        default=DEFAULT_CLUTTER_MAP_WARMUP_FRAMES,
+        help="Frames used to learn the initial clutter map. Defaults to 30.",
+    )
+    parser.add_argument(
+        "--clutter-map-min-snr-db",
+        type=float,
+        default=DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
+        help="Minimum target-to-background power ratio. Defaults to 6 dB.",
+    )
+    parser.add_argument(
         "--duration-minutes",
         type=float,
         help=(
@@ -118,9 +139,9 @@ def choose_display(display_arg: Optional[str]) -> str:
     print("  4. point-cloud")
     print("  5. point-cloud + micro-doppler")
     while True:
-        choice = input("Select display type [2]: ").strip()
+        choice = input("Select display type [5]: ").strip()
         if not choice:
-            return "range"
+            return "point-cloud-micro-doppler"
         if choice in {"1", "none"}:
             return "none"
         if choice in {"2", "range"}:
@@ -339,6 +360,12 @@ def build_capture_command(
         str(max(args.cluster_eps_m, 0.0)),
         "--cluster-min-samples",
         str(max(args.cluster_min_samples, 1)),
+        "--clutter-map-update-rate",
+        str(max(args.clutter_map_update_rate, 0.0)),
+        "--clutter-map-warmup-frames",
+        str(max(args.clutter_map_warmup_frames, 1)),
+        "--clutter-map-min-snr-db",
+        str(max(args.clutter_map_min_snr_db, 0.0)),
         "--raw-output",
         str(raw_output),
     ]
