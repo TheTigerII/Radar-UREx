@@ -1,0 +1,109 @@
+{
+  "artifact": "drone_bird_archive_logistic.joblib",
+  "created_utc": "2026-07-19T07:15:56Z",
+  "objective": "drone versus bionic bird micro-Doppler archive baseline",
+  "deployment_status": "archive_pretrained_unvalidated_on_iwr6843",
+  "dataset": {
+    "archive_path_at_training": "C:\\Users\\eliwe\\Desktop\\UREX\\Data.zip",
+    "manifest_sha256": "d68eebd46952aa21d2dc422540ca502756b0e618283dabc9a99650b8c6925094",
+    "recording_counts": {
+      "bionic_bird": 38,
+      "dji_mavic": 45,
+      "phantom_3_pro": 18,
+      "pole": 1
+    },
+    "session_group_source": "inferred from filenames; authoritative session metadata unavailable"
+  },
+  "feature_contract": {
+    "version": "archive-micro-doppler-v3",
+    "shape": [
+      2,
+      48,
+      64
+    ],
+    "axis_order": [
+      "channel",
+      "time",
+      "centered_doppler"
+    ],
+    "channels": [
+      "target_gate_log1p_power",
+      "target_minus_local_background_log1p_power"
+    ],
+    "target_gate_range_bins": 5,
+    "normalization": "training-only channel clipping and standardization"
+  },
+  "active_radar_contract": {
+    "num_adc_samples": 64,
+    "num_rx_channels": 4,
+    "num_chirps_per_frame": 384,
+    "num_loops_doppler_bins": 128,
+    "num_tdm_transmitters": 3,
+    "tx_channel_masks": [
+      1,
+      4,
+      2
+    ],
+    "frame_period_ms": 33.33,
+    "range_bin_spacing_m": 0.19517738151041666,
+    "bytes_per_frame": 393216,
+    "profile_sha256": "e8a77245da8481522167d5cb79713ebb94d8092fc9aee7105b6ca5ffaff26f46"
+  },
+  "selected_C": 0.01,
+  "threshold": 0.39107049998391946,
+  "window_test_metrics": {
+    "samples": 800,
+    "threshold": 0.39107049998391946,
+    "drone_recall": 0.9589285714285715,
+    "bird_false_positive_rate": 0.5333333333333333,
+    "precision": 0.8075187969924812,
+    "f1": 0.876734693877551,
+    "pr_auc_average_precision": 0.8642581899584525,
+    "roc_auc": 0.7645907738095239,
+    "brier_score": 0.15773696598477874,
+    "ece_10_bins": 0.13444739115993823,
+    "confusion_matrix_tn_fp_fn_tp": [
+      112,
+      128,
+      23,
+      537
+    ]
+  },
+  "recording_test_metrics": {
+    "samples": 20,
+    "threshold": 0.39107049998391946,
+    "drone_recall": 1.0,
+    "bird_false_positive_rate": 0.6666666666666666,
+    "precision": 0.7777777777777778,
+    "f1": 0.875,
+    "pr_auc_average_precision": 0.8758539079967651,
+    "roc_auc": 0.7857142857142858,
+    "brier_score": 0.15743648492783682,
+    "ece_10_bins": 0.23948446695086423,
+    "confusion_matrix_tn_fp_fn_tp": [
+      2,
+      4,
+      0,
+      14
+    ]
+  },
+  "unknown_pole_probe": {
+    "windows": 40,
+    "mean_p_drone": 0.16033477705456467,
+    "max_p_drone": 0.17070175161976564,
+    "fraction_above_threshold": 0.0
+  },
+  "limitations": [
+    "No held-out IWR6843ISK-ODS labelled data were available.",
+    "The negative class is bionic bird; it does not cover general non-drone clutter.",
+    "Archive frame timing and authoritative session IDs are unavailable.",
+    "The archive and live radar use different acquisition systems; live transfer is unvalidated.",
+    "One pole recording is only an unknown probe and cannot estimate false alarms per hour."
+  ],
+  "software": {
+    "python": "3.13.5",
+    "numpy": "2.3.3",
+    "scipy": "1.15.3",
+    "scikit_learn": "1.6.1"
+  }
+}
