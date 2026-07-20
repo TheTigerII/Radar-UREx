@@ -17,7 +17,6 @@ try:
         AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
-        compute_compensated_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
         compute_point_cloud,
@@ -33,7 +32,6 @@ except ImportError:
         AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
-        compute_compensated_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
         compute_point_cloud,
@@ -69,10 +67,8 @@ DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
-MICRO_DOPPLER_HISTORY_UPDATES = 60
-MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 1
-MICRO_DOPPLER_WINDOW_SAMPLES = 96
-MICRO_DOPPLER_HOP_SAMPLES = 48
+MICRO_DOPPLER_HISTORY_UPDATES = 150
+MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
 MICRO_DOPPLER_FFT_SIZE = 128
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
@@ -679,14 +675,12 @@ class ProcessedOutputWriter:
             "micro_doppler_axis": "centered Doppler bin",
             "micro_doppler_windows_layout": ["window", "centered_doppler_bin"],
             "micro_doppler_processing": {
-                "mode": "phase-compensated merged-TX TDM STFT",
+                "mode": "per-TX full-frame Doppler FFT",
                 "window": "Hann",
-                "window_samples": MICRO_DOPPLER_WINDOW_SAMPLES,
-                "hop_samples": MICRO_DOPPLER_HOP_SAMPLES,
-                "fft_size": MICRO_DOPPLER_FFT_SIZE,
-                "phase_reference": "TX1",
-                "rf_channel_calibrated": False,
-                "adaptive_tx_slot_equalization": True,
+                "window_samples": config.num_loops,
+                "hop_frames": max(int(update_every), 1),
+                "fft_size": config.num_loops,
+                "tx_rx_combination": "incoherent power sum",
             },
             "radar_config": {
                 "num_adc_samples": config.num_adc_samples,
@@ -807,8 +801,6 @@ class DisplayPayloadSink:
         self.target_tracker = SingleTargetTracker()
         self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
         self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
-        self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
-        self.micro_doppler_windows_generated = 0
         self.frame_count = 0
 
     def update(
@@ -842,7 +834,6 @@ class DisplayPayloadSink:
                     target_track,
                     _history,
                     selected_range_m,
-                    _window_count,
                 ) = (
                     combined_payload
                 )
@@ -852,7 +843,6 @@ class DisplayPayloadSink:
                     clusters=clusters,
                     target_track=target_track,
                     micro_doppler_db=self.latest_micro_doppler_db,
-                    micro_doppler_windows_db=self.latest_micro_doppler_windows_db,
                     selected_range_m=selected_range_m,
                 )
 
@@ -920,7 +910,6 @@ class DisplayPayloadSink:
         Optional[TargetTrack],
         np.ndarray,
         Optional[float],
-        int,
     ]:
         doppler_cube = compute_range_doppler_fft(range_fft, self.config)
         points = compute_point_cloud(
@@ -946,49 +935,24 @@ class DisplayPayloadSink:
             )
         )
         target_range_m = target_track.range_m if target_track is not None else None
-        _spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
             doppler_cube,
             range_axis_m,
             target_range_m=target_range_m,
             range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
             max_range_m=self.max_range_m,
         )
-        short_time_spectra = np.empty((0, 0), dtype=np.float32)
-        if selected_range_m is not None:
-            target_position_m = (
-                target_track.position_m
-                if target_track is not None
-                else (0.0, selected_range_m, 0.0)
-            )
-            short_time_spectra = compute_compensated_micro_doppler_spectrogram(
-                range_fft,
-                range_axis_m,
-                self.config,
-                target_position_m=target_position_m,
-                target_range_m=selected_range_m,
-                range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
-                window_length=MICRO_DOPPLER_WINDOW_SAMPLES,
-                hop_length=MICRO_DOPPLER_HOP_SAMPLES,
-                fft_size=MICRO_DOPPLER_FFT_SIZE,
-            )
-        new_window_count = short_time_spectra.shape[1]
-        self.micro_doppler_windows_generated += new_window_count
-        if short_time_spectra.size:
-            self.latest_micro_doppler_db = short_time_spectra[:, -1]
-            self.latest_micro_doppler_windows_db = short_time_spectra
+        if spectrum_db.size:
+            self.latest_micro_doppler_db = spectrum_db
             if (
                 self.micro_doppler_history
                 and self.micro_doppler_history[0].shape
                 != self.latest_micro_doppler_db.shape
             ):
                 self.micro_doppler_history.clear()
-            self.micro_doppler_history.extend(
-                short_time_spectra[:, index]
-                for index in range(short_time_spectra.shape[1])
-            )
+            self.micro_doppler_history.append(spectrum_db)
         else:
             self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
-            self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
         spectrogram_db = (
             np.stack(tuple(self.micro_doppler_history), axis=1)
             if self.micro_doppler_history
@@ -1000,7 +964,6 @@ class DisplayPayloadSink:
             target_track,
             spectrogram_db,
             selected_range_m,
-            self.micro_doppler_windows_generated,
         )
 
 
@@ -1258,7 +1221,7 @@ def _run_display_process(
             micro_doppler_axis.set_xlim(*initial_micro_doppler_extent[:2])
             micro_doppler_axis.set_ylim(*initial_micro_doppler_extent[2:])
             micro_doppler_axis.set_title("Live Micro-Doppler Spectrogram")
-            micro_doppler_axis.set_xlabel("STFT windows (newest at 0)")
+            micro_doppler_axis.set_xlabel("Display updates (newest at 0)")
             micro_doppler_axis.set_ylabel("Centered Doppler bin")
             micro_doppler_rate_text = micro_doppler_axis.text(
                 0.02,
@@ -1276,7 +1239,6 @@ def _run_display_process(
             _set_rate_indicator(
                 micro_doppler_rate_text,
                 None,
-                include_stft_rate=True,
             )
         if magnitude_colorbar_axis is not None:
             figure.colorbar(
@@ -1367,10 +1329,7 @@ def _run_display_process(
     figure.canvas.mpl_connect("resize_event", invalidate_display_background)
     figure.canvas.mpl_connect("draw_event", restore_dynamic_artists_after_draw)
     display_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
-    micro_doppler_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
-    previous_micro_doppler_window_count: Optional[int] = None
     display_refresh_rate_hz: Optional[float] = None
-    stft_window_rate_hz: Optional[float] = None
 
     try:
         while not stop_event.is_set():
@@ -1383,7 +1342,6 @@ def _run_display_process(
                     except queue.Empty:
                         break
 
-                refreshed_stft_windows = None
                 if point_cloud_rate_text is not None:
                     _set_rate_indicator(
                         point_cloud_rate_text,
@@ -1443,22 +1401,11 @@ def _run_display_process(
                         target_track,
                         spectrogram_db,
                         selected_range_m,
-                        micro_doppler_window_count,
                     ) = payload
-                    new_window_count = (
-                        micro_doppler_window_count
-                        - previous_micro_doppler_window_count
-                        if previous_micro_doppler_window_count is not None
-                        else 0
-                    )
-                    previous_micro_doppler_window_count = micro_doppler_window_count
-                    refreshed_stft_windows = float(new_window_count)
                     if micro_doppler_rate_text is not None:
                         _set_rate_indicator(
                             micro_doppler_rate_text,
                             display_refresh_rate_hz,
-                            stft_window_rate_hz,
-                            include_stft_rate=True,
                             range_gate_m=selected_range_m,
                         )
                     _draw_point_cloud(
@@ -1507,12 +1454,6 @@ def _run_display_process(
                     refreshed_at_s,
                     1.0,
                 )
-                if refreshed_stft_windows is not None:
-                    stft_window_rate_hz = _record_event_rate(
-                        micro_doppler_rate_events,
-                        refreshed_at_s,
-                        refreshed_stft_windows,
-                    )
                 refreshed_payload = True
             except queue.Empty:
                 pass
@@ -1552,9 +1493,7 @@ def _record_event_rate(
 def _set_rate_indicator(
     artist: Any,
     display_refresh_rate_hz: Optional[float],
-    stft_window_rate_hz: Optional[float] = None,
     *,
-    include_stft_rate: bool = False,
     range_gate_m: Optional[float] = None,
 ) -> None:
     display_rate_text = (
@@ -1566,13 +1505,6 @@ def _set_rate_indicator(
         f"Gate: {range_gate_m:.2f} m\n" if range_gate_m is not None else ""
     )
     text += f"Refresh rate: {display_rate_text}"
-    if include_stft_rate:
-        stft_rate_text = (
-            f"{stft_window_rate_hz:.1f} windows/s"
-            if stft_window_rate_hz is not None
-            else "measuring..."
-        )
-        text += f"\nSTFT rate: {stft_rate_text}"
     artist.set_text(text)
 
 
@@ -1617,7 +1549,6 @@ def _draw_micro_doppler(
     spectrogram_db: np.ndarray,
     selected_range_m: Optional[float],
     display_update_rate_hz: Optional[float] = None,
-    stft_window_rate_hz: Optional[float] = None,
     *,
     update_axes: bool = True,
     update_title: bool = True,
@@ -1650,10 +1581,8 @@ def _draw_micro_doppler(
             else ""
         )
         rate_text = (
-            f" — plot {display_update_rate_hz:.1f} Hz, "
-            f"STFT {stft_window_rate_hz:.1f} windows/s"
+            f" — {display_update_rate_hz:.1f} Hz"
             if display_update_rate_hz is not None
-            and stft_window_rate_hz is not None
             else ""
         )
         axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}{rate_text}")

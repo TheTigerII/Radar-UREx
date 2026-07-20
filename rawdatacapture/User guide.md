@@ -233,38 +233,25 @@ magnitude, the range-Doppler display, and micro-Doppler retain raw power.
 python run.py --display point-cloud-micro-doppler
 ```
 
-This mode places the 3D point cloud and a rolling 60-window micro-Doppler
-spectrogram side by side. It reuses one Doppler cube for tracking and range-gate
-selection. Once a 3D target track is available, the micro-Doppler path uses the
-nominal IWR6843ISK-ODS TX geometry to align the chronological TDM chirps to the
-TX1 phase center. It then calculates 96-sample Hann-windowed FFTs with a
-48-sample hop and a 128-point FFT. A complete 384-chirp frame produces seven
-short-time spectra. Frame-adaptive complex equalization plus window-local static
-offset cancellation removes the repeating TX-slot phase and amplitude
-discontinuity that would otherwise create two replicas of a static return. This
-display uses only the merged-TX path; before
-track acquisition it uses a boresight direction for nominal phase alignment. The
-spectrogram uses a three-range-bin gate centered on the strongest point-cloud
+This mode places the 3D point cloud and a rolling 150-update micro-Doppler
+spectrogram side by side. It reuses one Doppler cube for both plots. The
+spectrogram uses a five-range-bin gate centered on the strongest point-cloud
 return. If the point cloud is empty, it selects the strongest non-zero-Doppler
 range inside `--max-range-m`. The current gate range is shown in the
 spectrogram title.
 
-The horizontal spectrogram axis is measured in STFT windows, with the newest
-column at zero. Within an active chirp burst, compensated samples are spaced by
-one chirp interval; the frame still contains a gap before the next burst. The
-vertical axis is centered Doppler bin because velocity is not yet calibrated.
-Its magnitude color scale uses the same fixed 40 to 120 dB
+The horizontal spectrogram axis is measured in display updates, with the newest
+column at zero. The vertical axis is centered Doppler bin because velocity is
+not yet calibrated. Its magnitude color scale uses the same fixed 40 to 120 dB
 limits as the 3D point cloud, so colors remain comparable between updates and
 the two plots. One shared magnitude colorbar sits between both plots. Automatic
 gating can switch between targets when multiple
 strong objects are present; it is a visualization aid rather than persistent
 target tracking.
 
-The point-cloud title shows its measured plot refresh rate. The micro-Doppler
-title shows both its measured plot refresh rate and the rate at which new STFT
-windows enter the spectrogram. On Matplotlib backends that support it, the
-combined view blits only the changing scatter, image, and title artists rather
-than redrawing the full 3D axes and colorbar for every frame.
+The plot titles show their measured refresh rate. On Matplotlib backends that
+support it, the combined view blits only the changing scatter, image, and title
+artists rather than redrawing the full 3D axes and colorbar for every frame.
 
 ### Display performance
 
