@@ -391,6 +391,80 @@ def compute_micro_doppler_spectrum(
     return spectrum_db.astype(np.float32, copy=False), selected_range_m
 
 
+def compute_per_tx_micro_doppler_spectrogram(
+    range_fft: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    config: RadarDspConfig,
+    *,
+    target_range_m: float,
+    range_half_width_bins: int = 2,
+    window_loops: int = 64,
+    hop_loops: int = 32,
+    fft_size: int = 128,
+) -> np.ndarray:
+    """Return range-gated STFT spectra without coherently merging TDM TX slots.
+
+    Slow-time FFTs are calculated along the loop axis independently for every
+    TX slot, RX channel, and gated range bin. Their powers are summed only
+    after the FFT, so no inter-TX phase or amplitude calibration is required.
+    Output layout is [centered Doppler bin, short-time window].
+    """
+    if range_fft.ndim != 3 or range_fft.size == 0:
+        return np.empty((0, 0), dtype=np.float32)
+    if window_loops <= 0 or hop_loops <= 0 or fft_size < window_loops:
+        raise ValueError(
+            "Micro-Doppler window/hop must be positive and FFT size must "
+            "cover the window"
+        )
+
+    chirps_per_loop = config.num_chirps_per_loop or 1
+    if chirps_per_loop <= 0 or range_fft.shape[0] % chirps_per_loop:
+        return np.empty((0, 0), dtype=np.float32)
+    loop_count = range_fft.shape[0] // chirps_per_loop
+    if loop_count < window_loops:
+        return np.empty((0, 0), dtype=np.float32)
+
+    range_bins = range_fft.shape[-1]
+    physical_range_axis = (
+        np.asarray(range_axis, dtype=np.float64)
+        if range_axis is not None and range_axis.size == range_bins
+        else None
+    )
+    if physical_range_axis is None or not np.isfinite(target_range_m):
+        return np.empty((0, 0), dtype=np.float32)
+
+    center_bin = int(np.argmin(np.abs(physical_range_axis - target_range_m)))
+    half_width = max(int(range_half_width_bins), 0)
+    gate_start = max(center_bin - half_width, 0)
+    gate_end = min(center_bin + half_width + 1, range_bins)
+    loop_cube = range_fft.reshape(
+        loop_count,
+        chirps_per_loop,
+        range_fft.shape[1],
+        range_bins,
+    )
+    gated_loop_cube = loop_cube[..., gate_start:gate_end]
+
+    hann = np.hanning(window_loops).astype(np.float32)
+    spectra = []
+    for start in range(0, loop_count - window_loops + 1, hop_loops):
+        windowed = (
+            gated_loop_cube[start : start + window_loops]
+            * hann[:, np.newaxis, np.newaxis, np.newaxis]
+        )
+        transformed = np.fft.fftshift(
+            np.fft.fft(windowed, n=fft_size, axis=0),
+            axes=0,
+        )
+        # Combine TX slots only after their independent slow-time FFTs.
+        power = np.sum(np.abs(transformed) ** 2, axis=(1, 2, 3))
+        spectra.append(10.0 * np.log10(power + 1e-12))
+
+    if not spectra:
+        return np.empty((fft_size, 0), dtype=np.float32)
+    return np.stack(spectra, axis=1).astype(np.float32, copy=False)
+
+
 def cluster_point_cloud(
     points: np.ndarray,
     *,

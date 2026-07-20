@@ -208,13 +208,18 @@ The track is removed after 10 consecutive missed display updates. When no track
 exists, the gate follows the strongest non-zero-Doppler range inside the
 configured range limit.
 
-Power is summed over the gated range bins, TX channels, and RX channels before
-conversion to dB. Each resulting full-frame Doppler spectrum is appended to a
-150-update history in the frame-processing process. Sending the complete
-history through the latest-only display queue prevents GUI queue replacement
-from creating holes in the visible spectrogram. The spectrogram follows the
-single tracked target while its association remains valid. It can still change
-targets after track loss and reacquisition. The Matplotlib image uses the point cloud's fixed
+The micro-Doppler branch reshapes the chronological chirps into explicit loop
+and TX-slot axes. It applies independent slow-time FFTs to every TX slot, RX
+channel, and gated range bin using 64-loop Hann windows, a 32-loop hop, and a
+128-point FFT. TX, RX, and range-bin powers are summed only after the FFT, so
+the three TX signals are not coherently merged and require no inter-TX phase
+calibration. A 128-loop frame produces three short-time spectra. Each spectrum
+is appended to a 150-window history in the frame-processing process. Sending
+the complete history through the latest-only display queue prevents GUI queue
+replacement from creating holes in the visible spectrogram. The spectrogram
+follows the single tracked target while its association remains valid. It can
+still change targets after track loss and reacquisition. The Matplotlib image
+uses the point cloud's fixed
 40-to-120 dB magnitude color limits rather than rescaling each history update,
 and the combined layout uses one shared magnitude colorbar for both axes.
 The colorbar occupies a dedicated narrow grid column between the point cloud

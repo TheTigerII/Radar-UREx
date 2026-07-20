@@ -21,7 +21,9 @@ from rawdatacapture.livedatacapture import (
     DEFAULT_MAX_RANGE_M,
     DEFAULT_POINT_CLOUD_FOV_DEG,
     MICRO_DOPPLER_HISTORY_UPDATES,
+    MICRO_DOPPLER_HOP_LOOPS,
     MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+    MICRO_DOPPLER_WINDOW_LOOPS,
     POINT_CLOUD_MAGNITUDE_DB_MAX,
     POINT_CLOUD_MAGNITUDE_DB_MIN,
     DCA1000PacketHeader,
@@ -168,9 +170,10 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         self.assertEqual(records[0]["record_type"], "metadata")
         self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
         self.assertEqual(
-            records[0]["micro_doppler_processing"]["window_samples"],
-            128,
+            records[0]["micro_doppler_processing"]["window_loops"],
+            64,
         )
+        self.assertEqual(records[0]["micro_doppler_processing"]["hop_loops"], 32)
         self.assertEqual(records[1]["record_type"], "update")
         self.assertEqual(records[1]["processed_frame_index"], 7)
         self.assertEqual(records[1]["points"], [[1.0, 2.0, 3.0, 50.0]])
@@ -426,6 +429,11 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
                 return_value=(np.ones(4, dtype=np.float32), 2.0),
             ) as micro_doppler,
+            patch(
+                "rawdatacapture.livedatacapture."
+                "compute_per_tx_micro_doppler_spectrogram",
+                return_value=np.arange(12, dtype=np.float32).reshape(4, 3),
+            ) as short_time_micro_doppler,
         ):
             sink.update(np.empty((0,), dtype=np.complex64), np.arange(4))
 
@@ -434,11 +442,12 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
             micro_doppler.call_args.kwargs["target_range_m"],
             2.0,
         )
+        short_time_micro_doppler.assert_called_once()
         np.testing.assert_array_equal(
             sink.latest_micro_doppler_db,
-            np.ones(4, dtype=np.float32),
+            np.asarray((2.0, 5.0, 8.0, 11.0)),
         )
-        self.assertEqual(len(sink.micro_doppler_history), 1)
+        self.assertEqual(len(sink.micro_doppler_history), 3)
         payload = payload_queue.get_nowait()
         self.assertEqual(len(payload), 5)
         self.assertIsNotNone(payload[2])
@@ -515,8 +524,12 @@ class RangeDisplayBoundsTests(unittest.TestCase):
 
 
 class MicroDopplerDisplayTests(unittest.TestCase):
-    def test_live_history_keeps_150_display_updates(self) -> None:
+    def test_live_history_keeps_150_stft_windows(self) -> None:
         self.assertEqual(MICRO_DOPPLER_HISTORY_UPDATES, 150)
+
+    def test_stft_uses_64_loop_window_and_32_loop_hop(self) -> None:
+        self.assertEqual(MICRO_DOPPLER_WINDOW_LOOPS, 64)
+        self.assertEqual(MICRO_DOPPLER_HOP_LOOPS, 32)
 
     def test_live_range_gate_uses_five_bins(self) -> None:
         self.assertEqual(2 * MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS + 1, 5)

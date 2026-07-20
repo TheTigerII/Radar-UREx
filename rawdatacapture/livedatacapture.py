@@ -17,6 +17,7 @@ try:
         AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
+        compute_per_tx_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
         compute_point_cloud,
@@ -32,6 +33,7 @@ except ImportError:
         AdaptiveClutterMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
+        compute_per_tx_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
         compute_point_cloud,
@@ -69,6 +71,8 @@ DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
 MICRO_DOPPLER_HISTORY_UPDATES = 150
 MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
+MICRO_DOPPLER_WINDOW_LOOPS = 64
+MICRO_DOPPLER_HOP_LOOPS = 32
 MICRO_DOPPLER_FFT_SIZE = 128
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
@@ -675,11 +679,11 @@ class ProcessedOutputWriter:
             "micro_doppler_axis": "centered Doppler bin",
             "micro_doppler_windows_layout": ["window", "centered_doppler_bin"],
             "micro_doppler_processing": {
-                "mode": "per-TX full-frame Doppler FFT",
+                "mode": "per-TX TDM STFT",
                 "window": "Hann",
-                "window_samples": config.num_loops,
-                "hop_frames": max(int(update_every), 1),
-                "fft_size": config.num_loops,
+                "window_loops": MICRO_DOPPLER_WINDOW_LOOPS,
+                "hop_loops": MICRO_DOPPLER_HOP_LOOPS,
+                "fft_size": MICRO_DOPPLER_FFT_SIZE,
                 "tx_rx_combination": "incoherent power sum",
             },
             "radar_config": {
@@ -801,6 +805,7 @@ class DisplayPayloadSink:
         self.target_tracker = SingleTargetTracker()
         self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
         self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
+        self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
         self.frame_count = 0
 
     def update(
@@ -843,6 +848,7 @@ class DisplayPayloadSink:
                     clusters=clusters,
                     target_track=target_track,
                     micro_doppler_db=self.latest_micro_doppler_db,
+                    micro_doppler_windows_db=self.latest_micro_doppler_windows_db,
                     selected_range_m=selected_range_m,
                 )
 
@@ -935,24 +941,41 @@ class DisplayPayloadSink:
             )
         )
         target_range_m = target_track.range_m if target_track is not None else None
-        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+        _spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
             doppler_cube,
             range_axis_m,
             target_range_m=target_range_m,
             range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
             max_range_m=self.max_range_m,
         )
-        if spectrum_db.size:
-            self.latest_micro_doppler_db = spectrum_db
+        short_time_spectra = np.empty((0, 0), dtype=np.float32)
+        if selected_range_m is not None:
+            short_time_spectra = compute_per_tx_micro_doppler_spectrogram(
+                range_fft,
+                range_axis_m,
+                self.config,
+                target_range_m=selected_range_m,
+                range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+                window_loops=MICRO_DOPPLER_WINDOW_LOOPS,
+                hop_loops=MICRO_DOPPLER_HOP_LOOPS,
+                fft_size=MICRO_DOPPLER_FFT_SIZE,
+            )
+        if short_time_spectra.size:
+            self.latest_micro_doppler_db = short_time_spectra[:, -1]
+            self.latest_micro_doppler_windows_db = short_time_spectra
             if (
                 self.micro_doppler_history
                 and self.micro_doppler_history[0].shape
                 != self.latest_micro_doppler_db.shape
             ):
                 self.micro_doppler_history.clear()
-            self.micro_doppler_history.append(spectrum_db)
+            self.micro_doppler_history.extend(
+                short_time_spectra[:, index]
+                for index in range(short_time_spectra.shape[1])
+            )
         else:
             self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
+            self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
         spectrogram_db = (
             np.stack(tuple(self.micro_doppler_history), axis=1)
             if self.micro_doppler_history
@@ -1221,7 +1244,7 @@ def _run_display_process(
             micro_doppler_axis.set_xlim(*initial_micro_doppler_extent[:2])
             micro_doppler_axis.set_ylim(*initial_micro_doppler_extent[2:])
             micro_doppler_axis.set_title("Live Micro-Doppler Spectrogram")
-            micro_doppler_axis.set_xlabel("Display updates (newest at 0)")
+            micro_doppler_axis.set_xlabel("STFT windows (newest at 0)")
             micro_doppler_axis.set_ylabel("Centered Doppler bin")
             micro_doppler_rate_text = micro_doppler_axis.text(
                 0.02,

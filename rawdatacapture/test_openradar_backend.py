@@ -11,6 +11,7 @@ from rawdatacapture.dsp import (
     build_virtual_antenna_grids,
     cluster_point_cloud,
     compute_micro_doppler_spectrum,
+    compute_per_tx_micro_doppler_spectrogram,
     compute_point_cloud,
     doppler_peak_mask,
     estimate_xyz_from_virtual_array,
@@ -333,6 +334,42 @@ class MicroDopplerSpectrumTests(unittest.TestCase):
             float(spectrum_db[1]),
             10.0 * np.log10(6.0),
             places=6,
+        )
+
+    def test_per_tx_stft_uses_64_loop_window_and_32_loop_hop(self) -> None:
+        loop_count = 128
+        chirps_per_loop = 3
+        fft_size = 128
+        tone_bin = 8
+        loop_phase = np.exp(
+            2j * np.pi * tone_bin * np.arange(loop_count) / fft_size
+        )
+        slot_gains = np.asarray(
+            (1.0, 0.45 * np.exp(0.8j), 1.6 * np.exp(-1.1j))
+        )
+        range_cube = np.zeros(
+            (loop_count * chirps_per_loop, 1, 3),
+            dtype=np.complex64,
+        )
+        range_cube[:, 0, 1] = (
+            loop_phase[:, np.newaxis] * slot_gains[np.newaxis, :]
+        ).reshape(-1)
+
+        spectrogram = compute_per_tx_micro_doppler_spectrogram(
+            range_cube,
+            np.asarray((0.0, 1.0, 2.0)),
+            SimpleNamespace(num_chirps_per_loop=chirps_per_loop),
+            target_range_m=1.0,
+            range_half_width_bins=0,
+            window_loops=64,
+            hop_loops=32,
+            fft_size=fft_size,
+        )
+
+        self.assertEqual(spectrogram.shape, (128, 3))
+        np.testing.assert_array_equal(
+            np.argmax(spectrogram, axis=0),
+            np.full(3, (fft_size // 2) + tone_bin),
         )
 
 class PointCloudClusteringTests(unittest.TestCase):

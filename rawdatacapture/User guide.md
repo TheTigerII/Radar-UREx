@@ -233,14 +233,17 @@ magnitude, the range-Doppler display, and micro-Doppler retain raw power.
 python run.py --display point-cloud-micro-doppler
 ```
 
-This mode places the 3D point cloud and a rolling 150-update micro-Doppler
-spectrogram side by side. It reuses one Doppler cube for both plots. The
-spectrogram uses a five-range-bin gate centered on the strongest point-cloud
-return. If the point cloud is empty, it selects the strongest non-zero-Doppler
-range inside `--max-range-m`. The current gate range is shown in the
-spectrogram title.
+This mode places the 3D point cloud and a rolling 150-window micro-Doppler
+spectrogram side by side. It reuses one Doppler cube for tracking and range-gate
+selection. The micro-Doppler path calculates a separate slow-time FFT for each
+TX slot using 64-loop Hann windows, a 32-loop hop, and a 128-point FFT. The TX
+and RX powers are summed after the FFT; the TX signals are not coherently
+merged. A 128-loop frame produces three short-time spectra. The spectrogram
+uses a five-range-bin gate centered on the strongest point-cloud return. If the
+point cloud is empty, it selects the strongest non-zero-Doppler range inside
+`--max-range-m`. The current gate range is shown in the spectrogram title.
 
-The horizontal spectrogram axis is measured in display updates, with the newest
+The horizontal spectrogram axis is measured in STFT windows, with the newest
 column at zero. The vertical axis is centered Doppler bin because velocity is
 not yet calibrated. Its magnitude color scale uses the same fixed 40 to 120 dB
 limits as the 3D point cloud, so colors remain comparable between updates and
