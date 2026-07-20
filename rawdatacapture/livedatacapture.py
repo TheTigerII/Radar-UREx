@@ -74,6 +74,7 @@ MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
 MICRO_DOPPLER_WINDOW_LOOPS = 64
 MICRO_DOPPLER_HOP_LOOPS = 32
 MICRO_DOPPLER_FFT_SIZE = 128
+MAGNITUDE_COLORMAP = "turbo"
 POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -1173,13 +1174,14 @@ def _run_display_process(
             aspect="auto",
             origin="lower",
             interpolation="nearest",
+            cmap=MAGNITUDE_COLORMAP,
         )
         figure.colorbar(image, ax=axis, label="Magnitude (dB)")
         axis.set_title("Live Range-Doppler Heatmap")
         axis.set_xlabel("Range (m)")
         axis.set_ylabel("Doppler bin")
     elif mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
-        scatter = axis.scatter([], [], [], c=[], s=18, cmap="viridis")
+        scatter = axis.scatter([], [], [], c=[], s=18, cmap=MAGNITUDE_COLORMAP)
         scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
         cluster_scatter = axis.scatter(
             [],
@@ -1236,7 +1238,7 @@ def _run_display_process(
                 aspect="auto",
                 origin="lower",
                 interpolation="nearest",
-                cmap="viridis",
+                cmap=MAGNITUDE_COLORMAP,
                 vmin=POINT_CLOUD_MAGNITUDE_DB_MIN,
                 vmax=POINT_CLOUD_MAGNITUDE_DB_MAX,
                 extent=initial_micro_doppler_extent,

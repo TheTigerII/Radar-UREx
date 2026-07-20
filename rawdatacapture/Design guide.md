@@ -219,9 +219,9 @@ the complete history through the latest-only display queue prevents GUI queue
 replacement from creating holes in the visible spectrogram. The spectrogram
 follows the single tracked target while its association remains valid. It can
 still change targets after track loss and reacquisition. The Matplotlib image
-uses the point cloud's fixed
-40-to-120 dB magnitude color limits rather than rescaling each history update,
-and the combined layout uses one shared magnitude colorbar for both axes.
+uses a visible-spectrum `turbo` color map, running from dark blue at the fixed
+40 dB minimum to red at the fixed 120 dB maximum rather than rescaling each
+history update. The combined layout uses one shared magnitude colorbar for both axes.
 The colorbar occupies a dedicated narrow grid column between the point cloud
 and micro-Doppler axes, with a spacer on its right so it does not crowd the
 spectrogram's Doppler-axis label. Both plot titles report measured updates per

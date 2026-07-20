@@ -20,6 +20,7 @@ from rawdatacapture.livedatacapture import (
     DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
     DEFAULT_POINT_CLOUD_FOV_DEG,
+    MAGNITUDE_COLORMAP,
     MICRO_DOPPLER_HISTORY_UPDATES,
     MICRO_DOPPLER_HOP_LOOPS,
     MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
@@ -524,6 +525,9 @@ class RangeDisplayBoundsTests(unittest.TestCase):
 
 
 class MicroDopplerDisplayTests(unittest.TestCase):
+    def test_magnitude_colormap_runs_from_dark_blue_to_red(self) -> None:
+        self.assertEqual(MAGNITUDE_COLORMAP, "turbo")
+
     def test_live_history_keeps_150_stft_windows(self) -> None:
         self.assertEqual(MICRO_DOPPLER_HISTORY_UPDATES, 150)
 

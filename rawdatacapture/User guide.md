@@ -245,9 +245,10 @@ point cloud is empty, it selects the strongest non-zero-Doppler range inside
 
 The horizontal spectrogram axis is measured in STFT windows, with the newest
 column at zero. The vertical axis is centered Doppler bin because velocity is
-not yet calibrated. Its magnitude color scale uses the same fixed 40 to 120 dB
-limits as the 3D point cloud, so colors remain comparable between updates and
-the two plots. One shared magnitude colorbar sits between both plots. Automatic
+not yet calibrated. Its visible-spectrum `turbo` scale runs from dark blue at
+the fixed 40 dB minimum to red at the fixed 120 dB maximum, matching the 3D
+point cloud so colors remain comparable between updates and the two plots.
+One shared magnitude colorbar sits between both plots. Automatic
 gating can switch between targets when multiple
 strong objects are present; it is a visualization aid rather than persistent
 target tracking.
