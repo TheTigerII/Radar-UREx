@@ -200,8 +200,11 @@ Place the extracted archive recordings in Google Drive at:
 
 The directory may contain the `.pkl` files directly or inside nested folders.
 `classification.ipynb` discovers recordings recursively and ignores macOS
-resource forks. Keep the Radar-UREx repository in one of these locations, or
-set the `RADAR_UREX_REPO` environment variable before running the first cell:
+resource forks. If extraction created repeated directory copies, the notebook
+collapses files only when their recording names, sizes, and sampled content
+hashes agree; conflicting same-name files stop the run. Keep the Radar-UREx
+repository in one of these locations, or set the `RADAR_UREX_REPO` environment
+variable before running the first cell:
 
 ```text
 /content/Radar-UREx
