@@ -232,13 +232,20 @@ approximately 17 GiB of Colab local disk plus working space. After the
 persistent feature cache is created, subsequent sessions load that compact
 cache from Drive and do not need to stage the raw recordings again.
 
+Before feature extraction, the notebook detects CPUs available to the Colab
+container using Linux CPU affinity and cgroup quota, rather than trusting the
+host-wide logical CPU count. It creates one concurrent recording worker per
+available core. Each worker keeps SciPy FFT execution at one thread, avoiding
+nested FFT oversubscription. Results are restored to manifest order before the
+feature cache is written, keeping the output deterministic.
+
 If Colab reports `Transport endpoint is not connected`, restart the runtime,
 open the updated notebook from the repository, and run it again from the first
 cell. Do not resume only the failed cell: the stale Drive mount and the older
 in-memory helper functions would still be active.
 
 The first configuration cell must print
-`'pipeline_revision': 'streaming-drive-api-r5'`. If that marker is absent, Colab is
+`'pipeline_revision': 'adaptive-core-extraction-r7'`. If that marker is absent, Colab is
 running an older copy of `classification.ipynb`; replace or reopen the notebook
 at `/content/drive/MyDrive/UREX/Radar-UREx/classification.ipynb` before running
 feature extraction.
