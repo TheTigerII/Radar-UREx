@@ -220,17 +220,25 @@ future model artifacts persist across Colab sessions under:
 /content/drive/MyDrive/UREX/Radar-UREx-output
 ```
 
-Large pickle and FFT reads should not run directly through the Google Drive
-FUSE mount. When the feature cache is absent, the notebook copies each of the
-102 unique recordings to `/content/radar_urex_staging` and processes the local
-copy. Allow approximately 17 GiB of Colab local disk plus working space. After
-the persistent feature cache is created, subsequent sessions load that compact
-cache from Drive and do not need to stage the raw recordings again.
+Large pickle and FFT reads must not run through the Google Drive FUSE mount.
+When the feature cache is absent, the notebook authenticates the Google Drive
+API, downloads each of the 102 unique recordings to
+`/content/radar_urex_staging`, and processes the local copy. The API download
+bypasses FUSE and retries interrupted chunks. Allow approximately 17 GiB of
+Colab local disk plus working space. After the persistent feature cache is
+created, subsequent sessions load that compact cache from Drive and do not need
+to stage the raw recordings again.
 
 If Colab reports `Transport endpoint is not connected`, restart the runtime,
 open the updated notebook from the repository, and run it again from the first
 cell. Do not resume only the failed cell: the stale Drive mount and the older
 in-memory helper functions would still be active.
+
+The first configuration cell must print
+`'pipeline_revision': 'drive-api-staging-r3'`. If that marker is absent, Colab is
+running an older copy of `classification.ipynb`; replace or reopen the notebook
+at `/content/drive/MyDrive/UREX/Radar-UREx/classification.ipynb` before running
+feature extraction.
 
 Before training:
 
