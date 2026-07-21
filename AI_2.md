@@ -190,6 +190,47 @@ backend. TensorRT FP16 should be added only when Jetson deployment is confirmed
 and measured on the actual target device; INT8 should follow only if calibration
 data are representative and accuracy remains acceptable.
 
+### Google Colab training workflow
+
+Place the extracted archive recordings in Google Drive at:
+
+```text
+/content/drive/MyDrive/Data
+```
+
+The directory may contain the `.pkl` files directly or inside nested folders.
+`classification.ipynb` discovers recordings recursively and ignores macOS
+resource forks. Keep the Radar-UREx repository in one of these locations, or
+set the `RADAR_UREX_REPO` environment variable before running the first cell:
+
+```text
+/content/Radar-UREx
+/content/drive/MyDrive/Radar-UREx
+```
+
+When Colab is detected, the first notebook cell mounts Google Drive and selects
+`/content/drive/MyDrive/Data` automatically. The generated feature cache and
+future model artifacts persist across Colab sessions under:
+
+```text
+/content/drive/MyDrive/Radar-UREx-output
+```
+
+Before training:
+
+1. Select a GPU runtime in Colab.
+2. Run `classification.ipynb` in order through dataset auditing, feature
+   generation, grouped splitting, and training-only normalization.
+3. Run the CNN dependency, architecture, and data-pipeline cells.
+4. Run the CNN training cell manually.
+5. After training completes, run the calibration, locked-test evaluation, and
+   export cell.
+
+Opening the notebook does not train the CNN. The CNN training and export cells
+are intentionally unexecuted in the repository version. Do not bypass the
+grouped split, fit preprocessing on validation/test data, or inspect locked-test
+metrics during model selection.
+
 ## 6. Evaluation
 
 Evaluate on complete held-out recordings and sessions. Report:
