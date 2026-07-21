@@ -195,7 +195,7 @@ data are representative and accuracy remains acceptable.
 Place the extracted archive recordings in Google Drive at:
 
 ```text
-/content/drive/MyDrive/Data
+/content/drive/MyDrive/UREX/Data
 ```
 
 The directory may contain the `.pkl` files directly or inside nested folders.
@@ -205,15 +205,15 @@ set the `RADAR_UREX_REPO` environment variable before running the first cell:
 
 ```text
 /content/Radar-UREx
-/content/drive/MyDrive/Radar-UREx
+/content/drive/MyDrive/UREX/Radar-UREx
 ```
 
 When Colab is detected, the first notebook cell mounts Google Drive and selects
-`/content/drive/MyDrive/Data` automatically. The generated feature cache and
+`/content/drive/MyDrive/UREX/Data` automatically. The generated feature cache and
 future model artifacts persist across Colab sessions under:
 
 ```text
-/content/drive/MyDrive/Radar-UREx-output
+/content/drive/MyDrive/UREX/Radar-UREx-output
 ```
 
 Before training:
