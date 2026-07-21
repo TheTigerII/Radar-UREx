@@ -10,8 +10,8 @@ from rawdatacapture.dsp import (
     build_virtual_antenna_grid,
     build_virtual_antenna_grids,
     cluster_point_cloud,
-    compute_compensated_micro_doppler_spectrogram,
     compute_micro_doppler_spectrum,
+    compute_per_tx_micro_doppler_spectrogram,
     compute_point_cloud,
     doppler_peak_mask,
     estimate_xyz_from_virtual_array,
@@ -336,95 +336,41 @@ class MicroDopplerSpectrumTests(unittest.TestCase):
             places=6,
         )
 
-    def test_compensated_tdm_sequence_uses_short_overlapping_windows(self) -> None:
-        config = SimpleNamespace(
-            num_chirps_per_loop=3,
-            tx_channel_masks=(1, 4, 2),
-        )
-        chirp_count = 384
+    def test_per_tx_stft_uses_64_loop_window_and_32_loop_hop(self) -> None:
+        loop_count = 128
+        chirps_per_loop = 3
         fft_size = 128
         tone_bin = 8
-        target_position = np.asarray((1.0, 10.0, 0.0))
-        direction = target_position / np.linalg.norm(target_position)
-        tx_positions = np.asarray(
-            ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 0.0, -1.0))
+        loop_phase = np.exp(
+            2j * np.pi * tone_bin * np.arange(loop_count) / fft_size
         )
-        tx_phase = 2.0 * np.pi * (tx_positions @ direction)
-        # The configured masks make the chronological order TX1, TX3, TX2.
-        tx_order = np.resize(np.asarray((0, 2, 1)), chirp_count)
-        slow_time_phase = 2.0 * np.pi * tone_bin * np.arange(chirp_count) / fft_size
+        slot_gains = np.asarray(
+            (1.0, 0.45 * np.exp(0.8j), 1.6 * np.exp(-1.1j))
+        )
+        range_cube = np.zeros(
+            (loop_count * chirps_per_loop, 1, 3),
+            dtype=np.complex64,
+        )
+        range_cube[:, 0, 1] = (
+            loop_phase[:, np.newaxis] * slot_gains[np.newaxis, :]
+        ).reshape(-1)
 
-        range_cube = np.zeros((chirp_count, 1, 3), dtype=np.complex64)
-        range_cube[:, 0, 1] = np.exp(
-            1j * (slow_time_phase + tx_phase[tx_order])
-        )
-        spectrogram = compute_compensated_micro_doppler_spectrogram(
+        spectrogram = compute_per_tx_micro_doppler_spectrogram(
             range_cube,
             np.asarray((0.0, 1.0, 2.0)),
-            config,
-            target_position_m=tuple(target_position),
+            SimpleNamespace(num_chirps_per_loop=chirps_per_loop),
             target_range_m=1.0,
             range_half_width_bins=0,
-            window_length=96,
-            hop_length=48,
+            window_loops=64,
+            hop_loops=32,
             fft_size=fft_size,
         )
 
-        self.assertEqual(spectrogram.shape, (128, 7))
+        self.assertEqual(spectrogram.shape, (128, 3))
         np.testing.assert_array_equal(
             np.argmax(spectrogram, axis=0),
-            np.full(7, (fft_size // 2) + tone_bin),
+            np.full(3, (fft_size // 2) + tone_bin),
         )
-
-    def test_compensated_tdm_sequence_rejects_non_ods_tx_layout(self) -> None:
-        spectrogram = compute_compensated_micro_doppler_spectrogram(
-            np.ones((384, 1, 2), dtype=np.complex64),
-            np.asarray((0.0, 1.0)),
-            SimpleNamespace(
-                num_chirps_per_loop=2,
-                tx_channel_masks=(1, 2),
-            ),
-            target_position_m=(0.0, 1.0, 0.0),
-            target_range_m=1.0,
-        )
-
-        self.assertEqual(spectrogram.shape, (0, 0))
-
-    def test_compensated_tdm_sequence_removes_static_tx_cycle_replicas(self) -> None:
-        chirp_count = 384
-        slot_gains = np.asarray(
-            (
-                1.0,
-                0.45 * np.exp(0.8j),
-                1.6 * np.exp(-1.1j),
-            )
-        )
-        range_cube = np.zeros((chirp_count, 1, 3), dtype=np.complex64)
-        range_cube[:, 0, 1] = slot_gains[np.arange(chirp_count) % 3]
-
-        spectrogram = compute_compensated_micro_doppler_spectrogram(
-            range_cube,
-            np.asarray((0.0, 1.0, 2.0)),
-            SimpleNamespace(
-                num_chirps_per_loop=3,
-                tx_channel_masks=(1, 4, 2),
-            ),
-            target_position_m=(0.0, 1.0, 0.0),
-            target_range_m=1.0,
-            range_half_width_bins=0,
-            window_length=96,
-            hop_length=48,
-            fft_size=128,
-        )
-
-        center_bin = spectrogram.shape[0] // 2
-        replica_bins = (center_bin - 43, center_bin + 43)
-        replica_peak_db = float(np.max(spectrogram[list(replica_bins)]))
-        self.assertGreater(
-            float(np.min(spectrogram[center_bin])),
-            replica_peak_db + 40.0,
-        )
-
 
 class PointCloudClusteringTests(unittest.TestCase):
     def test_dbscan_returns_cluster_centers_and_ignores_noise(self) -> None:
