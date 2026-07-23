@@ -23,9 +23,18 @@ DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
 DEFAULT_DURATION_MINUTES = 3.0
 DEFAULT_MAX_RANGE_M = 10.0
-DEFAULT_CLUSTER_EPS_M = 0.5
+DEFAULT_CLUSTER_EPS_M = 0.4
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
-DISPLAY_CHOICES = ("none", "range", "range-doppler", "point-cloud")
+DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
+DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
+DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
+DISPLAY_CHOICES = (
+    "none",
+    "range",
+    "range-doppler",
+    "point-cloud",
+    "point-cloud-micro-doppler",
+)
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
 
@@ -71,7 +80,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CLUSTER_EPS_M,
         help=(
             "DBSCAN XYZ neighborhood radius for point-cloud clustering. "
-            "Defaults to 0.5 m; use 0 to disable clustering."
+            "Defaults to 0.4 m; use 0 to disable clustering."
         ),
     )
     parser.add_argument(
@@ -79,6 +88,24 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_CLUSTER_MIN_SAMPLES,
         help="Minimum points required for a DBSCAN cluster. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--clutter-map-update-rate",
+        type=float,
+        default=DEFAULT_CLUTTER_MAP_UPDATE_RATE,
+        help="Adaptive clutter-map EMA update rate; use 0 to disable.",
+    )
+    parser.add_argument(
+        "--clutter-map-warmup-frames",
+        type=int,
+        default=DEFAULT_CLUTTER_MAP_WARMUP_FRAMES,
+        help="Frames used to learn the initial clutter map. Defaults to 30.",
+    )
+    parser.add_argument(
+        "--clutter-map-min-snr-db",
+        type=float,
+        default=DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
+        help="Minimum target-to-background power ratio. Defaults to 6 dB.",
     )
     parser.add_argument(
         "--duration-minutes",
@@ -97,7 +124,19 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--capture-dir", type=Path, default=DEFAULT_CAPTURE_DIR)
-    parser.add_argument("--raw-output", type=Path)
+    parser.add_argument(
+        "--processed-output",
+        type=Path,
+        help=(
+            "Processed point-cloud and micro-Doppler JSONL output. Defaults "
+            "to a timestamped file in --capture-dir."
+        ),
+    )
+    parser.add_argument(
+        "--raw-output",
+        type=Path,
+        help="Optional raw ADC output. Raw recording is disabled by default.",
+    )
     return parser.parse_args()
 
 
@@ -110,10 +149,11 @@ def choose_display(display_arg: Optional[str]) -> str:
     print("  2. range")
     print("  3. range-doppler")
     print("  4. point-cloud")
+    print("  5. point-cloud + micro-doppler")
     while True:
-        choice = input("Select display type [2]: ").strip()
+        choice = input("Select display type [5]: ").strip()
         if not choice:
-            return "range"
+            return "point-cloud-micro-doppler"
         if choice in {"1", "none"}:
             return "none"
         if choice in {"2", "range"}:
@@ -122,7 +162,16 @@ def choose_display(display_arg: Optional[str]) -> str:
             return "range-doppler"
         if choice in {"4", "point-cloud", "point_cloud"}:
             return "point-cloud"
-        print("Choose 1, 2, 3, 4, none, range, range-doppler, or point-cloud.")
+        if choice in {
+            "5",
+            "point-cloud-micro-doppler",
+            "point_cloud_micro_doppler",
+        }:
+            return "point-cloud-micro-doppler"
+        print(
+            "Choose 1, 2, 3, 4, 5, none, range, range-doppler, point-cloud, "
+            "or point-cloud-micro-doppler."
+        )
 
 
 def choose_duration_minutes(duration_arg: Optional[float]) -> float:
@@ -229,9 +278,9 @@ def default_radar_port() -> Optional[str]:
     return LINUX_DEFAULT_RADAR_PORT
 
 
-def default_raw_output(capture_dir: Path) -> Path:
+def default_processed_output(capture_dir: Path) -> Path:
     timestamp = datetime.now().astimezone().strftime("%Y_%m_%dT%H_%M_%S")
-    return capture_dir / f"raw_capture_{timestamp}.bin"
+    return capture_dir / f"processed_capture_{timestamp}.jsonl"
 
 
 def start_process(label: str, command: list[str]) -> subprocess.Popen:
@@ -296,13 +345,14 @@ def kill_process(process: subprocess.Popen) -> None:
 def build_capture_command(
     args: argparse.Namespace,
     display: str,
-    raw_output: Path,
+    processed_output: Path,
+    raw_output: Optional[Path] = None,
 ) -> list[str]:
     display_update_every = args.display_update_every
     if display_update_every is None:
         display_update_every = 1
 
-    return [
+    command = [
         sys.executable,
         str(RAW_DATA_DIR / "livedatacapture.py"),
         "--config",
@@ -323,9 +373,18 @@ def build_capture_command(
         str(max(args.cluster_eps_m, 0.0)),
         "--cluster-min-samples",
         str(max(args.cluster_min_samples, 1)),
-        "--raw-output",
-        str(raw_output),
+        "--clutter-map-update-rate",
+        str(max(args.clutter_map_update_rate, 0.0)),
+        "--clutter-map-warmup-frames",
+        str(max(args.clutter_map_warmup_frames, 1)),
+        "--clutter-map-min-snr-db",
+        str(max(args.clutter_map_min_snr_db, 0.0)),
+        "--processed-output",
+        str(processed_output),
     ]
+    if raw_output is not None:
+        command.extend(("--raw-output", str(raw_output)))
+    return command
 
 
 def build_startup_command(args: argparse.Namespace, radar_port: str) -> list[str]:
@@ -373,9 +432,17 @@ def main() -> int:
         print("No radar command UART port was provided.", file=sys.stderr)
         return 2
 
-    raw_output = args.raw_output or default_raw_output(args.capture_dir)
-    raw_output = raw_output if raw_output.is_absolute() else ROOT / raw_output
-    raw_output.parent.mkdir(parents=True, exist_ok=True)
+    processed_output = args.processed_output or default_processed_output(
+        args.capture_dir
+    )
+    processed_output = (
+        processed_output if processed_output.is_absolute() else ROOT / processed_output
+    )
+    processed_output.parent.mkdir(parents=True, exist_ok=True)
+    raw_output = args.raw_output
+    if raw_output is not None:
+        raw_output = raw_output if raw_output.is_absolute() else ROOT / raw_output
+        raw_output.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Display mode: {display}")
     duration_text = (
@@ -383,14 +450,15 @@ def main() -> int:
     )
     print(f"Run duration: {duration_text}")
     print(f"Radar command UART: {radar_port}")
-    print(f"Raw output: {raw_output}")
+    print(f"Processed output: {processed_output}")
+    print(f"Raw output: {raw_output if raw_output is not None else 'disabled'}")
 
     capture_process: Optional[subprocess.Popen] = None
     startup_process: Optional[subprocess.Popen] = None
     try:
         capture_process = start_process(
             "live capture",
-            build_capture_command(args, display, raw_output),
+            build_capture_command(args, display, processed_output, raw_output),
         )
         time.sleep(1.0)
         if capture_process.poll() is not None:
@@ -434,8 +502,10 @@ def main() -> int:
     finally:
         stop_process("startup", startup_process)
         stop_process("live capture", capture_process)
-        print(f"Raw data file: {raw_output}")
-        print(f"Raw metadata file: {raw_output}.json")
+        print(f"Processed data file: {processed_output}")
+        if raw_output is not None:
+            print(f"Raw data file: {raw_output}")
+            print(f"Raw metadata file: {raw_output}.json")
 
 
 if __name__ == "__main__":

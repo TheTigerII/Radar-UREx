@@ -9,8 +9,8 @@ through `openradar_backend.py`. OS-CFAR uses a local vectorized ordered-window
 implementation to keep up with the live stream. Raw DCA1000 decoding and the
 IWR6843ISK-ODS-specific planar antenna mapping remain local because OpenRadar's
 generic XYZ implementation assumes a different virtual antenna layout.
-All live plots, including the 3D point cloud, run with Matplotlib in the display
-child process.
+All live plots, including the 3D point cloud and combined point-cloud/
+micro-Doppler view, run with Matplotlib in the display child process.
 
 ## Runtime Components
 
@@ -64,8 +64,10 @@ results in favor of the newest one.
 - `RadarLiveDisplay`: Matplotlib UI for any display other than `none`.
 - Processing queue: `--processing-queue-size`, default 4 frames.
 - Display payload queue: one result.
-- Display latency queue: 100 messages.
 - Processor log queue: 1,000 messages.
+
+Routine successful frames and display latency are silent. Capture statistics
+are emitted only when an error counter changes.
 
 ## Configuration
 
@@ -166,29 +168,83 @@ bin index, not velocity in m/s.
 The point-cloud path:
 
 1. Forms mean range-Doppler power.
-2. Runs two-dimensional OS-CFAR with Doppler wrapping.
-3. Keeps Doppler-local peaks without suppressing adjacent range detections, then
+2. Applies an adaptive power-domain clutter map. During the initial warm-up it
+   learns every cell using an exponential moving average and emits no point
+   detections. It then divides every cell by its learned background power before
+   CFAR and applies a default 6 dB minimum target-to-background ratio. This
+   keeps the normalized background near one instead of producing large regions
+   of zero-valued CFAR training cells. Range and Doppler guard neighborhoods
+   around current detections are frozen during map updates so targets are not
+   immediately absorbed. An FFT-shape change resets the map.
+3. Runs two-dimensional OS-CFAR with Doppler wrapping and a default requested
+   false-alarm probability of `1e-3` per axis.
+4. Keeps Doppler-local peaks without suppressing adjacent range detections, then
    removes detections below 0.25 m.
-4. Rejects detections beyond 10 m.
-5. Maps all candidate cells into virtual antenna grids and estimates their
+5. Rejects detections beyond 10 m.
+6. Maps all candidate cells into virtual antenna grids and estimates their
    directions with one batched 32-by-32 2D FFT. Unlimited point-cloud output
    preserves detection order and skips the unnecessary power sort.
-6. Applies ±60-degree azimuth and elevation gates and keeps all in-FOV
+7. Applies ±60-degree azimuth and elevation gates and keeps all in-FOV
    detections.
-7. Runs spatial DBSCAN on XYZ points and sends both the original points and
+8. Runs spatial DBSCAN on XYZ points and sends both the original points and
    cluster centers to the display process.
+9. Updates one persistent 3D target track. Initial acquisition uses the
+   strongest cluster or point; later updates use gated nearest-neighbor
+   association against a constant-velocity prediction.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and
 RX3. Other layouts fall back to a generic grid. Returned coordinates use
 X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
 
-## Raw Recording and Logging
+### Combined point cloud and micro-Doppler
+
+The `point-cloud-micro-doppler` display computes one Doppler cube for each
+display update and reuses it for both outputs. The point-cloud path runs as
+described above. The tracked target supplies the center of a five-bin range
+gate. During a short detection gap, a constant-velocity prediction maintains
+the gate and the green tracked-target marker is shown smaller and translucent.
+The track is removed after 10 consecutive missed display updates. When no track
+exists, the gate follows the strongest non-zero-Doppler range inside the
+configured range limit.
+
+The micro-Doppler branch reshapes the chronological chirps into explicit loop
+and TX-slot axes. It applies independent slow-time FFTs to every TX slot, RX
+channel, and gated range bin using 64-loop Hann windows, a 32-loop hop, and a
+128-point FFT. TX, RX, and range-bin powers are summed only after the FFT, so
+the three TX signals are not coherently merged and require no inter-TX phase
+calibration. A 128-loop frame produces three short-time spectra. Each spectrum
+is appended to a 150-window history in the frame-processing process. Sending
+the complete history through the latest-only display queue prevents GUI queue
+replacement from creating holes in the visible spectrogram. The spectrogram
+follows the single tracked target while its association remains valid. It can
+still change targets after track loss and reacquisition. The Matplotlib image
+uses a visible-spectrum `turbo` color map, running from dark blue at the fixed
+40 dB minimum to red at the fixed 120 dB maximum rather than rescaling each
+history update. The combined layout uses one shared magnitude colorbar for both axes.
+The colorbar occupies a dedicated narrow grid column between the point cloud
+and micro-Doppler axes, with a spacer on its right so it does not crowd the
+spectrogram's Doppler-axis label. Both plot titles report measured updates per
+second. Supported Matplotlib backends use artist-level blitting for the dynamic
+scatters, spectrogram, and titles so the static 3D axes and colorbar do not
+require a full redraw every update.
+
+## Processed and Raw Recording
+
+`--processed-output` streams newline-delimited JSON. Its first record describes
+the radar configuration and data axes. Each subsequent update contains the
+post-CFAR XYZ point cloud, DBSCAN clusters, target-track state, current
+micro-Doppler spectrum, every short-time window generated from the frame, and
+the selected range gate. The writer does not duplicate the rolling display
+history. When it
+is enabled, combined point-cloud/micro-Doppler processing runs even with a
+different display mode or `--display none`.
 
 `--raw-output` writes only complete valid frames, consecutively and without
 DCA1000 headers. At normal shutdown a JSON sidecar records dimensions, sample
 format, processing parameters, counts, and paths. An explicit `--raw-metadata`
-overrides the sidecar name.
+overrides the sidecar name. Integrated `run.py` enables processed output by
+default and leaves raw recording disabled unless `--raw-output` is supplied.
 
 Terminal messages are appended to `livedatacapture.log` by default. Raw files
 and logs have no rotation or size limit, so long deployments must monitor disk
@@ -198,8 +254,9 @@ space externally.
 
 - No packet reordering; only duplicate and overlap handling.
 - Only complex 16-bit, two-lane LVDS reshape is implemented.
-- No calibrated velocity axis, antenna calibration, phase calibration, or
-  target tracking.
+- No calibrated velocity axis, antenna calibration, or phase calibration.
+- Tracking supports one target only, uses uncalibrated XYZ positions, and has
+  no Doppler-assisted association or externally validated track identity.
 - Range FFT includes the full complex FFT rather than selecting only a
   physically useful half-spectrum.
 - The point cloud is a diagnostic visualization, not precision metrology.

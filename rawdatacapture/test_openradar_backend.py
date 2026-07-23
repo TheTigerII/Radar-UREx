@@ -1,14 +1,17 @@
 import importlib.util
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from rawdatacapture.dsp import (
+    AdaptiveClutterMap,
     build_virtual_antenna_grid,
     build_virtual_antenna_grids,
     cluster_point_cloud,
+    compute_micro_doppler_spectrum,
+    compute_per_tx_micro_doppler_spectrogram,
     compute_point_cloud,
     doppler_peak_mask,
     estimate_xyz_from_virtual_array,
@@ -24,6 +27,113 @@ from rawdatacapture.openradar_backend import (
 
 
 OPENRADAR_AVAILABLE = importlib.util.find_spec("mmwave") is not None
+
+
+class AdaptiveClutterMapTests(unittest.TestCase):
+    def test_normalizes_background_after_warmup_and_preserves_new_target(self) -> None:
+        clutter = AdaptiveClutterMap(update_rate=0.5, warmup_frames=2)
+        background = np.full((5, 8), 10.0)
+
+        np.testing.assert_array_equal(clutter.normalize(background), 0.0)
+        clutter.update(background)
+        np.testing.assert_array_equal(clutter.normalize(background), 0.0)
+        clutter.update(background)
+
+        target_frame = background.copy()
+        target_frame[2, 4] = 30.0
+        normalized = clutter.normalize(target_frame)
+
+        self.assertTrue(clutter.is_ready)
+        self.assertEqual(normalized[2, 4], 3.0)
+        np.testing.assert_array_equal(normalized[normalized != 3.0], 1.0)
+
+    def test_detection_protection_prevents_target_absorption(self) -> None:
+        clutter = AdaptiveClutterMap(update_rate=1.0, warmup_frames=1)
+        background = np.ones((5, 8))
+        clutter.normalize(background)
+        clutter.update(background)
+
+        target_frame = background.copy()
+        target_frame[2, 4] = 20.0
+        detections = np.zeros_like(target_frame, dtype=bool)
+        detections[2, 4] = True
+        clutter.update(target_frame, detections)
+
+        self.assertEqual(clutter.normalize(target_frame)[2, 4], 20.0)
+
+    def test_shape_change_resets_warmup(self) -> None:
+        clutter = AdaptiveClutterMap(warmup_frames=1)
+        first = np.ones((2, 3))
+        clutter.normalize(first)
+        clutter.update(first)
+        self.assertTrue(clutter.is_ready)
+
+        np.testing.assert_array_equal(clutter.normalize(np.ones((3, 2))), 0.0)
+        self.assertFalse(clutter.is_ready)
+
+    def test_point_detection_uses_normalized_power_and_updates_map(self) -> None:
+        doppler_cube = np.full((5, 1, 1, 8), 2.0, dtype=np.complex64)
+        normalized_power = np.zeros((5, 8), dtype=np.float64)
+        detections = np.zeros((5, 8), dtype=bool)
+        clutter = Mock(spec=AdaptiveClutterMap)
+        clutter.normalize.return_value = normalized_power
+        clutter.minimum_snr_linear = 4.0
+
+        with patch(
+            "rawdatacapture.dsp.os_cfar_2d",
+            return_value=detections,
+        ) as cfar:
+            points = compute_point_cloud(
+                np.empty((0,)),
+                np.arange(8, dtype=np.float32),
+                SimpleNamespace(),
+                doppler_cube=doppler_cube,
+                clutter_map=clutter,
+                min_range_m=0.0,
+            )
+
+        self.assertEqual(points.shape, (0, 4))
+        np.testing.assert_array_equal(clutter.normalize.call_args.args[0], 4.0)
+        np.testing.assert_array_equal(cfar.call_args.args[0], normalized_power)
+        self.assertEqual(cfar.call_args.kwargs["false_alarm_rate"], 1e-3)
+        np.testing.assert_array_equal(clutter.update.call_args.args[0], 4.0)
+        np.testing.assert_array_equal(clutter.update.call_args.args[1], detections)
+
+    def test_minimum_snr_gate_rejects_normalized_background(self) -> None:
+        doppler_cube = np.full((5, 1, 1, 8), 2.0, dtype=np.complex64)
+        normalized_power = np.ones((5, 8), dtype=np.float64)
+        normalized_power[2, 4] = 5.0
+        clutter = Mock(spec=AdaptiveClutterMap)
+        clutter.normalize.return_value = normalized_power
+        clutter.minimum_snr_linear = 4.0
+
+        with (
+            patch(
+                "rawdatacapture.dsp.os_cfar_2d",
+                return_value=np.ones((5, 8), dtype=bool),
+            ),
+            patch(
+                "rawdatacapture.dsp.estimate_xyz_from_virtual_arrays",
+                return_value=(
+                    np.asarray(((0.0, 4.0, 0.0),)),
+                    np.asarray((True,)),
+                ),
+            ),
+        ):
+            points = compute_point_cloud(
+                np.empty((0,)),
+                np.arange(8, dtype=np.float32),
+                SimpleNamespace(tx_channel_masks=None),
+                doppler_cube=doppler_cube,
+                clutter_map=clutter,
+                min_range_m=0.0,
+            )
+
+        self.assertEqual(points.shape, (1, 4))
+        self.assertAlmostEqual(float(points[0, 3]), 10.0 * np.log10(4.0), places=5)
+        protected = clutter.update.call_args.args[1]
+        self.assertEqual(np.count_nonzero(protected), 1)
+        self.assertTrue(protected[2, 4])
 
 
 class BatchedAngleFftTests(unittest.TestCase):
@@ -186,6 +296,81 @@ class DopplerPeakMaskTests(unittest.TestCase):
         self.assertFalse(peaks[0, 0])
         self.assertTrue(peaks[-1, 0])
 
+
+class MicroDopplerSpectrumTests(unittest.TestCase):
+    def test_auto_gate_uses_strongest_nonzero_doppler_range(self) -> None:
+        doppler_cube = np.zeros((8, 1, 1, 6), dtype=np.complex64)
+        doppler_cube[0, 0, 0, 4] = 3.0
+        doppler_cube[4, 0, 0, 2] = 100.0
+        range_axis = np.arange(6, dtype=np.float32)
+
+        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+            doppler_cube,
+            range_axis,
+            range_half_width_bins=0,
+            min_range_m=1.0,
+            max_range_m=5.0,
+        )
+
+        self.assertEqual(selected_range_m, 4.0)
+        self.assertEqual(int(np.argmax(spectrum_db)), 0)
+
+    def test_explicit_target_range_combines_gate_power_before_log(self) -> None:
+        doppler_cube = np.zeros((4, 2, 1, 5), dtype=np.complex64)
+        doppler_cube[1, :, :, 1:4] = 1.0
+        range_axis = np.arange(5, dtype=np.float32) * 0.5
+
+        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+            doppler_cube,
+            range_axis,
+            target_range_m=1.0,
+            range_half_width_bins=1,
+            min_range_m=0.25,
+            max_range_m=2.0,
+        )
+
+        self.assertEqual(selected_range_m, 1.0)
+        self.assertAlmostEqual(
+            float(spectrum_db[1]),
+            10.0 * np.log10(6.0),
+            places=6,
+        )
+
+    def test_per_tx_stft_uses_64_loop_window_and_32_loop_hop(self) -> None:
+        loop_count = 128
+        chirps_per_loop = 3
+        fft_size = 128
+        tone_bin = 8
+        loop_phase = np.exp(
+            2j * np.pi * tone_bin * np.arange(loop_count) / fft_size
+        )
+        slot_gains = np.asarray(
+            (1.0, 0.45 * np.exp(0.8j), 1.6 * np.exp(-1.1j))
+        )
+        range_cube = np.zeros(
+            (loop_count * chirps_per_loop, 1, 3),
+            dtype=np.complex64,
+        )
+        range_cube[:, 0, 1] = (
+            loop_phase[:, np.newaxis] * slot_gains[np.newaxis, :]
+        ).reshape(-1)
+
+        spectrogram = compute_per_tx_micro_doppler_spectrogram(
+            range_cube,
+            np.asarray((0.0, 1.0, 2.0)),
+            SimpleNamespace(num_chirps_per_loop=chirps_per_loop),
+            target_range_m=1.0,
+            range_half_width_bins=0,
+            window_loops=64,
+            hop_loops=32,
+            fft_size=fft_size,
+        )
+
+        self.assertEqual(spectrogram.shape, (128, 3))
+        np.testing.assert_array_equal(
+            np.argmax(spectrogram, axis=0),
+            np.full(3, (fft_size // 2) + tone_bin),
+        )
 
 class PointCloudClusteringTests(unittest.TestCase):
     def test_dbscan_returns_cluster_centers_and_ignores_noise(self) -> None:
