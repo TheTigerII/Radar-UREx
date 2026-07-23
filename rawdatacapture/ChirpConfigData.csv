@@ -1,4 +1,0 @@
-Profile ID;Chirp Start Index;Chirp End Index;Start Freq Var (MHz);Frequency Slop Var (kHz/us);Idle Time Var (us);ADC Start Var (us);TX0 Enble;TX1 Enable;TX2 Enable
-0;2;2;0;0;0;0;0;1;0
-0;0;0;0;0;0;0;1;0;0
-0;1;1;0;0;0;0;0;0;1
