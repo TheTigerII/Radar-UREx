@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy import fft as scipy_fft
 
 
 OPENRADAR_INSTALL_HINT = (
@@ -35,10 +36,15 @@ def validate_openradar_backend() -> str:
 
 def range_fft(adc_cube: np.ndarray) -> np.ndarray:
     """Run OpenRadar's Hann-windowed range FFT."""
-    openradar_dsp = _openradar_dsp()
-    return openradar_dsp.range_processing(
-        adc_cube,
-        window_type_1d=openradar_dsp.Window.HANNING,
+    if adc_cube.ndim != 3:
+        raise ValueError("ADC cube must have shape [chirp, rx, sample]")
+    windowed = np.asarray(adc_cube, dtype=np.complex64) * _hann_window(
+        adc_cube.shape[-1]
+    )[np.newaxis, np.newaxis, :]
+    return scipy_fft.fft(
+        windowed,
+        axis=-1,
+        workers=4,
     )
 
 
@@ -56,37 +62,31 @@ def doppler_fft(
             f"chirps={range_cube.shape[0]}, tx={num_tx_antennas}"
         )
 
-    openradar_dsp = _openradar_dsp()
-    # OpenRadar also calculates an unused log2 magnitude matrix internally;
-    # zero FFT cells can legitimately produce log2(0).
-    with np.errstate(divide="ignore", invalid="ignore"):
-        _det_matrix, aoa_input = openradar_dsp.doppler_processing(
-            range_cube,
-            num_tx_antennas=num_tx_antennas,
-            clutter_removal_enabled=False,
-            interleaved=True,
-            window_type_2d=openradar_dsp.Window.HANNING,
-            accumulate=False,
-        )
-
-    # OpenRadar returns [range, virtual_rx, doppler], with virtual receivers
-    # grouped by chirp/TX order. Restore this project's explicit TX/RX axes.
-    num_range_bins, num_virtual_antennas, num_doppler_bins = aoa_input.shape
-    num_rx_antennas = range_cube.shape[1]
-    expected_virtual_antennas = num_tx_antennas * num_rx_antennas
-    if num_virtual_antennas != expected_virtual_antennas:
-        raise ValueError(
-            "Unexpected OpenRadar virtual antenna count: "
-            f"got {num_virtual_antennas}, expected {expected_virtual_antennas}"
-        )
-
-    explicit_cube = aoa_input.transpose(2, 1, 0).reshape(
+    num_doppler_bins = range_cube.shape[0] // num_tx_antennas
+    explicit_cube = np.asarray(range_cube, dtype=np.complex64).reshape(
         num_doppler_bins,
         num_tx_antennas,
-        num_rx_antennas,
-        num_range_bins,
+        range_cube.shape[1],
+        range_cube.shape[2],
     )
-    return np.fft.fftshift(explicit_cube, axes=0)
+    windowed = explicit_cube * _hann_window(num_doppler_bins)[
+        :, np.newaxis, np.newaxis, np.newaxis
+    ]
+    transformed = scipy_fft.fft(
+        windowed,
+        axis=0,
+        workers=4,
+    )
+    return scipy_fft.fftshift(transformed, axes=0)
+
+
+@lru_cache(maxsize=16)
+def _hann_window(length: int) -> np.ndarray:
+    if length <= 0:
+        raise ValueError("Hann window length must be positive")
+    window = np.hanning(length).astype(np.float32)
+    window.setflags(write=False)
+    return window
 
 
 def os_cfar_2d(
@@ -155,16 +155,12 @@ def _os_thresholds_along_axis(
     scale: float,
 ) -> np.ndarray:
     """Calculate cyclic OS-CFAR thresholds for every cell without Python loops."""
-    offsets = np.concatenate(
-        (
-            np.arange(-guard_cells - training_cells, -guard_cells),
-            np.arange(guard_cells + 1, guard_cells + training_cells + 1),
-        )
-    )
     axis_size = power.shape[axis]
-    window_indices = (
-        np.arange(axis_size, dtype=np.intp)[:, np.newaxis] + offsets
-    ) % axis_size
+    window_indices = _training_window_indices(
+        axis_size,
+        guard_cells,
+        training_cells,
+    )
 
     oriented_power = np.moveaxis(power, axis, -1)
     training_windows = np.take(oriented_power, window_indices, axis=-1)
@@ -176,6 +172,26 @@ def _os_thresholds_along_axis(
     return np.moveaxis(ordered_noise, -1, axis) * scale
 
 
+@lru_cache(maxsize=64)
+def _training_window_indices(
+    axis_size: int,
+    guard_cells: int,
+    training_cells: int,
+) -> np.ndarray:
+    offsets = np.concatenate(
+        (
+            np.arange(-guard_cells - training_cells, -guard_cells),
+            np.arange(guard_cells + 1, guard_cells + training_cells + 1),
+        )
+    )
+    indices = (
+        np.arange(axis_size, dtype=np.intp)[:, np.newaxis] + offsets
+    ) % axis_size
+    indices.setflags(write=False)
+    return indices
+
+
+@lru_cache(maxsize=64)
 def _os_scale(total_training_cells: int, rank: int, pfa: float) -> float:
     """Return the exponential-noise OS-CFAR multiplier for a requested Pfa."""
     if not 1 <= rank <= total_training_cells:

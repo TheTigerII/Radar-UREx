@@ -4,9 +4,12 @@ This document describes the code currently implemented for live raw ADC capture
 from a TI IWR6843ISK-ODS through a DCA1000EVM. It is an implementation guide,
 not a description of TI UART TLV output or mmWave Studio post-processing.
 
-Range FFT, TDM separation, and Doppler FFT use the pinned OpenRadar dependency
-through `openradar_backend.py`. OS-CFAR uses a local vectorized ordered-window
-implementation to keep up with the live stream. Raw DCA1000 decoding and the
+Range FFT, TDM separation, and Doppler FFT use numerically equivalent
+complex64 SciPy kernels in `openradar_backend.py`, validated against the pinned
+OpenRadar implementation. Hann windows are cached, and the unused OpenRadar
+complex128/log-magnitude intermediates are not created. OS-CFAR uses a local
+vectorized ordered-window implementation with cached training indices and
+scale factors. Raw DCA1000 decoding and the
 IWR6843ISK-ODS-specific planar antenna mapping remain local because OpenRadar's
 generic XYZ implementation assumes a different virtual antenna layout.
 All live plots, including the 3D point cloud and combined point-cloud/
@@ -74,7 +77,11 @@ results in favor of the newest one.
 Routine successful frames and display latency are silent. Capture statistics
 are emitted immediately whenever an error counter changes. Shutdown emits
 capture, processing, and display summaries, including the number of updates
-actually rendered by the GUI.
+actually rendered by the GUI. The processor ignores the parent process's
+SIGINT, consumes the queue sentinel, and drains all frames queued before that
+sentinel. Its final report includes aggregate p50, p95, and maximum timings for
+range FFT, Doppler, dynamic detection/CFAR, static detection, clustering,
+micro-Doppler, serialization, and total processing.
 
 ## Configuration
 
@@ -196,7 +203,8 @@ The point-cloud path:
    preserves detection order and skips the unnecessary power sort.
 7. Applies ±60-degree azimuth and elevation gates and keeps all in-FOV
    detections.
-8. Runs spatial DBSCAN on XYZ points and sends both the original points and
+8. Runs deterministic local DBSCAN for normal-size clouds, with a scikit-learn
+   fallback for unusually large clouds, and sends both the original points and
    cluster centers to the display process.
 9. Updates one persistent dynamic 3D target track. Initial acquisition uses the
    strongest cluster or point; later updates use gated nearest-neighbor
@@ -204,14 +212,38 @@ The point-cloud path:
 
 In parallel, the static-change path sums angle-FFT power from the centered
 Doppler bin and its two neighbors. It applies the virtual-array mapping and one
-vectorized 32-by-32 angle FFT across every valid range bin, producing a
-`[range, elevation, azimuth]` cube. The first 30 processed detection updates
-are retained temporarily and reduced to a median reference; the reference is
-then frozen. Positive changes above the default 6 dB threshold are range/FOV
-gated, reduced by non-wrapping 3D local-maximum suppression, and capped at 256
-strongest cells before XYZ conversion and DBSCAN. Returned static points are
-`[x, y, z, magnitude_db, change_db]`. A separate tracker acquires the nearest
-static cluster and requires three consecutive hits.
+vectorized 32-by-32 angle FFT across every valid range bin on every processed
+point-cloud update, producing a `[range, elevation, azimuth]` cube. SciPy's FFT
+keeps the complex64 input precision instead of promoting it to complex128.
+Power is summed across the three Doppler bins before the smaller float32 power
+cube is shifted, reducing allocation and memory-copy cost without changing the
+FFT dimensions or update rate.
+
+The first 30 processed detection updates are discarded as warm-up. The next
+90 target-free updates build a median reference, a per-range power floor, and
+a robust per-cell noise estimate from the median absolute deviation in log
+power. Each live change map is corrected by its per-range median to remove
+common receiver-gain drift and updated with a 0.35-rate temporal EMA. A
+detection must exceed both the default 6 dB absolute threshold and four times
+the learned cell variation. Unprotected reference and noise cells then adapt
+at 0.01 per processed frame. Range/FOV gating occurs before local-maximum
+testing; when the threshold produces no candidates, the full 3D maximum scan
+is skipped. The remaining cells are capped at the 256 strongest before XYZ
+conversion and DBSCAN. Returned raw candidates are
+`[x, y, z, magnitude_db, change_db]`.
+
+Raw static candidates are diagnostic activity, not targets. The static tracker
+receives only DBSCAN clusters containing at least three points, never isolated
+point fallbacks. A cluster can start a static track only when a confirmed
+dynamic track moved at least 0.3 m within the preceding 30 processed frames,
+the cluster is within 0.75 m of the last dynamic position, and it persists for
+three consecutive frames. Handoff remains eligible for 60 frames. The selected
+target's range, azimuth, and elevation cells are protected by ±2 bins while
+validated; motion-only protection is released after 30 consecutive misses.
+The static tracker also releases after 30 misses, allowing removed objects to
+be absorbed into the adaptive map. Only the exact DBSCAN members of the
+validated target are displayed and saved. All suppressed raw activity is
+reported separately as `static_candidate_count`.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and
@@ -221,13 +253,13 @@ X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
 ### Combined point cloud and micro-Doppler
 
 The `point-cloud-micro-doppler` display computes one Doppler cube for each
-display update and reuses it for the dynamic point cloud, static angle cube,
-and range-gate selection. A confirmed static track has priority; otherwise a
-confirmed dynamic track supplies the center of the five-bin range gate. During
-a short detection gap, a constant-velocity prediction maintains the gate and
-the tracked-target marker is shown smaller and translucent. A track is removed
-after 10 consecutive missed display updates. No range fallback is selected
-while reference calibration or track confirmation is pending.
+processed update and reuses it for the dynamic point cloud, static angle cube,
+and range-gate selection. A measured confirmed dynamic track has priority
+while the target is moving. A validated static track takes over after handoff;
+a predicted dynamic track is used only when neither is measured. During a
+short dynamic detection gap, a constant-velocity prediction maintains the gate
+and the tracked-target marker is shown smaller and translucent. No static-only
+clutter or arbitrary range fallback can activate micro-Doppler.
 
 The micro-Doppler branch reshapes the chronological chirps into explicit loop
 and TX-slot axes. It applies independent slow-time FFTs to every TX slot, RX
@@ -253,14 +285,15 @@ require a full redraw every update.
 
 ## Processed and Raw Recording
 
-`--processed-output` streams version-2 newline-delimited JSON. Its first record
+`--processed-output` streams version-3 newline-delimited JSON. Its first record
 describes the radar configuration, data axes, and static-reference settings.
 Each subsequent update contains the dynamic and static point clouds, their
-DBSCAN clusters, static-reference state, target source and track, current
-micro-Doppler spectrum, every short-time window generated from the frame, and
-the selected range gate. Existing dynamic `points` and `clusters` fields keep
-their version-1 layouts. The writer does not duplicate the rolling display
-history. When it
+DBSCAN clusters, static-reference and validation state, suppressed
+`static_candidate_count`, target source and track, current micro-Doppler
+spectrum, every short-time window generated from the frame, and the selected
+range gate. `static_points` and `static_clusters` contain validated target data
+only. Existing dynamic `points` and `clusters` fields keep their version-1
+layouts. The writer does not duplicate the rolling display history. When it
 is enabled, combined point-cloud/micro-Doppler processing runs even with a
 different display mode or `--display none`.
 

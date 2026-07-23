@@ -205,15 +205,34 @@ The moving path uses an adaptive range-Doppler clutter map, OS-CFAR,
 Doppler-only peak filtering, and a batched virtual antenna 2D FFT.
 
 Static-change detection is enabled by default. Keep the radar and monitored
-scene fixed and leave the target absent while the first 30 processed detection
-updates build a median range-azimuth-elevation reference. The plot reports
-`Calibrating static reference N/30`, then `Static reference ready`. After
-calibration, the reference is frozen and positive changes of at least 6 dB are
-shown as orange squares; cyan diamonds mark their DBSCAN cluster centers.
-Objects present during calibration become part of the reference and are not
-reported as changes. Calibration counts updates that actually reach point-cloud
-processing, so packet/frame loss or `--display-update-every 2` makes it take
-longer than 30 physical frames.
+scene fixed and leave the target absent for startup calibration. The first
+30 processed detection updates are discarded as warm-up, then the next
+90 updates build a median range-azimuth-elevation reference. The plot reports
+the warm-up and calibration progress, then `Static reference ready (adaptive)`.
+The detector learns normal per-angle-cell variation, applies a per-range power
+floor, removes common receiver-gain drift, and temporally smooths the change
+map. A cell must exceed both the configured 6 dB minimum and four times its
+learned noise variation. Unprotected background and noise estimates adapt at
+0.01 per processed frame, suppressing slow thermal, gain, and stationary-room
+drift.
+
+Raw changes do not become displayed static targets by themselves. A confirmed
+dynamic track must move at least 0.3 m during the preceding 30 frames. For the
+next 60 frames, a static cluster can take over only if it contains at least
+three points, is within 0.75 m of the last dynamic position, and persists for
+three consecutive frames. The validated target is protected by ±2 range,
+azimuth, and elevation cells and remains visible after stopping. Protection is
+released after 30 consecutive misses so removed targets are eventually
+absorbed. Only the exact points in the validated cluster are shown as orange
+squares; its center is shown as a cyan diamond. Isolated and static-only
+clutter is suppressed.
+
+Static angle processing remains full rate: it runs for every processed
+point-cloud update with the complete 32-by-32 angle FFT. Temporal smoothing
+can delay a new static point by a few frames. Objects present during
+calibration become part of the reference and are not reported as changes.
+Calibration counts updates that actually reach point-cloud processing, so
+packet/frame loss makes it take longer than 120 physical frames.
 
 Both paths apply a 10 m radial range and a ±60-degree azimuth/elevation field
 of view. Spatial DBSCAN defaults to a 0.4 m neighborhood and two-point minimum.
@@ -242,9 +261,13 @@ minimum target-to-background ratio with `--clutter-map-warmup-frames` and
 software clutter map. These options affect point detection only; point-cloud
 magnitude, the range-Doppler display, and micro-Doppler retain raw power.
 
-Use `--static-reference-frames` and `--static-min-change-db` to tune static
-calibration and sensitivity. Disable the static branch without changing the
-moving-target path with:
+Use `--static-warmup-frames`, `--static-reference-frames`,
+`--static-background-update-rate`, `--static-cluster-min-samples`, and
+`--static-min-change-db` to tune calibration, adaptation, validation, and the
+absolute sensitivity floor. Defaults are 30 warm-up frames, 90 reference
+frames, a 0.01 adaptation rate, three cluster members, and 6 dB. The learned
+noise threshold can make the effective threshold higher in unstable cells.
+Disable the static branch without changing the moving-target path with:
 
 ```powershell
 python run.py --display point-cloud --no-static-detection
@@ -262,10 +285,11 @@ selection. The micro-Doppler path calculates a separate slow-time FFT for each
 TX slot using 64-loop Hann windows, a 32-loop hop, and a 128-point FFT. The TX
 and RX powers are summed after the FFT; the TX signals are not coherently
 merged. A 128-loop frame produces three short-time spectra. The spectrogram
-uses a five-range-bin gate centered on a confirmed track. A confirmed static
-track has priority and is acquired from the nearest persistent static cluster;
-otherwise a confirmed dynamic track is used. No arbitrary range is selected
-during calibration or track confirmation. The explicit target gate retains the
+uses a five-range-bin gate centered on a confirmed track. A measured dynamic
+track has priority while moving, then a motion-qualified validated static
+track takes over after stopping. Static-only clutter cannot activate
+micro-Doppler, and no arbitrary range is selected during calibration or track
+confirmation. The explicit target gate retains the
 centered zero-Doppler bin, so a rigid stationary object appears mainly as a
 zero-Doppler line while vibration or internal motion produces sidebands. The
 current gate range is shown in the spectrogram title.
@@ -286,15 +310,9 @@ artists rather than redrawing the full 3D axes and colorbar for every frame.
 ### Display performance
 
 Display rendering is a separate process and receives only the latest result.
-If processing cannot keep up, reduce display frequency:
-
-```powershell
-python rawdatacapture\livedatacapture.py `
-  --display range-doppler --display-update-every 3 --display-pause 0.05
-```
-
-The combined display is the most computationally expensive mode. Use
-`--display-update-every 2` or higher if `processing_drops` increases.
+The combined display preserves full 30 Hz DSP by default. Final logs include
+per-stage p50, p95, and maximum timings so sustained processing load can be
+distinguished from short initialization spikes.
 
 Use `--display none` for packet-loss testing or headless operation.
 
@@ -306,11 +324,20 @@ The integrated launcher saves processed data by default. Override its path with:
 python run.py --processed-output .\rawdatacapture\captures\processed.jsonl
 ```
 
-The first JSONL record contains the radar configuration and column definitions.
-Each following record contains one processed update with:
+The first JSONL record declares format version 3 and contains the radar
+configuration, column definitions, calibration settings, adaptive-reference
+rate, and static-validation policy. Each following record contains one
+processed update with:
 
 - `points`: `[x_m, y_m, z_m, magnitude_db]` rows;
 - `clusters`: `[x_m, y_m, z_m, point_count]` rows;
+- `static_points`: validated-target
+  `[x_m, y_m, z_m, magnitude_db, change_db]` rows only;
+- `static_clusters`: the validated target cluster only;
+- `static_candidate_count`: raw static activity before validation/suppression;
+- `static_validation`: `warming`, `calibrating`, `background`,
+  `handoff_pending`, `validated`, or `disabled`;
+- static-reference warm-up, calibration, readiness, and adaptation state;
 - the current target-track state;
 - the newest complete centered-bin micro-Doppler spectrum in dB;
 - all short-time micro-Doppler windows generated from that frame, laid out as
@@ -370,16 +397,19 @@ processing error counters change. Clean shutdown always prints:
 - a capture summary with total, valid, invalid, and queued frames;
 - a processing summary with queued and completed frames;
 - a display summary with physically rendered updates, latest-update
-  replacements, and frames not rendered over total assembled frames.
+  replacements, and frames not rendered over total assembled frames;
+- a static summary with raw candidate, handoff-pending, and validated counts;
+- a processing-timing summary with p50, p95, and maximum stage latency.
 
 The display deliberately keeps only the latest result. A skipped display
 update is therefore distinct from packet loss, an invalid frame, or a
 processing drop.
 
 If `processing_drops` grows while packet-loss counters remain zero, first
-confirm that the 32-frame queue is active. Reducing display updates or using
-`--display none` lowers sustained DSP load; increasing the queue further only
-absorbs short bursts.
+confirm that the 32-frame queue is active and inspect the final per-stage
+timings. Increasing the queue further only absorbs short bursts; sustained
+total-frame p95 above the 33.33 ms frame period requires profiling the reported
+stage rather than lowering the configured radar rate.
 
 ## Packet-Loss Troubleshooting
 
@@ -409,8 +439,10 @@ cannot reliably report network packet loss.
 ## Shutdown
 
 Press Ctrl+C. With `run.py`, the startup process is stopped first, followed by
-the capture process. Clean capture shutdown closes the socket, child processes,
-queues, raw file, metadata sidecar, and log file.
+the capture process. The frame processor ignores the parent SIGINT and stops
+only after the queue sentinel, so every frame queued before shutdown is
+drained. Clean capture shutdown closes the socket, child processes, queues,
+raw file, metadata sidecar, and log file.
 
 Show all receiver options with:
 

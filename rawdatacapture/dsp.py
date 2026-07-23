@@ -1,6 +1,9 @@
+from collections import deque
+from functools import lru_cache
 from typing import Optional, Protocol
 
 import numpy as np
+from scipy import fft as scipy_fft
 
 try:
     from .openradar_backend import (
@@ -22,6 +25,12 @@ SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
 DEFAULT_STATIC_ANGLE_FFT_SIZE = 32
 DEFAULT_STATIC_DOPPLER_HALF_WIDTH_BINS = 1
 DEFAULT_STATIC_MAX_POINTS = 256
+DEFAULT_STATIC_WARMUP_FRAMES = 30
+DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER = 4.0
+DEFAULT_STATIC_SMOOTHING_RATE = 0.35
+DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
+DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE = 20.0
+DEFAULT_STATIC_MINIMUM_NOISE_DB = 1.0
 
 
 class AdaptiveClutterMap:
@@ -154,25 +163,83 @@ class AdaptiveClutterMap:
 
 
 class StaticSceneMap:
-    """Learn and freeze a range-angle reference for static-scene changes."""
+    """Learn a noise-aware adaptive reference for static-scene changes.
+
+    Calibration records both the median power and normal per-cell variation.
+    Detection uses log power with a per-range noise floor, removes common gain
+    drift, and smooths changes over time. Unprotected cells adapt continuously;
+    cells around a motion-qualified or validated target can be protected.
+    """
 
     def __init__(
         self,
         *,
-        reference_frames: int = 30,
+        warmup_frames: int = DEFAULT_STATIC_WARMUP_FRAMES,
+        reference_frames: int = 90,
         minimum_change_db: float = 6.0,
+        noise_sigma_multiplier: float = DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER,
+        smoothing_rate: float = DEFAULT_STATIC_SMOOTHING_RATE,
+        background_update_rate: float = DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,
+        reference_floor_percentile: float = (
+            DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE
+        ),
+        minimum_noise_db: float = DEFAULT_STATIC_MINIMUM_NOISE_DB,
     ) -> None:
+        if warmup_frames < 0:
+            raise ValueError("Static warm-up frames cannot be negative")
         if reference_frames < 1:
             raise ValueError("Static reference must contain at least one frame")
         if not np.isfinite(minimum_change_db) or minimum_change_db < 0.0:
             raise ValueError(
                 "Static minimum change must be finite and non-negative"
             )
+        if (
+            not np.isfinite(noise_sigma_multiplier)
+            or noise_sigma_multiplier < 0.0
+        ):
+            raise ValueError(
+                "Static noise sigma multiplier must be finite and non-negative"
+            )
+        if not np.isfinite(smoothing_rate) or not 0.0 < smoothing_rate <= 1.0:
+            raise ValueError("Static smoothing rate must be in (0, 1]")
+        if (
+            not np.isfinite(background_update_rate)
+            or not 0.0 <= background_update_rate <= 1.0
+        ):
+            raise ValueError("Static background update rate must be in [0, 1]")
+        if (
+            not np.isfinite(reference_floor_percentile)
+            or not 0.0 <= reference_floor_percentile <= 100.0
+        ):
+            raise ValueError(
+                "Static reference floor percentile must be between 0 and 100"
+            )
+        if not np.isfinite(minimum_noise_db) or minimum_noise_db < 0.0:
+            raise ValueError(
+                "Static minimum noise must be finite and non-negative"
+            )
 
+        self.warmup_frames = int(warmup_frames)
         self.reference_frames = int(reference_frames)
         self.minimum_change_db = float(minimum_change_db)
+        self.noise_sigma_multiplier = float(noise_sigma_multiplier)
+        self.smoothing_rate = float(smoothing_rate)
+        self.background_update_rate = float(background_update_rate)
+        self.reference_floor_percentile = float(
+            reference_floor_percentile
+        )
+        self.minimum_noise_db = float(minimum_noise_db)
+        self._warmup_frames_seen = 0
         self._calibration_frames: list[np.ndarray] = []
         self._reference_power: Optional[np.ndarray] = None
+        self._reference_log_power: Optional[np.ndarray] = None
+        self._reference_floor: Optional[np.ndarray] = None
+        self._noise_db: Optional[np.ndarray] = None
+        self._noise_mad_db: Optional[np.ndarray] = None
+        self._detection_threshold_db: Optional[np.ndarray] = None
+        self._smoothed_change_db: Optional[np.ndarray] = None
+        self._pending_log_power: Optional[np.ndarray] = None
+        self._pending_change_db: Optional[np.ndarray] = None
         self._shape: Optional[tuple[int, ...]] = None
 
     @property
@@ -187,45 +254,206 @@ class StaticSceneMap:
             else len(self._calibration_frames)
         )
 
+    @property
+    def warmup_frames_seen(self) -> int:
+        return self._warmup_frames_seen
+
+    @property
+    def is_warming_up(self) -> bool:
+        return self._warmup_frames_seen < self.warmup_frames
+
+    @property
+    def reference_shape(self) -> Optional[tuple[int, ...]]:
+        return self._shape if self.is_ready else None
+
     def reset(self) -> None:
+        self._warmup_frames_seen = 0
         self._calibration_frames.clear()
         self._reference_power = None
+        self._reference_log_power = None
+        self._reference_floor = None
+        self._noise_db = None
+        self._noise_mad_db = None
+        self._detection_threshold_db = None
+        self._smoothed_change_db = None
+        self._pending_log_power = None
+        self._pending_change_db = None
         self._shape = None
 
     def observe(self, power_cube: np.ndarray) -> Optional[np.ndarray]:
-        """Calibrate or return positive change in dB against the frozen scene."""
+        """Calibrate or return smoothed change in dB against the scene map."""
         power = self._validated_power(power_cube)
         if self._shape != power.shape:
             self.reset()
             self._shape = power.shape
 
         if not self.is_ready:
+            if self._warmup_frames_seen < self.warmup_frames:
+                self._warmup_frames_seen += 1
+                return None
             self._calibration_frames.append(
                 power.astype(np.float32, copy=True)
             )
             if len(self._calibration_frames) >= self.reference_frames:
-                self._reference_power = np.median(
-                    np.stack(self._calibration_frames, axis=0),
-                    axis=0,
-                ).astype(np.float32, copy=False)
-                self._calibration_frames.clear()
+                self._finish_calibration()
             return None
 
         assert self._reference_power is not None
-        positive_reference = self._reference_power[self._reference_power > 0.0]
-        reference_floor = (
-            max(
-                float(np.median(positive_reference)) * 1e-6,
-                np.finfo(np.float32).tiny,
-            )
-            if positive_reference.size
-            else np.finfo(np.float32).tiny
+        assert self._reference_log_power is not None
+        assert self._reference_floor is not None
+        current_log_power = 10.0 * np.log10(
+            np.maximum(power, self._reference_floor)
         )
-        ratio = power / np.maximum(self._reference_power, reference_floor)
-        return (10.0 * np.log10(np.maximum(ratio, 1e-12))).astype(
+        instantaneous_change_db = (
+            current_log_power - self._reference_log_power
+        )
+        instantaneous_change_db -= np.median(
+            instantaneous_change_db,
+            axis=(-2, -1),
+            keepdims=True,
+        )
+
+        if self._smoothed_change_db is None:
+            self._smoothed_change_db = np.zeros_like(
+                instantaneous_change_db,
+                dtype=np.float32,
+            )
+        alpha = self.smoothing_rate
+        self._smoothed_change_db *= 1.0 - alpha
+        self._smoothed_change_db += alpha * instantaneous_change_db
+        self._pending_log_power = current_log_power.astype(
+            np.float32,
+            copy=True,
+        )
+        self._pending_change_db = instantaneous_change_db.astype(
+            np.float32,
+            copy=True,
+        )
+        return self._smoothed_change_db.astype(np.float32, copy=True)
+
+    def detection_mask(self, change_db: np.ndarray) -> np.ndarray:
+        """Return changes that exceed both absolute and learned noise limits."""
+        changes = np.asarray(change_db, dtype=np.float32)
+        if (
+            self._detection_threshold_db is None
+            or changes.shape != self._detection_threshold_db.shape
+        ):
+            return np.zeros(changes.shape, dtype=bool)
+        return changes >= self._detection_threshold_db
+
+    def adapt(self, protected_cells: Optional[np.ndarray] = None) -> None:
+        """Adapt unprotected background and noise cells after one observation."""
+        if (
+            self.background_update_rate <= 0.0
+            or self._pending_log_power is None
+            or self._pending_change_db is None
+            or self._reference_log_power is None
+            or self._noise_mad_db is None
+        ):
+            self._pending_log_power = None
+            self._pending_change_db = None
+            return
+
+        update_mask = np.ones(self._pending_log_power.shape, dtype=bool)
+        if protected_cells is not None:
+            protected = np.asarray(protected_cells, dtype=bool)
+            if protected.shape != update_mask.shape:
+                raise ValueError(
+                    "Static protected-cell mask must match the reference shape"
+                )
+            update_mask &= ~protected
+
+        alpha = self.background_update_rate
+        reference = self._reference_log_power
+        reference[update_mask] = (
+            (1.0 - alpha) * reference[update_mask]
+            + alpha * self._pending_log_power[update_mask]
+        )
+        absolute_residual = np.abs(self._pending_change_db)
+        noise_mad = self._noise_mad_db
+        noise_mad[update_mask] = (
+            (1.0 - alpha) * noise_mad[update_mask]
+            + alpha * absolute_residual[update_mask]
+        )
+        assert self._noise_db is not None
+        assert self._detection_threshold_db is not None
+        self._noise_db[update_mask] = np.maximum(
+            1.4826 * noise_mad[update_mask],
+            self.minimum_noise_db,
+        )
+        self._detection_threshold_db[update_mask] = np.maximum(
+            self.minimum_change_db,
+            self.noise_sigma_multiplier * self._noise_db[update_mask],
+        )
+        self._pending_log_power = None
+        self._pending_change_db = None
+
+    def _finish_calibration(self) -> None:
+        calibration = np.stack(self._calibration_frames, axis=0).astype(
             np.float32,
             copy=False,
         )
+        reference_power = np.median(calibration, axis=0).astype(
+            np.float32,
+            copy=False,
+        )
+        positive_reference = reference_power[reference_power > 0.0]
+        absolute_floor = (
+            float(np.median(positive_reference)) * 1e-3
+            if positive_reference.size
+            else np.finfo(np.float32).tiny
+        )
+        range_floor = np.percentile(
+            reference_power,
+            self.reference_floor_percentile,
+            axis=(-2, -1),
+            keepdims=True,
+        )
+        reference_floor = np.maximum(
+            range_floor,
+            max(absolute_floor, np.finfo(np.float32).tiny),
+        ).astype(np.float32, copy=False)
+        calibration_log_power = 10.0 * np.log10(
+            np.maximum(calibration, reference_floor[np.newaxis, ...])
+        )
+        reference_log_power = np.median(
+            calibration_log_power,
+            axis=0,
+        )
+        residual_db = calibration_log_power - reference_log_power
+        residual_db -= np.median(
+            residual_db,
+            axis=(-2, -1),
+            keepdims=True,
+        )
+        median_absolute_deviation = np.median(
+            np.abs(residual_db),
+            axis=0,
+        )
+
+        self._reference_power = reference_power
+        self._reference_log_power = reference_log_power.astype(
+            np.float32,
+            copy=False,
+        )
+        self._reference_floor = reference_floor
+        self._noise_mad_db = median_absolute_deviation.astype(
+            np.float32,
+            copy=False,
+        )
+        self._noise_db = np.maximum(
+            1.4826 * median_absolute_deviation,
+            self.minimum_noise_db,
+        ).astype(np.float32, copy=False)
+        self._detection_threshold_db = np.maximum(
+            self.minimum_change_db,
+            self.noise_sigma_multiplier * self._noise_db,
+        ).astype(np.float32, copy=False)
+        self._smoothed_change_db = np.zeros_like(
+            reference_power,
+            dtype=np.float32,
+        )
+        self._calibration_frames.clear()
 
     @staticmethod
     def _validated_power(power_cube: np.ndarray) -> np.ndarray:
@@ -431,18 +659,26 @@ def compute_static_angle_power(
         1,
     ).reshape((-1, tx_count, rx_count))
     virtual_grids = build_virtual_antenna_grids(selected, config)
-    angle_response = np.fft.fftshift(
-        np.fft.fft2(
-            virtual_grids,
-            s=(angle_fft_size, angle_fft_size),
-            axes=(-2, -1),
-        ),
+    # scipy.fft retains complex64 input precision and avoids NumPy's promotion
+    # to complex128. Shift only the summed float32 power cube, not the three
+    # larger complex Doppler-neighbor responses.
+    angle_response = scipy_fft.fft2(
+        virtual_grids,
+        s=(angle_fft_size, angle_fft_size),
         axes=(-2, -1),
+        workers=4,
     )
-    angle_power = np.abs(angle_response) ** 2
+    angle_power = (
+        angle_response.real * angle_response.real
+        + angle_response.imag * angle_response.imag
+    )
     angle_power = angle_power.reshape(
         (end - start, range_bins, angle_fft_size, angle_fft_size)
     ).sum(axis=0)
+    angle_power = scipy_fft.fftshift(
+        angle_power,
+        axes=(-2, -1),
+    )
     return angle_power.astype(np.float32, copy=False)
 
 
@@ -488,39 +724,22 @@ def compute_static_point_cloud(
     if max_range_m > 0.0:
         valid_ranges &= physical_range_axis <= max_range_m
 
-    azimuth_bins = np.arange(angle_fft_size)
-    elevation_bins = np.arange(angle_fft_size)
-    azimuth_u = _spatial_bins_to_direction_cosines(
-        azimuth_bins,
+    azimuth_u, elevation_u, valid_angles = _static_angle_geometry(
         angle_fft_size,
-    )
-    elevation_u = _spatial_bins_to_direction_cosines(
-        elevation_bins,
-        angle_fft_size,
-    )
-    elevation_grid, azimuth_grid = np.meshgrid(
-        elevation_u,
-        azimuth_u,
-        indexing="ij",
-    )
-    direction_norm_sq = azimuth_grid**2 + elevation_grid**2
-    valid_angles = direction_norm_sq <= 1.0
-    valid_angles &= (
-        np.abs(azimuth_grid)
-        <= np.sin(np.deg2rad(np.clip(azimuth_fov_deg, 0.0, 90.0))) + 1e-9
-    )
-    valid_angles &= (
-        np.abs(elevation_grid)
-        <= np.sin(np.deg2rad(np.clip(elevation_fov_deg, 0.0, 90.0))) + 1e-9
+        float(azimuth_fov_deg),
+        float(elevation_fov_deg),
     )
 
-    detections = (change_db > 0.0) & (
-        change_db >= scene_map.minimum_change_db
-    )
-    detections &= _local_maxima_3d(change_db)
+    detections = scene_map.detection_mask(change_db)
     detections &= valid_ranges[:, np.newaxis, np.newaxis]
     detections &= valid_angles[np.newaxis, :, :]
     candidate_indices = np.argwhere(detections)
+    if candidate_indices.size == 0:
+        return np.empty((0, 5), dtype=np.float32)
+    candidate_indices = _local_maximum_candidate_indices(
+        change_db,
+        candidate_indices,
+    )
     if candidate_indices.size == 0:
         return np.empty((0, 5), dtype=np.float32)
 
@@ -552,6 +771,66 @@ def compute_static_point_cloud(
     ).astype(np.float32, copy=False)
 
 
+def static_target_protection_mask(
+    shape: tuple[int, int, int],
+    target_positions_m: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    *,
+    neighborhood_cells: int = 2,
+) -> np.ndarray:
+    """Return protected range-angle cells around validated XYZ targets."""
+    protected = np.zeros(shape, dtype=bool)
+    positions = np.asarray(target_positions_m, dtype=np.float64)
+    if positions.size == 0:
+        return protected
+    if positions.ndim != 2 or positions.shape[1] != 3:
+        raise ValueError("Static protection targets must have shape [target, 3]")
+
+    range_count, elevation_count, azimuth_count = shape
+    physical_range_axis = (
+        np.asarray(range_axis, dtype=np.float64)
+        if range_axis is not None and range_axis.size == range_count
+        else np.arange(range_count, dtype=np.float64)
+    )
+    radius = max(int(neighborhood_cells), 0)
+    for position in positions:
+        target_range = float(np.linalg.norm(position))
+        if target_range <= 0.0:
+            continue
+        range_bin = int(np.argmin(np.abs(physical_range_axis - target_range)))
+        azimuth_u = float(np.clip(position[0] / target_range, -1.0, 1.0))
+        elevation_u = float(np.clip(-position[2] / target_range, -1.0, 1.0))
+        azimuth_bin = int(
+            np.clip(
+                np.rint((azimuth_u * 0.5 + 0.5) * azimuth_count),
+                0,
+                azimuth_count - 1,
+            )
+        )
+        elevation_bin = int(
+            np.clip(
+                np.rint((elevation_u * 0.5 + 0.5) * elevation_count),
+                0,
+                elevation_count - 1,
+            )
+        )
+        protected[
+            max(range_bin - radius, 0) : min(
+                range_bin + radius + 1,
+                range_count,
+            ),
+            max(elevation_bin - radius, 0) : min(
+                elevation_bin + radius + 1,
+                elevation_count,
+            ),
+            max(azimuth_bin - radius, 0) : min(
+                azimuth_bin + radius + 1,
+                azimuth_count,
+            ),
+        ] = True
+    return protected
+
+
 def _local_maxima_3d(values: np.ndarray) -> np.ndarray:
     """Return non-wrapping 3x3x3 local maxima for a three-dimensional cube."""
     if values.ndim != 3 or values.size == 0:
@@ -576,6 +855,68 @@ def _local_maxima_3d(values: np.ndarray) -> np.ndarray:
                     ],
                 )
     return values >= local_maximum
+
+
+def _local_maximum_candidate_indices(
+    values: np.ndarray,
+    candidate_indices: np.ndarray,
+) -> np.ndarray:
+    """Filter thresholded candidates without scanning an empty full cube."""
+    if candidate_indices.shape[0] > 128:
+        maxima = _local_maxima_3d(values)
+        return candidate_indices[maxima[tuple(candidate_indices.T)]]
+
+    keep = np.empty(candidate_indices.shape[0], dtype=bool)
+    range_count, elevation_count, azimuth_count = values.shape
+    for index, (range_bin, elevation_bin, azimuth_bin) in enumerate(
+        candidate_indices
+    ):
+        neighborhood = values[
+            max(int(range_bin) - 1, 0) : min(int(range_bin) + 2, range_count),
+            max(int(elevation_bin) - 1, 0) : min(
+                int(elevation_bin) + 2,
+                elevation_count,
+            ),
+            max(int(azimuth_bin) - 1, 0) : min(
+                int(azimuth_bin) + 2,
+                azimuth_count,
+            ),
+        ]
+        keep[index] = values[
+            range_bin,
+            elevation_bin,
+            azimuth_bin,
+        ] >= np.max(neighborhood)
+    return candidate_indices[keep]
+
+
+@lru_cache(maxsize=32)
+def _static_angle_geometry(
+    angle_fft_size: int,
+    azimuth_fov_deg: float,
+    elevation_fov_deg: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    bins = np.arange(angle_fft_size)
+    azimuth_u = _spatial_bins_to_direction_cosines(bins, angle_fft_size)
+    elevation_u = _spatial_bins_to_direction_cosines(bins, angle_fft_size)
+    elevation_grid, azimuth_grid = np.meshgrid(
+        elevation_u,
+        azimuth_u,
+        indexing="ij",
+    )
+    valid_angles = azimuth_grid**2 + elevation_grid**2 <= 1.0
+    valid_angles &= (
+        np.abs(azimuth_grid)
+        <= np.sin(np.deg2rad(np.clip(azimuth_fov_deg, 0.0, 90.0))) + 1e-9
+    )
+    valid_angles &= (
+        np.abs(elevation_grid)
+        <= np.sin(np.deg2rad(np.clip(elevation_fov_deg, 0.0, 90.0))) + 1e-9
+    )
+    azimuth_u.setflags(write=False)
+    elevation_u.setflags(write=False)
+    valid_angles.setflags(write=False)
+    return azimuth_u, elevation_u, valid_angles
 
 
 def compute_micro_doppler_spectrum(
@@ -707,24 +1048,40 @@ def compute_per_tx_micro_doppler_spectrogram(
     )
     gated_loop_cube = loop_cube[..., gate_start:gate_end]
 
-    hann = np.hanning(window_loops).astype(np.float32)
+    hann = _hann_window_float32(window_loops)
     spectra = []
     for start in range(0, loop_count - window_loops + 1, hop_loops):
         windowed = (
             gated_loop_cube[start : start + window_loops]
             * hann[:, np.newaxis, np.newaxis, np.newaxis]
         )
-        transformed = np.fft.fftshift(
-            np.fft.fft(windowed, n=fft_size, axis=0),
+        transformed = scipy_fft.fftshift(
+            scipy_fft.fft(
+                windowed,
+                n=fft_size,
+                axis=0,
+                workers=4,
+            ),
             axes=0,
         )
         # Combine TX slots only after their independent slow-time FFTs.
-        power = np.sum(np.abs(transformed) ** 2, axis=(1, 2, 3))
+        power = np.sum(
+            transformed.real * transformed.real
+            + transformed.imag * transformed.imag,
+            axis=(1, 2, 3),
+        )
         spectra.append(10.0 * np.log10(power + 1e-12))
 
     if not spectra:
         return np.empty((fft_size, 0), dtype=np.float32)
     return np.stack(spectra, axis=1).astype(np.float32, copy=False)
+
+
+@lru_cache(maxsize=16)
+def _hann_window_float32(length: int) -> np.ndarray:
+    window = np.hanning(length).astype(np.float32)
+    window.setflags(write=False)
+    return window
 
 
 def cluster_point_cloud(
@@ -734,18 +1091,44 @@ def cluster_point_cloud(
     min_samples: int = 2,
 ) -> np.ndarray:
     """Return DBSCAN cluster centers as [x, y, z, point_count]."""
+    centers, _labels = cluster_point_cloud_with_labels(
+        points,
+        eps_m=eps_m,
+        min_samples=min_samples,
+    )
+    return centers
+
+
+def cluster_point_cloud_with_labels(
+    points: np.ndarray,
+    *,
+    eps_m: float = 0.4,
+    min_samples: int = 2,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return DBSCAN centers and one membership label per input point."""
     if points.ndim != 2 or (points.size and points.shape[1] < 3):
         raise ValueError("Point cloud must have shape [point, at least 3 values]")
     if points.size == 0 or eps_m <= 0.0:
-        return np.empty((0, 4), dtype=np.float32)
+        return (
+            np.empty((0, 4), dtype=np.float32),
+            np.full(points.shape[0], -1, dtype=np.intp),
+        )
     if min_samples < 1:
         raise ValueError("DBSCAN min_samples must be at least 1")
 
-    from sklearn.cluster import DBSCAN
+    if points.shape[0] <= 128:
+        labels = _dbscan_labels_small_cloud(
+            points[:, :3],
+            eps_m=float(eps_m),
+            min_samples=int(min_samples),
+        )
+    else:
+        from sklearn.cluster import DBSCAN
 
-    labels = DBSCAN(eps=float(eps_m), min_samples=int(min_samples)).fit_predict(
-        points[:, :3]
-    )
+        labels = DBSCAN(
+            eps=float(eps_m),
+            min_samples=int(min_samples),
+        ).fit_predict(points[:, :3])
     centers = []
     for label in sorted(set(int(label) for label in labels if label >= 0)):
         members = points[labels == label, :3]
@@ -753,8 +1136,55 @@ def cluster_point_cloud(
         centers.append((center[0], center[1], center[2], members.shape[0]))
 
     if not centers:
-        return np.empty((0, 4), dtype=np.float32)
-    return np.asarray(centers, dtype=np.float32)
+        return np.empty((0, 4), dtype=np.float32), labels
+    return np.asarray(centers, dtype=np.float32), labels
+
+
+def _dbscan_labels_small_cloud(
+    xyz_m: np.ndarray,
+    *,
+    eps_m: float,
+    min_samples: int,
+) -> np.ndarray:
+    """Deterministic DBSCAN without sklearn's per-frame validation overhead."""
+    coordinates = np.asarray(xyz_m, dtype=np.float64)
+    point_count = coordinates.shape[0]
+    differences = (
+        coordinates[:, np.newaxis, :] - coordinates[np.newaxis, :, :]
+    )
+    neighbors = np.sum(differences * differences, axis=2) <= eps_m * eps_m
+    labels = np.full(point_count, -1, dtype=np.intp)
+    visited = np.zeros(point_count, dtype=bool)
+    cluster_label = 0
+
+    for point_index in range(point_count):
+        if visited[point_index]:
+            continue
+        visited[point_index] = True
+        point_neighbors = np.flatnonzero(neighbors[point_index])
+        if point_neighbors.size < min_samples:
+            continue
+
+        labels[point_index] = cluster_label
+        seeds = deque(
+            int(index) for index in point_neighbors if index != point_index
+        )
+        queued = np.zeros(point_count, dtype=bool)
+        queued[point_neighbors] = True
+        while seeds:
+            neighbor_index = seeds.popleft()
+            if not visited[neighbor_index]:
+                visited[neighbor_index] = True
+                neighbor_neighbors = np.flatnonzero(neighbors[neighbor_index])
+                if neighbor_neighbors.size >= min_samples:
+                    for new_index in neighbor_neighbors:
+                        if not queued[new_index]:
+                            queued[new_index] = True
+                            seeds.append(int(new_index))
+            if labels[neighbor_index] < 0:
+                labels[neighbor_index] = cluster_label
+        cluster_label += 1
+    return labels
 
 
 def _point_is_within_fov(

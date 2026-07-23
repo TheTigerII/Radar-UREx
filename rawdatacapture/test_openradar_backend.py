@@ -8,9 +8,12 @@ import numpy as np
 from rawdatacapture.dsp import (
     AdaptiveClutterMap,
     StaticSceneMap,
+    _local_maxima_3d,
+    _local_maximum_candidate_indices,
     build_virtual_antenna_grid,
     build_virtual_antenna_grids,
     cluster_point_cloud,
+    cluster_point_cloud_with_labels,
     compute_micro_doppler_spectrum,
     compute_per_tx_micro_doppler_spectrogram,
     compute_point_cloud,
@@ -19,6 +22,7 @@ from rawdatacapture.dsp import (
     doppler_peak_mask,
     estimate_xyz_from_virtual_array,
     estimate_xyz_from_virtual_arrays,
+    static_target_protection_mask,
 )
 from rawdatacapture.openradar_backend import (
     _os_scale,
@@ -77,7 +81,11 @@ class AdaptiveClutterMapTests(unittest.TestCase):
 
 class StaticSceneMapTests(unittest.TestCase):
     def test_frozen_reference_preserves_new_static_change(self) -> None:
-        scene = StaticSceneMap(reference_frames=2, minimum_change_db=6.0)
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=2,
+            minimum_change_db=6.0,
+        )
         background = np.full((3, 4, 5), 10.0, dtype=np.float32)
 
         self.assertIsNone(scene.observe(background))
@@ -90,20 +98,73 @@ class StaticSceneMapTests(unittest.TestCase):
 
         changed = background.copy()
         changed[1, 2, 3] = 100.0
+        first_change_db = scene.observe(changed)
+        second_change_db = scene.observe(changed)
         change_db = scene.observe(changed)
+        assert first_change_db is not None
+        assert second_change_db is not None
         assert change_db is not None
-        self.assertAlmostEqual(float(change_db[1, 2, 3]), 10.0, places=5)
+        self.assertLess(float(first_change_db[1, 2, 3]), 6.0)
+        self.assertLess(float(second_change_db[1, 2, 3]), 6.0)
+        self.assertGreater(float(change_db[1, 2, 3]), 6.0)
+        self.assertTrue(scene.detection_mask(change_db)[1, 2, 3])
 
         repeated_change_db = scene.observe(changed)
         assert repeated_change_db is not None
-        self.assertAlmostEqual(
+        self.assertGreater(
             float(repeated_change_db[1, 2, 3]),
-            10.0,
-            places=5,
+            float(change_db[1, 2, 3]),
         )
 
+    def test_common_gain_drift_and_weak_reference_cells_are_suppressed(
+        self,
+    ) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=3,
+            minimum_change_db=6.0,
+        )
+        background = np.full((2, 8, 8), 100.0, dtype=np.float32)
+        background[1, 3, 4] = 1e-12
+        for _ in range(3):
+            self.assertIsNone(scene.observe(background))
+
+        gain_drift = background * 4.0
+        gain_drift[1, 3, 4] = 1e-6
+        for _ in range(5):
+            change_db = scene.observe(gain_drift)
+
+        assert change_db is not None
+        self.assertFalse(np.any(scene.detection_mask(change_db)))
+
+    def test_calibration_variability_raises_per_cell_detection_limit(
+        self,
+    ) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=5,
+            minimum_change_db=6.0,
+            smoothing_rate=1.0,
+        )
+        background = np.full((2, 8, 8), 100.0, dtype=np.float32)
+        noisy_levels = (100.0, 200.0, 400.0, 800.0, 1600.0)
+        for level in noisy_levels:
+            sample = background.copy()
+            sample[1, 3, 4] = level
+            self.assertIsNone(scene.observe(sample))
+
+        changed = background.copy()
+        changed[0, 2, 3] = 1000.0
+        changed[1, 3, 4] = 4000.0
+        change_db = scene.observe(changed)
+
+        assert change_db is not None
+        detections = scene.detection_mask(change_db)
+        self.assertTrue(detections[0, 2, 3])
+        self.assertFalse(detections[1, 3, 4])
+
     def test_target_present_during_calibration_is_part_of_reference(self) -> None:
-        scene = StaticSceneMap(reference_frames=3)
+        scene = StaticSceneMap(warmup_frames=0, reference_frames=3)
         occupied_scene = np.ones((2, 3, 4), dtype=np.float32)
         occupied_scene[1, 1, 2] = 20.0
 
@@ -114,6 +175,118 @@ class StaticSceneMapTests(unittest.TestCase):
 
         assert change_db is not None
         np.testing.assert_allclose(change_db, 0.0)
+
+    def test_warmup_frames_are_discarded_before_calibration(self) -> None:
+        scene = StaticSceneMap(warmup_frames=2, reference_frames=3)
+        background = np.ones((2, 3, 4), dtype=np.float32)
+
+        for _ in range(2):
+            self.assertIsNone(scene.observe(background))
+        self.assertFalse(scene.is_warming_up)
+        self.assertEqual(scene.frames_seen, 0)
+        for _ in range(3):
+            self.assertIsNone(scene.observe(background))
+
+        self.assertTrue(scene.is_ready)
+        self.assertEqual(scene.warmup_frames_seen, 2)
+
+    def test_adaptive_background_absorbs_unprotected_drift(self) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=3,
+            minimum_change_db=6.0,
+            smoothing_rate=1.0,
+            background_update_rate=0.1,
+        )
+        background = np.full((2, 8, 8), 100.0, dtype=np.float32)
+        for _ in range(3):
+            scene.observe(background)
+        drifted = background.copy()
+        drifted[1, 3, 4] = 1000.0
+
+        for _ in range(12):
+            change_db = scene.observe(drifted)
+            assert change_db is not None
+            scene.adapt()
+
+        self.assertFalse(scene.detection_mask(change_db)[1, 3, 4])
+
+    def test_protected_background_change_remains_detectable(self) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=3,
+            minimum_change_db=6.0,
+            smoothing_rate=1.0,
+            background_update_rate=0.1,
+        )
+        background = np.full((2, 8, 8), 100.0, dtype=np.float32)
+        for _ in range(3):
+            scene.observe(background)
+        changed = background.copy()
+        changed[1, 3, 4] = 1000.0
+        protected = np.zeros(changed.shape, dtype=bool)
+        protected[1, 3, 4] = True
+
+        for _ in range(12):
+            change_db = scene.observe(changed)
+            assert change_db is not None
+            scene.adapt(protected)
+
+        self.assertTrue(scene.detection_mask(change_db)[1, 3, 4])
+
+    def test_released_target_is_eventually_absorbed(self) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=3,
+            minimum_change_db=6.0,
+            smoothing_rate=1.0,
+            background_update_rate=0.1,
+        )
+        background = np.full((2, 8, 8), 100.0, dtype=np.float32)
+        for _ in range(3):
+            scene.observe(background)
+        changed = background.copy()
+        changed[1, 3, 4] = 1000.0
+        protected = np.zeros(changed.shape, dtype=bool)
+        protected[1, 3, 4] = True
+
+        for _ in range(5):
+            change_db = scene.observe(changed)
+            assert change_db is not None
+            scene.adapt(protected)
+        self.assertTrue(scene.detection_mask(change_db)[1, 3, 4])
+
+        for _ in range(15):
+            change_db = scene.observe(changed)
+            assert change_db is not None
+            scene.adapt()
+        self.assertFalse(scene.detection_mask(change_db)[1, 3, 4])
+
+    def test_shape_change_restarts_static_warmup_and_calibration(self) -> None:
+        scene = StaticSceneMap(warmup_frames=1, reference_frames=2)
+        first_shape = np.ones((2, 3, 4), dtype=np.float32)
+        for _ in range(3):
+            scene.observe(first_shape)
+        self.assertTrue(scene.is_ready)
+
+        self.assertIsNone(scene.observe(np.ones((3, 3, 4), dtype=np.float32)))
+
+        self.assertFalse(scene.is_ready)
+        self.assertEqual(scene.warmup_frames_seen, 1)
+        self.assertEqual(scene.frames_seen, 0)
+
+    def test_static_target_protection_mask_uses_range_and_angle_cells(self) -> None:
+        range_axis = np.arange(10, dtype=np.float32)
+
+        protected = static_target_protection_mask(
+            (10, 32, 32),
+            np.asarray(((0.0, 4.0, 0.0),), dtype=np.float32),
+            range_axis,
+            neighborhood_cells=2,
+        )
+
+        self.assertTrue(protected[4, 16, 16])
+        self.assertEqual(np.count_nonzero(protected), 125)
 
     def test_static_angle_power_integrates_centered_doppler_neighbors(self) -> None:
         config = SimpleNamespace(tx_channel_masks=(1,))
@@ -130,9 +303,50 @@ class StaticSceneMapTests(unittest.TestCase):
         self.assertEqual(power.shape, (5, 8, 8))
         self.assertGreater(float(np.max(power)), 0.0)
 
+    def test_static_angle_power_matches_full_precision_32_point_fft(self) -> None:
+        config = SimpleNamespace(tx_channel_masks=(1, 4, 2))
+        rng = np.random.default_rng(12)
+        doppler_cube = (
+            rng.standard_normal((8, 3, 4, 5))
+            + 1j * rng.standard_normal((8, 3, 4, 5))
+        ).astype(np.complex64)
+
+        actual = compute_static_angle_power(doppler_cube, config)
+
+        selected = np.moveaxis(doppler_cube[3:6], -1, 1).reshape(
+            (-1, 3, 4)
+        )
+        grids = build_virtual_antenna_grids(selected, config)
+        response = np.fft.fftshift(
+            np.fft.fft2(grids, s=(32, 32), axes=(-2, -1)),
+            axes=(-2, -1),
+        )
+        expected = (np.abs(response) ** 2).reshape((3, 5, 32, 32)).sum(
+            axis=0
+        )
+
+        self.assertEqual(actual.shape, (5, 32, 32))
+        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=2e-5)
+
+    def test_candidate_local_maxima_matches_full_cube_filter(self) -> None:
+        rng = np.random.default_rng(4)
+        values = rng.standard_normal((7, 8, 9)).astype(np.float32)
+        all_indices = np.argwhere(np.ones(values.shape, dtype=bool))
+        expected_mask = _local_maxima_3d(values)
+
+        for candidates in (all_indices[::17], all_indices):
+            actual = _local_maximum_candidate_indices(values, candidates)
+            expected = candidates[expected_mask[tuple(candidates.T)]]
+            np.testing.assert_array_equal(actual, expected)
+
     def test_static_points_separate_changes_at_same_range_by_angle(self) -> None:
         config = SimpleNamespace(tx_channel_masks=(1,))
-        scene = StaticSceneMap(reference_frames=1, minimum_change_db=6.0)
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=1,
+            minimum_change_db=6.0,
+            smoothing_rate=1.0,
+        )
         doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
         range_axis = np.arange(5, dtype=np.float32)
         background = np.ones((5, 8, 8), dtype=np.float32)
@@ -512,6 +726,45 @@ class PointCloudClusteringTests(unittest.TestCase):
 
         self.assertEqual(clusters.shape, (0, 4))
 
+    def test_small_cloud_dbscan_matches_sklearn(self) -> None:
+        from sklearn.cluster import DBSCAN
+
+        rng = np.random.default_rng(91)
+        points = rng.normal(size=(100, 4)).astype(np.float32)
+        expected_labels = DBSCAN(eps=0.55, min_samples=3).fit_predict(
+            points[:, :3]
+        )
+        expected = []
+        for label in sorted(set(expected_labels) - {-1}):
+            members = points[expected_labels == label, :3]
+            expected.append((*members.mean(axis=0), members.shape[0]))
+
+        actual = cluster_point_cloud(points, eps_m=0.55, min_samples=3)
+
+        np.testing.assert_allclose(
+            actual,
+            np.asarray(expected, dtype=np.float32).reshape((-1, 4)),
+        )
+
+    def test_cluster_labels_identify_exact_returned_members(self) -> None:
+        points = np.asarray(
+            (
+                (0.0, 0.0, 0.0, 10.0),
+                (0.1, 0.0, 0.0, 20.0),
+                (2.0, 0.0, 0.0, 30.0),
+            ),
+            dtype=np.float32,
+        )
+
+        centers, labels = cluster_point_cloud_with_labels(
+            points,
+            eps_m=0.2,
+            min_samples=2,
+        )
+
+        self.assertEqual(centers.shape, (1, 4))
+        np.testing.assert_array_equal(labels, (0, 0, -1))
+
 
 class OsCfarParameterTests(unittest.TestCase):
     def test_scale_matches_requested_false_alarm_rate(self) -> None:
@@ -575,6 +828,39 @@ class OpenRadarBackendTests(unittest.TestCase):
 
         self.assertEqual(range_cube.shape, (6, 4, 8))
         self.assertEqual(doppler_cube.shape, (2, 3, 4, 8))
+
+    def test_optimized_ffts_match_openradar_hann_processing(self) -> None:
+        import mmwave.dsp as openradar_dsp
+
+        rng = np.random.default_rng(73)
+        adc_cube = (
+            rng.normal(size=(12, 4, 16))
+            + 1j * rng.normal(size=(12, 4, 16))
+        ).astype(np.complex64)
+        expected_range = openradar_dsp.range_processing(
+            adc_cube,
+            window_type_1d=openradar_dsp.Window.HANNING,
+        )
+        actual_range = range_fft(adc_cube)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            _unused, expected_aoa = openradar_dsp.doppler_processing(
+                expected_range,
+                num_tx_antennas=3,
+                clutter_removal_enabled=False,
+                interleaved=True,
+                window_type_2d=openradar_dsp.Window.HANNING,
+                accumulate=False,
+            )
+        expected_doppler = np.fft.fftshift(
+            expected_aoa.transpose(2, 1, 0).reshape((4, 3, 4, 16)),
+            axes=0,
+        )
+        actual_doppler = doppler_fft(actual_range, num_tx_antennas=3)
+
+        self.assertEqual(actual_range.dtype, np.complex64)
+        self.assertEqual(actual_doppler.dtype, np.complex64)
+        np.testing.assert_allclose(actual_range, expected_range, rtol=2e-6)
+        np.testing.assert_allclose(actual_doppler, expected_doppler, rtol=3e-6)
 
     def test_os_cfar_detects_an_isolated_strong_cell(self) -> None:
         power_map = np.ones((16, 32), dtype=np.float64)

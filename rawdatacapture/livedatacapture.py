@@ -2,6 +2,7 @@ import argparse
 import json
 import multiprocessing as mp
 import queue
+import signal
 import socket
 import threading
 import time
@@ -18,6 +19,7 @@ try:
         AdaptiveClutterMap,
         StaticSceneMap,
         cluster_point_cloud,
+        cluster_point_cloud_with_labels,
         compute_micro_doppler_spectrum,
         compute_per_tx_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
@@ -29,6 +31,7 @@ try:
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
+        static_target_protection_mask,
         validate_openradar_backend,
     )
 except ImportError:
@@ -36,6 +39,7 @@ except ImportError:
         AdaptiveClutterMap,
         StaticSceneMap,
         cluster_point_cloud,
+        cluster_point_cloud_with_labels,
         compute_micro_doppler_spectrum,
         compute_per_tx_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
@@ -47,6 +51,7 @@ except ImportError:
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
+        static_target_protection_mask,
         validate_openradar_backend,
     )
 
@@ -72,8 +77,17 @@ DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
 DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
 DEFAULT_STATIC_DETECTION = True
-DEFAULT_STATIC_REFERENCE_FRAMES = 30
+DEFAULT_STATIC_WARMUP_FRAMES = 30
+DEFAULT_STATIC_REFERENCE_FRAMES = 90
 DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
+DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
+DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 3
+STATIC_MOTION_HISTORY_UPDATES = 30
+STATIC_MOTION_MIN_DISPLACEMENT_M = 0.3
+STATIC_HANDOFF_WINDOW_UPDATES = 60
+STATIC_HANDOFF_DISTANCE_M = 0.75
+STATIC_PROTECTION_CELLS = 2
+STATIC_TRACK_MAX_MISSED_UPDATES = 30
 DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
@@ -226,13 +240,21 @@ class StaticReferenceStatus:
     ready: bool
     frames_seen: int
     required_frames: int
+    warmup_frames_seen: int = 0
+    warmup_frames_required: int = 0
+    adaptive: bool = False
 
     @property
     def label(self) -> str:
         if not self.enabled:
             return "Static detection disabled"
+        if self.warmup_frames_seen < self.warmup_frames_required:
+            return (
+                "Warming static detector "
+                f"{self.warmup_frames_seen}/{self.warmup_frames_required}"
+            )
         if self.ready:
-            return "Static reference ready"
+            return "Static reference ready (adaptive)"
         return (
             "Calibrating static reference "
             f"{self.frames_seen}/{self.required_frames}"
@@ -248,6 +270,8 @@ class PointCloudDisplayPayload:
     target_track: Optional[TargetTrack]
     target_source: Optional[str]
     static_reference: StaticReferenceStatus
+    static_candidate_count: int = 0
+    static_validation: str = "disabled"
 
 
 @dataclass(frozen=True)
@@ -255,6 +279,42 @@ class CombinedDisplayPayload:
     point_cloud: PointCloudDisplayPayload
     spectrogram_db: np.ndarray
     selected_range_m: Optional[float]
+
+
+class ProcessingTimingStats:
+    """Collect low-overhead per-stage timing samples for the final summary."""
+
+    STAGE_ORDER = (
+        "range_fft",
+        "doppler",
+        "dynamic_detection",
+        "static_detection",
+        "clustering",
+        "micro_doppler",
+        "serialization",
+        "total",
+    )
+
+    def __init__(self) -> None:
+        self.samples_ms = {stage: [] for stage in self.STAGE_ORDER}
+
+    def add(self, stage: str, elapsed_seconds: float) -> None:
+        if stage in self.samples_ms:
+            self.samples_ms[stage].append(max(float(elapsed_seconds), 0.0) * 1000.0)
+
+    def format_summary(self) -> str:
+        fields = []
+        for stage in self.STAGE_ORDER:
+            samples = self.samples_ms[stage]
+            if not samples:
+                continue
+            values = np.asarray(samples, dtype=np.float64)
+            fields.append(
+                f"{stage}=p50:{np.percentile(values, 50):.2f}ms/"
+                f"p95:{np.percentile(values, 95):.2f}ms/"
+                f"max:{np.max(values):.2f}ms"
+            )
+        return "Processing timing summary: " + ", ".join(fields)
 
 
 class SingleTargetTracker:
@@ -305,6 +365,14 @@ class SingleTargetTracker:
         self._missed_updates = 0
         self._confirmed = False
 
+    @property
+    def is_active(self) -> bool:
+        return self._position_m is not None
+
+    @property
+    def is_confirmed(self) -> bool:
+        return self._confirmed
+
     def update(self, candidates: np.ndarray) -> Optional[TargetTrack]:
         candidates = np.asarray(candidates, dtype=np.float64)
         if candidates.ndim != 2 or (candidates.size and candidates.shape[1] < 4):
@@ -344,7 +412,7 @@ class SingleTargetTracker:
             self._position_m = predicted_position
             self._missed_updates += 1
             self._consecutive_hits = 0
-            if self._missed_updates > self.max_missed_updates:
+            if self._missed_updates >= self.max_missed_updates:
                 self.reset()
                 return None
             return self._snapshot()
@@ -385,6 +453,80 @@ class SingleTargetTracker:
             missed_updates=self._missed_updates,
             confirmed=self._confirmed,
         )
+
+
+class MotionHandoffQualifier:
+    """Retain a short handoff window after a genuinely moving target."""
+
+    def __init__(
+        self,
+        *,
+        history_updates: int = STATIC_MOTION_HISTORY_UPDATES,
+        minimum_displacement_m: float = STATIC_MOTION_MIN_DISPLACEMENT_M,
+        handoff_window_updates: int = STATIC_HANDOFF_WINDOW_UPDATES,
+        protection_missed_updates: int = STATIC_TRACK_MAX_MISSED_UPDATES,
+    ) -> None:
+        self.history: deque[Optional[np.ndarray]] = deque(
+            maxlen=max(int(history_updates), 2)
+        )
+        self.minimum_displacement_m = max(float(minimum_displacement_m), 0.0)
+        self.handoff_window_updates = max(int(handoff_window_updates), 1)
+        self.protection_missed_updates = max(
+            int(protection_missed_updates),
+            0,
+        )
+        self.remaining_updates = 0
+        self.consecutive_missed_updates = 0
+        self.last_position_m: Optional[np.ndarray] = None
+
+    def update(self, dynamic_track: Optional[TargetTrack]) -> Optional[np.ndarray]:
+        if self.remaining_updates > 0:
+            self.remaining_updates -= 1
+
+        measured_position: Optional[np.ndarray] = None
+        if (
+            dynamic_track is not None
+            and dynamic_track.confirmed
+            and not dynamic_track.is_predicted
+        ):
+            self.consecutive_missed_updates = 0
+            measured_position = np.asarray(
+                dynamic_track.position_m,
+                dtype=np.float64,
+            )
+            if any(
+                previous is not None
+                and np.linalg.norm(measured_position - previous)
+                >= self.minimum_displacement_m
+                for previous in self.history
+            ):
+                self.remaining_updates = self.handoff_window_updates
+            if self.remaining_updates > 0:
+                self.last_position_m = measured_position.copy()
+        else:
+            self.consecutive_missed_updates += 1
+        self.history.append(
+            measured_position.copy()
+            if measured_position is not None
+            else None
+        )
+
+        if self.remaining_updates <= 0:
+            self.last_position_m = None
+            return None
+        assert self.last_position_m is not None
+        return self.last_position_m.copy()
+
+    @property
+    def protection_position_m(self) -> Optional[np.ndarray]:
+        """Protect recent motion until 30 consecutive detection misses."""
+        if (
+            self.last_position_m is None
+            or self.consecutive_missed_updates
+            >= self.protection_missed_updates
+        ):
+            return None
+        return self.last_position_m.copy()
 
 
 class SequenceTracker:
@@ -787,8 +929,13 @@ class ProcessedOutputWriter:
         emit_func: Optional[EmitFunc] = None,
         *,
         static_detection: bool = DEFAULT_STATIC_DETECTION,
+        static_warmup_frames: int = DEFAULT_STATIC_WARMUP_FRAMES,
         static_reference_frames: int = DEFAULT_STATIC_REFERENCE_FRAMES,
         static_min_change_db: float = DEFAULT_STATIC_MIN_CHANGE_DB,
+        static_background_update_rate: float = (
+            DEFAULT_STATIC_BACKGROUND_UPDATE_RATE
+        ),
+        static_cluster_min_samples: int = DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
     ) -> None:
         self.emit = emit_func or emit
         self.output_path = _resolve_output_path(output_path) if output_path else None
@@ -803,7 +950,7 @@ class ProcessedOutputWriter:
         metadata = {
             "record_type": "metadata",
             "format": "radar-processed-jsonl",
-            "version": 2,
+            "version": 3,
             "created_at": _timestamp(),
             "display_update_every": max(int(update_every), 1),
             "point_columns": ["x_m", "y_m", "z_m", "magnitude_db"],
@@ -823,10 +970,30 @@ class ProcessedOutputWriter:
             ],
             "static_detection": {
                 "enabled": bool(static_detection),
+                "warmup_frames": max(int(static_warmup_frames), 0),
                 "reference_frames": max(int(static_reference_frames), 1),
                 "minimum_change_db": max(float(static_min_change_db), 0.0),
+                "background_update_rate": min(
+                    max(float(static_background_update_rate), 0.0),
+                    1.0,
+                ),
+                "cluster_min_samples": max(
+                    int(static_cluster_min_samples),
+                    1,
+                ),
                 "reference_update_unit": "processed detection update",
-                "reference_policy": "startup median, frozen after calibration",
+                "reference_policy": (
+                    "startup median, adaptive except around motion-qualified "
+                    "and validated targets"
+                ),
+                "noise_policy": (
+                    "per-cell calibration variability with common-mode "
+                    "gain suppression and temporal smoothing"
+                ),
+                "validation_policy": (
+                    "recent dynamic motion followed by a persistent nearby "
+                    "static cluster"
+                ),
             },
             "micro_doppler_units": "dB power",
             "micro_doppler_axis": "centered Doppler bin",
@@ -872,6 +1039,8 @@ class ProcessedOutputWriter:
         static_clusters: Optional[np.ndarray] = None,
         static_reference: Optional[StaticReferenceStatus] = None,
         target_source: Optional[str] = None,
+        static_candidate_count: int = 0,
+        static_validation: str = "disabled",
     ) -> None:
         if self.file is None:
             return
@@ -914,12 +1083,19 @@ class ProcessedOutputWriter:
                     "ready": static_reference.ready,
                     "frames_seen": static_reference.frames_seen,
                     "required_frames": static_reference.required_frames,
+                    "warmup_frames_seen": static_reference.warmup_frames_seen,
+                    "warmup_frames_required": (
+                        static_reference.warmup_frames_required
+                    ),
+                    "adaptive": static_reference.adaptive,
                 }
                 if static_reference is not None
                 else None
             ),
             "target_track": track,
             "target_source": target_source,
+            "static_candidate_count": max(int(static_candidate_count), 0),
+            "static_validation": str(static_validation),
             "micro_doppler_db": np.asarray(
                 micro_doppler_db,
                 dtype=np.float32,
@@ -965,8 +1141,13 @@ class DisplayPayloadSink:
         processed_writer: Optional[ProcessedOutputWriter] = None,
         display_skipped_counter: Optional[Any] = None,
         static_detection: bool = DEFAULT_STATIC_DETECTION,
+        static_warmup_frames: int = DEFAULT_STATIC_WARMUP_FRAMES,
         static_reference_frames: int = DEFAULT_STATIC_REFERENCE_FRAMES,
         static_min_change_db: float = DEFAULT_STATIC_MIN_CHANGE_DB,
+        static_background_update_rate: float = (
+            DEFAULT_STATIC_BACKGROUND_UPDATE_RATE
+        ),
+        static_cluster_min_samples: int = DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -989,15 +1170,23 @@ class DisplayPayloadSink:
         )
         self.static_scene_map = (
             StaticSceneMap(
+                warmup_frames=static_warmup_frames,
                 reference_frames=static_reference_frames,
                 minimum_change_db=static_min_change_db,
+                background_update_rate=static_background_update_rate,
             )
             if static_detection
             else None
         )
         self.dynamic_target_tracker = SingleTargetTracker()
         self.static_target_tracker = SingleTargetTracker(
-            acquisition_policy="nearest"
+            acquisition_policy="nearest",
+            max_missed_updates=STATIC_TRACK_MAX_MISSED_UPDATES,
+        )
+        self.motion_handoff = MotionHandoffQualifier()
+        self.static_cluster_min_samples = max(
+            int(static_cluster_min_samples),
+            1,
         )
         # Retain the old attribute for callers that inspect the dynamic tracker.
         self.target_tracker = self.dynamic_target_tracker
@@ -1006,6 +1195,10 @@ class DisplayPayloadSink:
         self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
         self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
         self.frame_count = 0
+        self.timings = ProcessingTimingStats()
+        self.static_candidate_total = 0
+        self.static_validated_updates = 0
+        self.static_handoff_pending_updates = 0
 
     def update(
         self,
@@ -1033,6 +1226,7 @@ class DisplayPayloadSink:
             if save_processed:
                 assert self.processed_writer is not None
                 point_cloud = combined_payload.point_cloud
+                serialization_started = time.perf_counter()
                 self.processed_writer.write_update(
                     frame_index=self.frame_count,
                     points=point_cloud.points,
@@ -1042,9 +1236,15 @@ class DisplayPayloadSink:
                     static_reference=point_cloud.static_reference,
                     target_track=point_cloud.target_track,
                     target_source=point_cloud.target_source,
+                    static_candidate_count=point_cloud.static_candidate_count,
+                    static_validation=point_cloud.static_validation,
                     micro_doppler_db=self.latest_micro_doppler_db,
                     micro_doppler_windows_db=self.latest_micro_doppler_windows_db,
                     selected_range_m=combined_payload.selected_range_m,
+                )
+                self.timings.add(
+                    "serialization",
+                    time.perf_counter() - serialization_started,
                 )
 
         if self.mode == "none":
@@ -1106,6 +1306,7 @@ class DisplayPayloadSink:
             )
         self.active_target_source = target_source
 
+        micro_doppler_started = time.perf_counter()
         selected_range_m = None
         if target_track is not None:
             _spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
@@ -1148,6 +1349,10 @@ class DisplayPayloadSink:
             if self.micro_doppler_history
             else np.empty((0, 0), dtype=np.float32)
         )
+        self.timings.add(
+            "micro_doppler",
+            time.perf_counter() - micro_doppler_started,
+        )
         return CombinedDisplayPayload(
             point_cloud=point_cloud,
             spectrogram_db=spectrogram_db,
@@ -1159,7 +1364,10 @@ class DisplayPayloadSink:
         range_fft: np.ndarray,
         range_axis_m: Optional[np.ndarray],
     ) -> tuple[PointCloudDisplayPayload, np.ndarray]:
+        doppler_started = time.perf_counter()
         doppler_cube = compute_range_doppler_fft(range_fft, self.config)
+        self.timings.add("doppler", time.perf_counter() - doppler_started)
+        dynamic_started = time.perf_counter()
         points = compute_point_cloud(
             range_fft,
             range_axis_m,
@@ -1170,6 +1378,11 @@ class DisplayPayloadSink:
             azimuth_fov_deg=self.point_cloud_fov_deg,
             elevation_fov_deg=self.point_cloud_fov_deg,
         )
+        self.timings.add(
+            "dynamic_detection",
+            time.perf_counter() - dynamic_started,
+        )
+        clustering_started = time.perf_counter()
         clusters = cluster_point_cloud(
             points,
             eps_m=self.cluster_eps_m,
@@ -1182,12 +1395,19 @@ class DisplayPayloadSink:
                 assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
             )
         )
+        clustering_elapsed = time.perf_counter() - clustering_started
 
+        raw_static_points = np.empty((0, 5), dtype=np.float32)
+        raw_static_clusters = np.empty((0, 4), dtype=np.float32)
         static_points = np.empty((0, 5), dtype=np.float32)
         static_clusters = np.empty((0, 4), dtype=np.float32)
         static_track = None
+        static_candidate_count = 0
+        static_validation = "disabled"
+        handoff_position = self.motion_handoff.update(dynamic_track)
         if self.static_scene_map is not None:
-            static_points = compute_static_point_cloud(
+            static_started = time.perf_counter()
+            raw_static_points = compute_static_point_cloud(
                 doppler_cube,
                 range_axis_m,
                 self.config,
@@ -1196,25 +1416,113 @@ class DisplayPayloadSink:
                 azimuth_fov_deg=self.point_cloud_fov_deg,
                 elevation_fov_deg=self.point_cloud_fov_deg,
             )
-            static_clusters = cluster_point_cloud(
-                static_points,
-                eps_m=self.cluster_eps_m,
-                min_samples=self.cluster_min_samples,
+            self.timings.add(
+                "static_detection",
+                time.perf_counter() - static_started,
             )
-            static_track = self.static_target_tracker.update(
-                _point_cloud_track_candidates(
-                    static_points,
-                    static_clusters,
+            static_candidate_count = int(raw_static_points.shape[0])
+            self.static_candidate_total += static_candidate_count
+            clustering_started = time.perf_counter()
+            raw_static_clusters, raw_static_labels = (
+                cluster_point_cloud_with_labels(
+                    raw_static_points,
+                    eps_m=self.cluster_eps_m,
+                    min_samples=self.static_cluster_min_samples,
+                )
+            )
+            clustering_elapsed += time.perf_counter() - clustering_started
+            cluster_candidates = np.empty((0, 4), dtype=np.float32)
+            if raw_static_clusters.size:
+                cluster_candidates = _point_cloud_track_candidates(
+                    raw_static_points,
+                    raw_static_clusters,
                     assignment_distance_m=max(
                         2.0 * self.cluster_eps_m,
                         1e-6,
                     ),
                 )
+            if not self.static_target_tracker.is_confirmed:
+                if handoff_position is None or not cluster_candidates.size:
+                    cluster_candidates = np.empty((0, 4), dtype=np.float32)
+                else:
+                    handoff_distances = np.linalg.norm(
+                        cluster_candidates[:, :3] - handoff_position,
+                        axis=1,
+                    )
+                    cluster_candidates = cluster_candidates[
+                        handoff_distances <= STATIC_HANDOFF_DISTANCE_M
+                    ]
+
+            static_track = self.static_target_tracker.update(cluster_candidates)
+            if static_track is not None and static_track.confirmed:
+                static_validation = "validated"
+                self.static_validated_updates += 1
+                if raw_static_clusters.size and not static_track.is_predicted:
+                    track_position = np.asarray(
+                        static_track.position_m,
+                        dtype=np.float64,
+                    )
+                    cluster_distances = np.linalg.norm(
+                        raw_static_clusters[:, :3] - track_position,
+                        axis=1,
+                    )
+                    selected_cluster_index = int(np.argmin(cluster_distances))
+                    if (
+                        cluster_distances[selected_cluster_index]
+                        <= max(2.0 * self.cluster_eps_m, 1e-6)
+                    ):
+                        static_clusters = raw_static_clusters[
+                            selected_cluster_index : selected_cluster_index + 1
+                        ]
+                        static_points = raw_static_points[
+                            raw_static_labels == selected_cluster_index
+                        ]
+            elif handoff_position is not None:
+                static_validation = "handoff_pending"
+                self.static_handoff_pending_updates += 1
+            elif self.static_scene_map.is_ready:
+                static_validation = "background"
+            elif self.static_scene_map.is_warming_up:
+                static_validation = "warming"
+            else:
+                static_validation = "calibrating"
+
+            protected_positions = []
+            motion_protection_position = (
+                self.motion_handoff.protection_position_m
             )
+            if motion_protection_position is not None:
+                protected_positions.append(motion_protection_position)
+            if static_track is not None and static_track.confirmed:
+                protected_positions.append(
+                    np.asarray(static_track.position_m, dtype=np.float64)
+                )
+            protected_cells = None
+            reference_shape = self.static_scene_map.reference_shape
+            if reference_shape is not None and protected_positions:
+                protected_cells = static_target_protection_mask(
+                    (
+                        int(reference_shape[0]),
+                        int(reference_shape[1]),
+                        int(reference_shape[2]),
+                    ),
+                    np.stack(protected_positions),
+                    range_axis_m,
+                    neighborhood_cells=STATIC_PROTECTION_CELLS,
+                )
+            self.static_scene_map.adapt(protected_cells)
+        self.timings.add("clustering", clustering_elapsed)
 
         target_track = None
         target_source = None
-        if static_track is not None and static_track.confirmed:
+        if (
+            dynamic_track is not None
+            and dynamic_track.confirmed
+            and not dynamic_track.is_predicted
+        ):
+            target_track = dynamic_track
+            target_source = "dynamic"
+        elif static_track is not None and static_track.confirmed:
             target_track = static_track
             target_source = "static"
         elif dynamic_track is not None and dynamic_track.confirmed:
@@ -1231,6 +1539,8 @@ class DisplayPayloadSink:
                 target_track=target_track,
                 target_source=target_source,
                 static_reference=static_reference,
+                static_candidate_count=static_candidate_count,
+                static_validation=static_validation,
             ),
             doppler_cube,
         )
@@ -1248,6 +1558,17 @@ class DisplayPayloadSink:
             ready=self.static_scene_map.is_ready,
             frames_seen=self.static_scene_map.frames_seen,
             required_frames=self.static_scene_map.reference_frames,
+            warmup_frames_seen=self.static_scene_map.warmup_frames_seen,
+            warmup_frames_required=self.static_scene_map.warmup_frames,
+            adaptive=self.static_scene_map.background_update_rate > 0.0,
+        )
+
+    def format_static_summary(self) -> str:
+        return (
+            "Static detection summary: "
+            f"candidate_points={self.static_candidate_total}, "
+            f"handoff_pending_updates={self.static_handoff_pending_updates}, "
+            f"validated_updates={self.static_validated_updates}"
         )
 
 
@@ -2134,6 +2455,7 @@ def process_complete_frame(
     emit_func: Optional[EmitFunc] = None,
 ) -> None:
     emit_func = emit_func or emit
+    total_started = time.perf_counter()
     if not frame.is_valid:
         raw_writer.write_frame(frame)
         emit_func(
@@ -2144,9 +2466,15 @@ def process_complete_frame(
 
     raw_writer.write_frame(frame)
     radar_cube = frame_bytes_to_radar_cube(frame.data, config)
+    range_fft_started = time.perf_counter()
     range_fft = compute_range_fft(radar_cube)
+    display.timings.add(
+        "range_fft",
+        time.perf_counter() - range_fft_started,
+    )
     range_axis_m = config.range_axis_m()
     display.update(range_fft, range_axis_m)
+    display.timings.add("total", time.perf_counter() - total_started)
 
 
 def _queue_emit(log_queue: mp.Queue, message: str) -> None:
@@ -2195,9 +2523,14 @@ def _run_frame_processor(
     clutter_map_warmup_frames: int,
     clutter_map_min_snr_db: float,
     static_detection: bool,
+    static_warmup_frames: int,
     static_reference_frames: int,
     static_min_change_db: float,
+    static_background_update_rate: float,
+    static_cluster_min_samples: int,
 ) -> None:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
 
@@ -2208,8 +2541,11 @@ def _run_frame_processor(
         display_update_every,
         worker_emit,
         static_detection=static_detection,
+        static_warmup_frames=static_warmup_frames,
         static_reference_frames=static_reference_frames,
         static_min_change_db=static_min_change_db,
+        static_background_update_rate=static_background_update_rate,
+        static_cluster_min_samples=static_cluster_min_samples,
     )
     display = DisplayPayloadSink(
         display_mode,
@@ -2225,9 +2561,12 @@ def _run_frame_processor(
         clutter_map_min_snr_db,
         processed_writer,
         display_skipped_counter,
-        static_detection,
-        static_reference_frames,
-        static_min_change_db,
+        static_detection=static_detection,
+        static_warmup_frames=static_warmup_frames,
+        static_reference_frames=static_reference_frames,
+        static_min_change_db=static_min_change_db,
+        static_background_update_rate=static_background_update_rate,
+        static_cluster_min_samples=static_cluster_min_samples,
     )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -2245,8 +2584,10 @@ def _run_frame_processor(
     ):
         worker_emit(
             "Static scene detection enabled: "
-            f"reference={static_reference_frames} processed updates, "
-            f"minimum_change={static_min_change_db:g} dB. "
+            f"warmup={static_warmup_frames} updates, "
+            f"reference={static_reference_frames} updates, "
+            f"minimum_change={static_min_change_db:g} dB, "
+            f"background_update_rate={static_background_update_rate:g}. "
             "Keep the target absent until calibration is complete."
         )
 
@@ -2265,6 +2606,8 @@ def _run_frame_processor(
     finally:
         raw_writer.close()
         processed_writer.close()
+        worker_emit(display.format_static_summary())
+        worker_emit(display.timings.format_summary())
 
 
 def listen_for_frames(
@@ -2606,8 +2949,18 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_STATIC_DETECTION,
         help=(
-            "Detect stationary changes against a frozen startup reference. "
+            "Detect motion-qualified stationary changes against an adaptive "
+            "startup reference. "
             "Enabled by default; use --no-static-detection to disable."
+        ),
+    )
+    parser.add_argument(
+        "--static-warmup-frames",
+        type=int,
+        default=DEFAULT_STATIC_WARMUP_FRAMES,
+        help=(
+            "Processed updates discarded before static calibration. "
+            f"Defaults to {DEFAULT_STATIC_WARMUP_FRAMES}."
         ),
     )
     parser.add_argument(
@@ -2626,6 +2979,24 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Minimum positive range-angle power change for a static detection. "
             f"Defaults to {DEFAULT_STATIC_MIN_CHANGE_DB:g} dB."
+        ),
+    )
+    parser.add_argument(
+        "--static-background-update-rate",
+        type=float,
+        default=DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,
+        help=(
+            "Adaptive update rate for unprotected static background cells. "
+            f"Defaults to {DEFAULT_STATIC_BACKGROUND_UPDATE_RATE:g}."
+        ),
+    )
+    parser.add_argument(
+        "--static-cluster-min-samples",
+        type=int,
+        default=DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
+        help=(
+            "Minimum points in a static handoff cluster. "
+            f"Defaults to {DEFAULT_STATIC_CLUSTER_MIN_SAMPLES}."
         ),
     )
     return parser.parse_args()
@@ -3184,8 +3555,11 @@ def main() -> None:
                 args.clutter_map_warmup_frames,
                 args.clutter_map_min_snr_db,
                 args.static_detection,
+                max(args.static_warmup_frames, 0),
                 max(args.static_reference_frames, 1),
                 max(args.static_min_change_db, 0.0),
+                min(max(args.static_background_update_rate, 0.0), 1.0),
+                max(args.static_cluster_min_samples, 1),
             ),
             name="RadarFrameProcessor",
         )

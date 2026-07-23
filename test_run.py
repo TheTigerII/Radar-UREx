@@ -69,8 +69,11 @@ class CaptureCommandTests(unittest.TestCase):
             clutter_map_warmup_frames=30,
             clutter_map_min_snr_db=6.0,
             static_detection=True,
-            static_reference_frames=30,
+            static_warmup_frames=30,
+            static_reference_frames=90,
             static_min_change_db=6.0,
+            static_background_update_rate=0.01,
+            static_cluster_min_samples=3,
         )
 
         command = run.build_capture_command(
@@ -85,8 +88,11 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--packet-queue-size", command)
         self.assertIn("--processing-queue-size", command)
         self.assertIn("--static-detection", command)
+        self.assertIn("--static-warmup-frames", command)
         self.assertIn("--static-reference-frames", command)
         self.assertIn("--static-min-change-db", command)
+        self.assertIn("--static-background-update-rate", command)
+        self.assertIn("--static-cluster-min-samples", command)
         self.assertNotIn("--raw-output", command)
 
         args.static_detection = False

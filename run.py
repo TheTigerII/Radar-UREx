@@ -32,8 +32,11 @@ DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
 DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
 DEFAULT_STATIC_DETECTION = True
-DEFAULT_STATIC_REFERENCE_FRAMES = 30
+DEFAULT_STATIC_WARMUP_FRAMES = 30
+DEFAULT_STATIC_REFERENCE_FRAMES = 90
 DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
+DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
+DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 3
 DISPLAY_CHOICES = (
     "none",
     "range",
@@ -136,21 +139,40 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_STATIC_DETECTION,
         help=(
-            "Detect stationary changes against a frozen startup reference. "
+            "Detect motion-qualified stationary changes against an adaptive "
+            "startup reference. "
             "Enabled by default."
         ),
+    )
+    parser.add_argument(
+        "--static-warmup-frames",
+        type=int,
+        default=DEFAULT_STATIC_WARMUP_FRAMES,
+        help="Processed updates discarded before static calibration. Defaults to 30.",
     )
     parser.add_argument(
         "--static-reference-frames",
         type=int,
         default=DEFAULT_STATIC_REFERENCE_FRAMES,
-        help="Processed updates used for static-scene calibration. Defaults to 30.",
+        help="Processed updates used for static-scene calibration. Defaults to 90.",
     )
     parser.add_argument(
         "--static-min-change-db",
         type=float,
         default=DEFAULT_STATIC_MIN_CHANGE_DB,
         help="Minimum static target-to-reference change. Defaults to 6 dB.",
+    )
+    parser.add_argument(
+        "--static-background-update-rate",
+        type=float,
+        default=DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,
+        help="Adaptive static-background update rate. Defaults to 0.01.",
+    )
+    parser.add_argument(
+        "--static-cluster-min-samples",
+        type=int,
+        default=DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
+        help="Minimum points in a static handoff cluster. Defaults to 3.",
     )
     parser.add_argument(
         "--duration-minutes",
@@ -435,10 +457,16 @@ def build_capture_command(
             if args.static_detection
             else "--no-static-detection"
         ),
+        "--static-warmup-frames",
+        str(max(args.static_warmup_frames, 0)),
         "--static-reference-frames",
         str(max(args.static_reference_frames, 1)),
         "--static-min-change-db",
         str(max(args.static_min_change_db, 0.0)),
+        "--static-background-update-rate",
+        str(min(max(args.static_background_update_rate, 0.0), 1.0)),
+        "--static-cluster-min-samples",
+        str(max(args.static_cluster_min_samples, 1)),
         "--processed-output",
         str(processed_output),
     ]
