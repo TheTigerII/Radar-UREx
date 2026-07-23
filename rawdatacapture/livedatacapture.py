@@ -60,7 +60,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
-DEFAULT_CLUSTER_EPS_M = 0.5
+DEFAULT_CLUSTER_EPS_M = 0.4
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
 DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
@@ -2121,7 +2121,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CLUSTER_EPS_M,
         help=(
             "DBSCAN XYZ neighborhood radius in meters for point-cloud clustering. "
-            "Defaults to 0.5 m; use 0 to disable clustering."
+            "Defaults to 0.4 m; use 0 to disable clustering."
         ),
     )
     parser.add_argument(

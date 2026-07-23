@@ -199,7 +199,7 @@ each cell is divided by its learned background power before CFAR. A detection
 must also exceed the background by at least 6 dB. Neighborhoods around current
 detections are protected from map updates. The point cloud shows all
 detected points within a 10 m radial range and a ±60-degree azimuth/elevation
-field of view. Spatial DBSCAN runs after XYZ generation with a default 0.5 m
+field of view. Spatial DBSCAN runs after XYZ generation with a default 0.4 m
 neighborhood and two-point minimum. Original
 points remain visible, while red crosses mark cluster centers and cross size
 indicates the number of cluster members. Coordinates are X left/right, Y

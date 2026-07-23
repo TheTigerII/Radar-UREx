@@ -468,7 +468,7 @@ def compute_per_tx_micro_doppler_spectrogram(
 def cluster_point_cloud(
     points: np.ndarray,
     *,
-    eps_m: float = 0.5,
+    eps_m: float = 0.4,
     min_samples: int = 2,
 ) -> np.ndarray:
     """Return DBSCAN cluster centers as [x, y, z, point_count]."""

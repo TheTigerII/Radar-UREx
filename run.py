@@ -23,7 +23,7 @@ DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
 DEFAULT_DURATION_MINUTES = 3.0
 DEFAULT_MAX_RANGE_M = 10.0
-DEFAULT_CLUSTER_EPS_M = 0.5
+DEFAULT_CLUSTER_EPS_M = 0.4
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
 DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
@@ -80,7 +80,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CLUSTER_EPS_M,
         help=(
             "DBSCAN XYZ neighborhood radius for point-cloud clustering. "
-            "Defaults to 0.5 m; use 0 to disable clustering."
+            "Defaults to 0.4 m; use 0 to disable clustering."
         ),
     )
     parser.add_argument(
