@@ -198,9 +198,20 @@ The point-cloud path:
    detections.
 8. Runs spatial DBSCAN on XYZ points and sends both the original points and
    cluster centers to the display process.
-9. Updates one persistent 3D target track. Initial acquisition uses the
+9. Updates one persistent dynamic 3D target track. Initial acquisition uses the
    strongest cluster or point; later updates use gated nearest-neighbor
    association against a constant-velocity prediction.
+
+In parallel, the static-change path sums angle-FFT power from the centered
+Doppler bin and its two neighbors. It applies the virtual-array mapping and one
+vectorized 32-by-32 angle FFT across every valid range bin, producing a
+`[range, elevation, azimuth]` cube. The first 30 processed detection updates
+are retained temporarily and reduced to a median reference; the reference is
+then frozen. Positive changes above the default 6 dB threshold are range/FOV
+gated, reduced by non-wrapping 3D local-maximum suppression, and capped at 256
+strongest cells before XYZ conversion and DBSCAN. Returned static points are
+`[x, y, z, magnitude_db, change_db]`. A separate tracker acquires the nearest
+static cluster and requires three consecutive hits.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and
@@ -210,13 +221,13 @@ X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
 ### Combined point cloud and micro-Doppler
 
 The `point-cloud-micro-doppler` display computes one Doppler cube for each
-display update and reuses it for both outputs. The point-cloud path runs as
-described above. The tracked target supplies the center of a five-bin range
-gate. During a short detection gap, a constant-velocity prediction maintains
-the gate and the green tracked-target marker is shown smaller and translucent.
-The track is removed after 10 consecutive missed display updates. When no track
-exists, the gate follows the strongest non-zero-Doppler range inside the
-configured range limit.
+display update and reuses it for the dynamic point cloud, static angle cube,
+and range-gate selection. A confirmed static track has priority; otherwise a
+confirmed dynamic track supplies the center of the five-bin range gate. During
+a short detection gap, a constant-velocity prediction maintains the gate and
+the tracked-target marker is shown smaller and translucent. A track is removed
+after 10 consecutive missed display updates. No range fallback is selected
+while reference calibration or track confirmation is pending.
 
 The micro-Doppler branch reshapes the chronological chirps into explicit loop
 and TX-slot axes. It applies independent slow-time FFTs to every TX slot, RX
@@ -227,9 +238,10 @@ calibration. A 128-loop frame produces three short-time spectra. Each spectrum
 is appended to a 150-window history in the frame-processing process. Sending
 the complete history through the latest-only display queue prevents GUI queue
 replacement from creating holes in the visible spectrogram. The spectrogram
-follows the single tracked target while its association remains valid. It can
-still change targets after track loss and reacquisition. The Matplotlib image
-uses a visible-spectrum `turbo` color map, running from dark blue at the fixed
+follows the selected track while its association remains valid. History is
+cleared when the target source changes or the track is lost. An explicit static
+gate retains the centered zero-Doppler bin. The Matplotlib image uses a
+visible-spectrum `turbo` color map, running from dark blue at the fixed
 40 dB minimum to red at the fixed 120 dB maximum rather than rescaling each
 history update. The combined layout uses one shared magnitude colorbar for both axes.
 The colorbar occupies a dedicated narrow grid column between the point cloud
@@ -241,11 +253,13 @@ require a full redraw every update.
 
 ## Processed and Raw Recording
 
-`--processed-output` streams newline-delimited JSON. Its first record describes
-the radar configuration and data axes. Each subsequent update contains the
-post-CFAR XYZ point cloud, DBSCAN clusters, target-track state, current
+`--processed-output` streams version-2 newline-delimited JSON. Its first record
+describes the radar configuration, data axes, and static-reference settings.
+Each subsequent update contains the dynamic and static point clouds, their
+DBSCAN clusters, static-reference state, target source and track, current
 micro-Doppler spectrum, every short-time window generated from the frame, and
-the selected range gate. The writer does not duplicate the rolling display
+the selected range gate. Existing dynamic `points` and `clusters` fields keep
+their version-1 layouts. The writer does not duplicate the rolling display
 history. When it
 is enabled, combined point-cloud/micro-Doppler processing runs even with a
 different display mode or `--display none`.

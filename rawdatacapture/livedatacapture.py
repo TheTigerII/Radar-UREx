@@ -16,6 +16,7 @@ import numpy as np
 try:
     from .dsp import (
         AdaptiveClutterMap,
+        StaticSceneMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
         compute_per_tx_micro_doppler_spectrogram,
@@ -24,6 +25,7 @@ try:
         compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
+        compute_static_point_cloud,
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
@@ -32,6 +34,7 @@ try:
 except ImportError:
     from dsp import (
         AdaptiveClutterMap,
+        StaticSceneMap,
         cluster_point_cloud,
         compute_micro_doppler_spectrum,
         compute_per_tx_micro_doppler_spectrogram,
@@ -40,6 +43,7 @@ except ImportError:
         compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
+        compute_static_point_cloud,
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
@@ -67,6 +71,9 @@ DEFAULT_CLUSTER_MIN_SAMPLES = 2
 DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
 DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
+DEFAULT_STATIC_DETECTION = True
+DEFAULT_STATIC_REFERENCE_FRAMES = 30
+DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
 DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
@@ -213,6 +220,43 @@ class TargetTrack:
         return self.missed_updates > 0
 
 
+@dataclass(frozen=True)
+class StaticReferenceStatus:
+    enabled: bool
+    ready: bool
+    frames_seen: int
+    required_frames: int
+
+    @property
+    def label(self) -> str:
+        if not self.enabled:
+            return "Static detection disabled"
+        if self.ready:
+            return "Static reference ready"
+        return (
+            "Calibrating static reference "
+            f"{self.frames_seen}/{self.required_frames}"
+        )
+
+
+@dataclass(frozen=True)
+class PointCloudDisplayPayload:
+    points: np.ndarray
+    clusters: np.ndarray
+    static_points: np.ndarray
+    static_clusters: np.ndarray
+    target_track: Optional[TargetTrack]
+    target_source: Optional[str]
+    static_reference: StaticReferenceStatus
+
+
+@dataclass(frozen=True)
+class CombinedDisplayPayload:
+    point_cloud: PointCloudDisplayPayload
+    spectrogram_db: np.ndarray
+    selected_range_m: Optional[float]
+
+
 class SingleTargetTracker:
     """Track one 3D point-cloud target with gated nearest-neighbor updates.
 
@@ -230,6 +274,7 @@ class SingleTargetTracker:
         confirmation_hits: int = DEFAULT_TRACK_CONFIRMATION_HITS,
         position_gain: float = 0.65,
         velocity_gain: float = 0.35,
+        acquisition_policy: str = "strongest",
     ) -> None:
         if association_distance_m <= 0.0:
             raise ValueError("Track association distance must be positive")
@@ -241,12 +286,17 @@ class SingleTargetTracker:
             raise ValueError("Track position gain must be in (0, 1]")
         if not 0.0 <= velocity_gain <= 1.0:
             raise ValueError("Track velocity gain must be in [0, 1]")
+        if acquisition_policy not in {"strongest", "nearest"}:
+            raise ValueError(
+                "Track acquisition policy must be 'strongest' or 'nearest'"
+            )
 
         self.association_distance_m = float(association_distance_m)
         self.max_missed_updates = int(max_missed_updates)
         self.confirmation_hits = int(confirmation_hits)
         self.position_gain = float(position_gain)
         self.velocity_gain = float(velocity_gain)
+        self.acquisition_policy = acquisition_policy
         self._position_m: Optional[np.ndarray] = None
         self._velocity_m_per_update = np.zeros(3, dtype=np.float64)
         self._age_updates = 0
@@ -263,8 +313,13 @@ class SingleTargetTracker:
         if self._position_m is None:
             if candidates.size == 0:
                 return None
-            strongest_index = int(np.argmax(candidates[:, 3]))
-            self._position_m = candidates[strongest_index, :3].copy()
+            if self.acquisition_policy == "nearest":
+                acquisition_index = int(
+                    np.argmin(np.linalg.norm(candidates[:, :3], axis=1))
+                )
+            else:
+                acquisition_index = int(np.argmax(candidates[:, 3]))
+            self._position_m = candidates[acquisition_index, :3].copy()
             self._velocity_m_per_update.fill(0.0)
             self._age_updates = 1
             self._hits = 1
@@ -730,6 +785,10 @@ class ProcessedOutputWriter:
         config: RadarCaptureConfig,
         update_every: int,
         emit_func: Optional[EmitFunc] = None,
+        *,
+        static_detection: bool = DEFAULT_STATIC_DETECTION,
+        static_reference_frames: int = DEFAULT_STATIC_REFERENCE_FRAMES,
+        static_min_change_db: float = DEFAULT_STATIC_MIN_CHANGE_DB,
     ) -> None:
         self.emit = emit_func or emit
         self.output_path = _resolve_output_path(output_path) if output_path else None
@@ -744,11 +803,31 @@ class ProcessedOutputWriter:
         metadata = {
             "record_type": "metadata",
             "format": "radar-processed-jsonl",
-            "version": 1,
+            "version": 2,
             "created_at": _timestamp(),
             "display_update_every": max(int(update_every), 1),
             "point_columns": ["x_m", "y_m", "z_m", "magnitude_db"],
             "cluster_columns": ["x_m", "y_m", "z_m", "point_count"],
+            "static_point_columns": [
+                "x_m",
+                "y_m",
+                "z_m",
+                "magnitude_db",
+                "change_db",
+            ],
+            "static_cluster_columns": [
+                "x_m",
+                "y_m",
+                "z_m",
+                "point_count",
+            ],
+            "static_detection": {
+                "enabled": bool(static_detection),
+                "reference_frames": max(int(static_reference_frames), 1),
+                "minimum_change_db": max(float(static_min_change_db), 0.0),
+                "reference_update_unit": "processed detection update",
+                "reference_policy": "startup median, frozen after calibration",
+            },
             "micro_doppler_units": "dB power",
             "micro_doppler_axis": "centered Doppler bin",
             "micro_doppler_windows_layout": ["window", "centered_doppler_bin"],
@@ -789,6 +868,10 @@ class ProcessedOutputWriter:
         micro_doppler_db: np.ndarray,
         selected_range_m: Optional[float],
         micro_doppler_windows_db: Optional[np.ndarray] = None,
+        static_points: Optional[np.ndarray] = None,
+        static_clusters: Optional[np.ndarray] = None,
+        static_reference: Optional[StaticReferenceStatus] = None,
+        target_source: Optional[str] = None,
     ) -> None:
         if self.file is None:
             return
@@ -813,7 +896,30 @@ class ProcessedOutputWriter:
             ),
             "points": np.asarray(points, dtype=np.float32).tolist(),
             "clusters": np.asarray(clusters, dtype=np.float32).tolist(),
+            "static_points": np.asarray(
+                static_points
+                if static_points is not None
+                else np.empty((0, 5), dtype=np.float32),
+                dtype=np.float32,
+            ).tolist(),
+            "static_clusters": np.asarray(
+                static_clusters
+                if static_clusters is not None
+                else np.empty((0, 4), dtype=np.float32),
+                dtype=np.float32,
+            ).tolist(),
+            "static_reference": (
+                {
+                    "enabled": static_reference.enabled,
+                    "ready": static_reference.ready,
+                    "frames_seen": static_reference.frames_seen,
+                    "required_frames": static_reference.required_frames,
+                }
+                if static_reference is not None
+                else None
+            ),
             "target_track": track,
+            "target_source": target_source,
             "micro_doppler_db": np.asarray(
                 micro_doppler_db,
                 dtype=np.float32,
@@ -858,6 +964,9 @@ class DisplayPayloadSink:
         clutter_map_min_snr_db: float = DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
         processed_writer: Optional[ProcessedOutputWriter] = None,
         display_skipped_counter: Optional[Any] = None,
+        static_detection: bool = DEFAULT_STATIC_DETECTION,
+        static_reference_frames: int = DEFAULT_STATIC_REFERENCE_FRAMES,
+        static_min_change_db: float = DEFAULT_STATIC_MIN_CHANGE_DB,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -878,7 +987,21 @@ class DisplayPayloadSink:
             if clutter_map_update_rate > 0.0
             else None
         )
-        self.target_tracker = SingleTargetTracker()
+        self.static_scene_map = (
+            StaticSceneMap(
+                reference_frames=static_reference_frames,
+                minimum_change_db=static_min_change_db,
+            )
+            if static_detection
+            else None
+        )
+        self.dynamic_target_tracker = SingleTargetTracker()
+        self.static_target_tracker = SingleTargetTracker(
+            acquisition_policy="nearest"
+        )
+        # Retain the old attribute for callers that inspect the dynamic tracker.
+        self.target_tracker = self.dynamic_target_tracker
+        self.active_target_source: Optional[str] = None
         self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
         self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
         self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
@@ -909,23 +1032,19 @@ class DisplayPayloadSink:
             )
             if save_processed:
                 assert self.processed_writer is not None
-                (
-                    points,
-                    clusters,
-                    target_track,
-                    _history,
-                    selected_range_m,
-                ) = (
-                    combined_payload
-                )
+                point_cloud = combined_payload.point_cloud
                 self.processed_writer.write_update(
                     frame_index=self.frame_count,
-                    points=points,
-                    clusters=clusters,
-                    target_track=target_track,
+                    points=point_cloud.points,
+                    clusters=point_cloud.clusters,
+                    static_points=point_cloud.static_points,
+                    static_clusters=point_cloud.static_clusters,
+                    static_reference=point_cloud.static_reference,
+                    target_track=point_cloud.target_track,
+                    target_source=point_cloud.target_source,
                     micro_doppler_db=self.latest_micro_doppler_db,
                     micro_doppler_windows_db=self.latest_micro_doppler_windows_db,
-                    selected_range_m=selected_range_m,
+                    selected_range_m=combined_payload.selected_range_m,
                 )
 
         if self.mode == "none":
@@ -942,36 +1061,11 @@ class DisplayPayloadSink:
             )
         elif self.mode == "point-cloud":
             if combined_payload is not None:
-                payload = combined_payload[:3]
+                payload = combined_payload.point_cloud
             else:
-                points = compute_point_cloud(
+                payload, _doppler_cube = self._compute_point_cloud_payload(
                     range_fft,
                     range_axis_m,
-                    self.config,
-                    clutter_map=self.clutter_map,
-                    max_range_m=self.max_range_m,
-                    azimuth_fov_deg=self.point_cloud_fov_deg,
-                    elevation_fov_deg=self.point_cloud_fov_deg,
-                )
-                clusters = cluster_point_cloud(
-                    points,
-                    eps_m=self.cluster_eps_m,
-                    min_samples=self.cluster_min_samples,
-                )
-                target_track = self.target_tracker.update(
-                    _point_cloud_track_candidates(
-                        points,
-                        clusters,
-                        assignment_distance_m=max(
-                            2.0 * self.cluster_eps_m,
-                            1e-6,
-                        ),
-                    )
-                )
-                payload = (
-                    points,
-                    clusters,
-                    target_track,
                 )
         elif self.mode == COMBINED_DISPLAY_MODE:
             assert combined_payload is not None
@@ -993,44 +1087,34 @@ class DisplayPayloadSink:
         self,
         range_fft: np.ndarray,
         range_axis_m: Optional[np.ndarray],
-    ) -> tuple[
-        np.ndarray,
-        np.ndarray,
-        Optional[TargetTrack],
-        np.ndarray,
-        Optional[float],
-    ]:
-        doppler_cube = compute_range_doppler_fft(range_fft, self.config)
-        points = compute_point_cloud(
+    ) -> CombinedDisplayPayload:
+        point_cloud, doppler_cube = self._compute_point_cloud_payload(
             range_fft,
             range_axis_m,
-            self.config,
-            doppler_cube=doppler_cube,
-            clutter_map=self.clutter_map,
-            max_range_m=self.max_range_m,
-            azimuth_fov_deg=self.point_cloud_fov_deg,
-            elevation_fov_deg=self.point_cloud_fov_deg,
         )
-        clusters = cluster_point_cloud(
-            points,
-            eps_m=self.cluster_eps_m,
-            min_samples=self.cluster_min_samples,
-        )
-        target_track = self.target_tracker.update(
-            _point_cloud_track_candidates(
-                points,
-                clusters,
-                assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
+        target_track = point_cloud.target_track
+        target_source = point_cloud.target_source
+        selection_changed = target_source != self.active_target_source
+        if target_track is not None and target_track.age_updates == 1:
+            selection_changed = True
+        if selection_changed:
+            self.micro_doppler_history.clear()
+            self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
+            self.latest_micro_doppler_windows_db = np.empty(
+                (0, 0),
+                dtype=np.float32,
             )
-        )
-        target_range_m = target_track.range_m if target_track is not None else None
-        _spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
-            doppler_cube,
-            range_axis_m,
-            target_range_m=target_range_m,
-            range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
-            max_range_m=self.max_range_m,
-        )
+        self.active_target_source = target_source
+
+        selected_range_m = None
+        if target_track is not None:
+            _spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+                doppler_cube,
+                range_axis_m,
+                target_range_m=target_track.range_m,
+                range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+                max_range_m=self.max_range_m,
+            )
         short_time_spectra = np.empty((0, 0), dtype=np.float32)
         if selected_range_m is not None:
             short_time_spectra = compute_per_tx_micro_doppler_spectrogram(
@@ -1064,12 +1148,106 @@ class DisplayPayloadSink:
             if self.micro_doppler_history
             else np.empty((0, 0), dtype=np.float32)
         )
-        return (
+        return CombinedDisplayPayload(
+            point_cloud=point_cloud,
+            spectrogram_db=spectrogram_db,
+            selected_range_m=selected_range_m,
+        )
+
+    def _compute_point_cloud_payload(
+        self,
+        range_fft: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+    ) -> tuple[PointCloudDisplayPayload, np.ndarray]:
+        doppler_cube = compute_range_doppler_fft(range_fft, self.config)
+        points = compute_point_cloud(
+            range_fft,
+            range_axis_m,
+            self.config,
+            doppler_cube=doppler_cube,
+            clutter_map=self.clutter_map,
+            max_range_m=self.max_range_m,
+            azimuth_fov_deg=self.point_cloud_fov_deg,
+            elevation_fov_deg=self.point_cloud_fov_deg,
+        )
+        clusters = cluster_point_cloud(
             points,
-            clusters,
-            target_track,
-            spectrogram_db,
-            selected_range_m,
+            eps_m=self.cluster_eps_m,
+            min_samples=self.cluster_min_samples,
+        )
+        dynamic_track = self.dynamic_target_tracker.update(
+            _point_cloud_track_candidates(
+                points,
+                clusters,
+                assignment_distance_m=max(2.0 * self.cluster_eps_m, 1e-6),
+            )
+        )
+
+        static_points = np.empty((0, 5), dtype=np.float32)
+        static_clusters = np.empty((0, 4), dtype=np.float32)
+        static_track = None
+        if self.static_scene_map is not None:
+            static_points = compute_static_point_cloud(
+                doppler_cube,
+                range_axis_m,
+                self.config,
+                self.static_scene_map,
+                max_range_m=self.max_range_m,
+                azimuth_fov_deg=self.point_cloud_fov_deg,
+                elevation_fov_deg=self.point_cloud_fov_deg,
+            )
+            static_clusters = cluster_point_cloud(
+                static_points,
+                eps_m=self.cluster_eps_m,
+                min_samples=self.cluster_min_samples,
+            )
+            static_track = self.static_target_tracker.update(
+                _point_cloud_track_candidates(
+                    static_points,
+                    static_clusters,
+                    assignment_distance_m=max(
+                        2.0 * self.cluster_eps_m,
+                        1e-6,
+                    ),
+                )
+            )
+
+        target_track = None
+        target_source = None
+        if static_track is not None and static_track.confirmed:
+            target_track = static_track
+            target_source = "static"
+        elif dynamic_track is not None and dynamic_track.confirmed:
+            target_track = dynamic_track
+            target_source = "dynamic"
+
+        static_reference = self._static_reference_status()
+        return (
+            PointCloudDisplayPayload(
+                points=points,
+                clusters=clusters,
+                static_points=static_points,
+                static_clusters=static_clusters,
+                target_track=target_track,
+                target_source=target_source,
+                static_reference=static_reference,
+            ),
+            doppler_cube,
+        )
+
+    def _static_reference_status(self) -> StaticReferenceStatus:
+        if self.static_scene_map is None:
+            return StaticReferenceStatus(
+                enabled=False,
+                ready=False,
+                frames_seen=0,
+                required_frames=0,
+            )
+        return StaticReferenceStatus(
+            enabled=True,
+            ready=self.static_scene_map.is_ready,
+            frames_seen=self.static_scene_map.frames_seen,
+            required_frames=self.static_scene_map.reference_frames,
         )
 
 
@@ -1259,8 +1437,11 @@ def _run_display_process(
     micro_doppler_image = None
     scatter = None
     cluster_scatter = None
+    static_scatter = None
+    static_cluster_scatter = None
     target_scatter = None
     point_cloud_rate_text = None
+    static_reference_text = None
     micro_doppler_rate_text = None
 
     if mode == "range":
@@ -1294,6 +1475,28 @@ def _run_display_process(
             linewidths=2,
             label="Cluster centers",
         )
+        static_scatter = axis.scatter(
+            [],
+            [],
+            [],
+            c="orange",
+            marker="s",
+            s=30,
+            edgecolors="black",
+            linewidths=0.4,
+            label="Static changes",
+        )
+        static_cluster_scatter = axis.scatter(
+            [],
+            [],
+            [],
+            c="cyan",
+            marker="D",
+            s=70,
+            edgecolors="black",
+            linewidths=0.8,
+            label="Static clusters",
+        )
         target_scatter = axis.scatter(
             [],
             [],
@@ -1326,6 +1529,15 @@ def _run_display_process(
             bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
         )
         _set_rate_indicator(point_cloud_rate_text, None)
+        static_reference_text = axis.text2D(
+            0.02,
+            0.90,
+            "",
+            transform=axis.transAxes,
+            horizontalalignment="left",
+            verticalalignment="top",
+            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+        )
         if micro_doppler_axis is not None:
             initial_micro_doppler = np.zeros(
                 (MICRO_DOPPLER_FFT_SIZE, MICRO_DOPPLER_HISTORY_UPDATES),
@@ -1395,8 +1607,11 @@ def _run_display_process(
             for artist in (
                 scatter,
                 cluster_scatter,
+                static_scatter,
+                static_cluster_scatter,
                 target_scatter,
                 point_cloud_rate_text,
+                static_reference_text,
             )
             if artist is not None
         )
@@ -1501,59 +1716,72 @@ def _run_display_process(
                     mode == "point-cloud"
                     and scatter is not None
                     and cluster_scatter is not None
+                    and static_scatter is not None
+                    and static_cluster_scatter is not None
                     and target_scatter is not None
                 ):
-                    points, clusters, target_track = payload
+                    point_cloud = payload
                     _draw_point_cloud(
                         axis,
                         scatter,
                         cluster_scatter,
-                        points,
-                        clusters,
+                        point_cloud.points,
+                        point_cloud.clusters,
                         point_cloud_range_m,
                         point_cloud_fov_deg,
                         target_scatter,
-                        target_track,
+                        point_cloud.target_track,
+                        static_scatter=static_scatter,
+                        static_cluster_scatter=static_cluster_scatter,
+                        static_points=point_cloud.static_points,
+                        static_clusters=point_cloud.static_clusters,
+                        static_reference_text=static_reference_text,
+                        static_reference=point_cloud.static_reference,
+                        target_source=point_cloud.target_source,
                         update_static_artists=False,
                     )
                 elif (
                     mode == COMBINED_DISPLAY_MODE
                     and scatter is not None
                     and cluster_scatter is not None
+                    and static_scatter is not None
+                    and static_cluster_scatter is not None
                     and target_scatter is not None
                     and micro_doppler_axis is not None
                     and micro_doppler_image is not None
                 ):
-                    (
-                        points,
-                        clusters,
-                        target_track,
-                        spectrogram_db,
-                        selected_range_m,
-                    ) = payload
+                    combined = payload
+                    point_cloud = combined.point_cloud
                     if micro_doppler_rate_text is not None:
                         _set_rate_indicator(
                             micro_doppler_rate_text,
                             display_refresh_rate_hz,
-                            range_gate_m=selected_range_m,
+                            range_gate_m=combined.selected_range_m,
                         )
                     _draw_point_cloud(
                         axis,
                         scatter,
                         cluster_scatter,
-                        points,
-                        clusters,
+                        point_cloud.points,
+                        point_cloud.clusters,
                         point_cloud_range_m,
                         point_cloud_fov_deg,
                         target_scatter,
-                        target_track,
+                        point_cloud.target_track,
+                        static_scatter=static_scatter,
+                        static_cluster_scatter=static_cluster_scatter,
+                        static_points=point_cloud.static_points,
+                        static_clusters=point_cloud.static_clusters,
+                        static_reference_text=static_reference_text,
+                        static_reference=point_cloud.static_reference,
+                        target_source=point_cloud.target_source,
                         update_static_artists=False,
                     )
                     _draw_micro_doppler(
                         micro_doppler_axis,
                         micro_doppler_image,
-                        spectrogram_db,
-                        selected_range_m,
+                        combined.spectrogram_db,
+                        combined.selected_range_m,
                         update_axes=False,
                         update_title=False,
                     )
@@ -1745,6 +1973,13 @@ def _draw_point_cloud(
     target_track: Optional[TargetTrack] = None,
     update_rate_hz: Optional[float] = None,
     *,
+    static_scatter: Optional[Any] = None,
+    static_cluster_scatter: Optional[Any] = None,
+    static_points: Optional[np.ndarray] = None,
+    static_clusters: Optional[np.ndarray] = None,
+    static_reference_text: Optional[Any] = None,
+    static_reference: Optional[StaticReferenceStatus] = None,
+    target_source: Optional[str] = None,
     update_static_artists: bool = True,
 ) -> None:
     empty = np.array([], dtype=np.float32)
@@ -1775,6 +2010,46 @@ def _draw_point_cloud(
             np.clip(40.0 + (clusters[:, 3] * 10.0), 50.0, 180.0)
         )
 
+    if static_scatter is not None:
+        visible_static_points = (
+            np.asarray(static_points)
+            if static_points is not None
+            else np.empty((0, 5), dtype=np.float32)
+        )
+        static_scatter.set_visible(bool(visible_static_points.size))
+        if visible_static_points.size == 0:
+            static_scatter._offsets3d = (empty, empty, empty)
+        else:
+            static_scatter._offsets3d = (
+                visible_static_points[:, 0],
+                visible_static_points[:, 1],
+                visible_static_points[:, 2],
+            )
+
+    if static_cluster_scatter is not None:
+        visible_static_clusters = (
+            np.asarray(static_clusters)
+            if static_clusters is not None
+            else np.empty((0, 4), dtype=np.float32)
+        )
+        static_cluster_scatter.set_visible(bool(visible_static_clusters.size))
+        if visible_static_clusters.size == 0:
+            static_cluster_scatter._offsets3d = (empty, empty, empty)
+            static_cluster_scatter.set_sizes(empty)
+        else:
+            static_cluster_scatter._offsets3d = (
+                visible_static_clusters[:, 0],
+                visible_static_clusters[:, 1],
+                visible_static_clusters[:, 2],
+            )
+            static_cluster_scatter.set_sizes(
+                np.clip(
+                    45.0 + (visible_static_clusters[:, 3] * 10.0),
+                    55.0,
+                    190.0,
+                )
+            )
+
     if target_scatter is not None:
         target_scatter.set_visible(target_track is not None)
         if target_track is None:
@@ -1791,6 +2066,14 @@ def _draw_point_cloud(
                 np.asarray((120.0 if target_track.is_predicted else 180.0,))
             )
             target_scatter.set_alpha(0.4 if target_track.is_predicted else 1.0)
+            target_scatter.set_facecolor(
+                "orange" if target_source == "static" else "lime"
+            )
+
+    if static_reference_text is not None:
+        static_reference_text.set_text(
+            static_reference.label if static_reference is not None else ""
+        )
 
     if update_static_artists:
         _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
@@ -1911,6 +2194,9 @@ def _run_frame_processor(
     clutter_map_update_rate: float,
     clutter_map_warmup_frames: int,
     clutter_map_min_snr_db: float,
+    static_detection: bool,
+    static_reference_frames: int,
+    static_min_change_db: float,
 ) -> None:
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
@@ -1921,6 +2207,9 @@ def _run_frame_processor(
         config,
         display_update_every,
         worker_emit,
+        static_detection=static_detection,
+        static_reference_frames=static_reference_frames,
+        static_min_change_db=static_min_change_db,
     )
     display = DisplayPayloadSink(
         display_mode,
@@ -1936,6 +2225,9 @@ def _run_frame_processor(
         clutter_map_min_snr_db,
         processed_writer,
         display_skipped_counter,
+        static_detection,
+        static_reference_frames,
+        static_min_change_db,
     )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -1946,6 +2238,16 @@ def _run_frame_processor(
             f"update_rate={clutter_map_update_rate:g}, "
             f"warmup={clutter_map_warmup_frames} updates, "
             f"minimum_snr={clutter_map_min_snr_db:g} dB"
+        )
+    if display.static_scene_map is not None and (
+        display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
+        or processed_writer.enabled
+    ):
+        worker_emit(
+            "Static scene detection enabled: "
+            f"reference={static_reference_frames} processed updates, "
+            f"minimum_change={static_min_change_db:g} dB. "
+            "Keep the target absent until calibration is complete."
         )
 
     try:
@@ -2297,6 +2599,33 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Minimum target-to-background power ratio in dB after clutter "
             "normalization. Defaults to 6 dB."
+        ),
+    )
+    parser.add_argument(
+        "--static-detection",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_STATIC_DETECTION,
+        help=(
+            "Detect stationary changes against a frozen startup reference. "
+            "Enabled by default; use --no-static-detection to disable."
+        ),
+    )
+    parser.add_argument(
+        "--static-reference-frames",
+        type=int,
+        default=DEFAULT_STATIC_REFERENCE_FRAMES,
+        help=(
+            "Processed detection updates used for the startup static-scene "
+            f"reference. Defaults to {DEFAULT_STATIC_REFERENCE_FRAMES}."
+        ),
+    )
+    parser.add_argument(
+        "--static-min-change-db",
+        type=float,
+        default=DEFAULT_STATIC_MIN_CHANGE_DB,
+        help=(
+            "Minimum positive range-angle power change for a static detection. "
+            f"Defaults to {DEFAULT_STATIC_MIN_CHANGE_DB:g} dB."
         ),
     )
     return parser.parse_args()
@@ -2854,6 +3183,9 @@ def main() -> None:
                 args.clutter_map_update_rate,
                 args.clutter_map_warmup_frames,
                 args.clutter_map_min_snr_db,
+                args.static_detection,
+                max(args.static_reference_frames, 1),
+                max(args.static_min_change_db, 0.0),
             ),
             name="RadarFrameProcessor",
         )

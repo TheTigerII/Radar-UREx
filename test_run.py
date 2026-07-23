@@ -68,6 +68,9 @@ class CaptureCommandTests(unittest.TestCase):
             clutter_map_update_rate=0.02,
             clutter_map_warmup_frames=30,
             clutter_map_min_snr_db=6.0,
+            static_detection=True,
+            static_reference_frames=30,
+            static_min_change_db=6.0,
         )
 
         command = run.build_capture_command(
@@ -81,7 +84,19 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--socket-recv-buffer", command)
         self.assertIn("--packet-queue-size", command)
         self.assertIn("--processing-queue-size", command)
+        self.assertIn("--static-detection", command)
+        self.assertIn("--static-reference-frames", command)
+        self.assertIn("--static-min-change-db", command)
         self.assertNotIn("--raw-output", command)
+
+        args.static_detection = False
+        disabled_command = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--no-static-detection", disabled_command)
+        self.assertNotIn("--static-detection", disabled_command)
 
 
 if __name__ == "__main__":

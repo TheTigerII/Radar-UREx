@@ -200,21 +200,27 @@ and receivers.
 python rawdatacapture\livedatacapture.py --display point-cloud
 ```
 
-The diagnostic point cloud uses an adaptive range-Doppler clutter map, OS-CFAR,
-Doppler-only peak filtering, and a batched virtual antenna 2D FFT. The first 30
-display updates learn the background and intentionally produce no point
-detections, so start capture with an empty scene when possible. After warm-up,
-each cell is divided by its learned background power before CFAR. A detection
-must also exceed the background by at least 6 dB. Neighborhoods around current
-detections are protected from map updates. The point cloud shows all
-detected points within a 10 m radial range and a ±60-degree azimuth/elevation
-field of view. Spatial DBSCAN runs after XYZ generation with a default 0.4 m
-neighborhood and two-point minimum. Original
-points remain visible, while red crosses mark cluster centers and cross size
-indicates the number of cluster members. Coordinates are X left/right, Y
-forward, and Z elevation. The plot spans 0 to 10 m forward and approximately
--8.66 to +8.66 m across X and Z. Point color is fixed from 40 to 120 dB. Angle
-output is not calibrated.
+The diagnostic point cloud has parallel moving-target and static-change paths.
+The moving path uses an adaptive range-Doppler clutter map, OS-CFAR,
+Doppler-only peak filtering, and a batched virtual antenna 2D FFT.
+
+Static-change detection is enabled by default. Keep the radar and monitored
+scene fixed and leave the target absent while the first 30 processed detection
+updates build a median range-azimuth-elevation reference. The plot reports
+`Calibrating static reference N/30`, then `Static reference ready`. After
+calibration, the reference is frozen and positive changes of at least 6 dB are
+shown as orange squares; cyan diamonds mark their DBSCAN cluster centers.
+Objects present during calibration become part of the reference and are not
+reported as changes. Calibration counts updates that actually reach point-cloud
+processing, so packet/frame loss or `--display-update-every 2` makes it take
+longer than 30 physical frames.
+
+Both paths apply a 10 m radial range and a ±60-degree azimuth/elevation field
+of view. Spatial DBSCAN defaults to a 0.4 m neighborhood and two-point minimum.
+Dynamic points remain magnitude-colored, and red crosses mark their cluster
+centers. Coordinates are X left/right, Y forward, and Z elevation. The plot
+spans 0 to 10 m forward and approximately -8.66 to +8.66 m across X and Z.
+Dynamic point color is fixed from 40 to 120 dB. Angle output is not calibrated.
 
 The software OS-CFAR requested probability of false alarm defaults to
 `1e-3` per axis.
@@ -236,6 +242,14 @@ minimum target-to-background ratio with `--clutter-map-warmup-frames` and
 software clutter map. These options affect point detection only; point-cloud
 magnitude, the range-Doppler display, and micro-Doppler retain raw power.
 
+Use `--static-reference-frames` and `--static-min-change-db` to tune static
+calibration and sensitivity. Disable the static branch without changing the
+moving-target path with:
+
+```powershell
+python run.py --display point-cloud --no-static-detection
+```
+
 ### Point cloud with micro-Doppler
 
 ```powershell
@@ -248,19 +262,22 @@ selection. The micro-Doppler path calculates a separate slow-time FFT for each
 TX slot using 64-loop Hann windows, a 32-loop hop, and a 128-point FFT. The TX
 and RX powers are summed after the FFT; the TX signals are not coherently
 merged. A 128-loop frame produces three short-time spectra. The spectrogram
-uses a five-range-bin gate centered on the strongest point-cloud return. If the
-point cloud is empty, it selects the strongest non-zero-Doppler range inside
-`--max-range-m`. The current gate range is shown in the spectrogram title.
+uses a five-range-bin gate centered on a confirmed track. A confirmed static
+track has priority and is acquired from the nearest persistent static cluster;
+otherwise a confirmed dynamic track is used. No arbitrary range is selected
+during calibration or track confirmation. The explicit target gate retains the
+centered zero-Doppler bin, so a rigid stationary object appears mainly as a
+zero-Doppler line while vibration or internal motion produces sidebands. The
+current gate range is shown in the spectrogram title.
 
 The horizontal spectrogram axis is measured in STFT windows, with the newest
 column at zero. The vertical axis is centered Doppler bin because velocity is
 not yet calibrated. Its visible-spectrum `turbo` scale runs from dark blue at
 the fixed 40 dB minimum to red at the fixed 120 dB maximum, matching the 3D
 point cloud so colors remain comparable between updates and the two plots.
-One shared magnitude colorbar sits between both plots. Automatic
-gating can switch between targets when multiple
-strong objects are present; it is a visualization aid rather than persistent
-target tracking.
+One shared magnitude colorbar sits between both plots. Spectrogram history is
+cleared when the selected track is lost or changes between the static and
+dynamic sources, preventing two objects from sharing one visible history.
 
 The plot titles show their measured refresh rate. On Matplotlib backends that
 support it, the combined view blits only the changing scatter, image, and title

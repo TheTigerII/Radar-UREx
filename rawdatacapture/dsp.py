@@ -19,6 +19,9 @@ except ImportError:
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
+DEFAULT_STATIC_ANGLE_FFT_SIZE = 32
+DEFAULT_STATIC_DOPPLER_HALF_WIDTH_BINS = 1
+DEFAULT_STATIC_MAX_POINTS = 256
 
 
 class AdaptiveClutterMap:
@@ -148,6 +151,91 @@ class AdaptiveClutterMap:
                     shifted[:, range_offset:] = False
                 expanded |= shifted
         return expanded
+
+
+class StaticSceneMap:
+    """Learn and freeze a range-angle reference for static-scene changes."""
+
+    def __init__(
+        self,
+        *,
+        reference_frames: int = 30,
+        minimum_change_db: float = 6.0,
+    ) -> None:
+        if reference_frames < 1:
+            raise ValueError("Static reference must contain at least one frame")
+        if not np.isfinite(minimum_change_db) or minimum_change_db < 0.0:
+            raise ValueError(
+                "Static minimum change must be finite and non-negative"
+            )
+
+        self.reference_frames = int(reference_frames)
+        self.minimum_change_db = float(minimum_change_db)
+        self._calibration_frames: list[np.ndarray] = []
+        self._reference_power: Optional[np.ndarray] = None
+        self._shape: Optional[tuple[int, ...]] = None
+
+    @property
+    def is_ready(self) -> bool:
+        return self._reference_power is not None
+
+    @property
+    def frames_seen(self) -> int:
+        return (
+            self.reference_frames
+            if self.is_ready
+            else len(self._calibration_frames)
+        )
+
+    def reset(self) -> None:
+        self._calibration_frames.clear()
+        self._reference_power = None
+        self._shape = None
+
+    def observe(self, power_cube: np.ndarray) -> Optional[np.ndarray]:
+        """Calibrate or return positive change in dB against the frozen scene."""
+        power = self._validated_power(power_cube)
+        if self._shape != power.shape:
+            self.reset()
+            self._shape = power.shape
+
+        if not self.is_ready:
+            self._calibration_frames.append(
+                power.astype(np.float32, copy=True)
+            )
+            if len(self._calibration_frames) >= self.reference_frames:
+                self._reference_power = np.median(
+                    np.stack(self._calibration_frames, axis=0),
+                    axis=0,
+                ).astype(np.float32, copy=False)
+                self._calibration_frames.clear()
+            return None
+
+        assert self._reference_power is not None
+        positive_reference = self._reference_power[self._reference_power > 0.0]
+        reference_floor = (
+            max(
+                float(np.median(positive_reference)) * 1e-6,
+                np.finfo(np.float32).tiny,
+            )
+            if positive_reference.size
+            else np.finfo(np.float32).tiny
+        )
+        ratio = power / np.maximum(self._reference_power, reference_floor)
+        return (10.0 * np.log10(np.maximum(ratio, 1e-12))).astype(
+            np.float32,
+            copy=False,
+        )
+
+    @staticmethod
+    def _validated_power(power_cube: np.ndarray) -> np.ndarray:
+        power = np.asarray(power_cube, dtype=np.float32)
+        if power.ndim != 3 or power.size == 0:
+            raise ValueError(
+                "Static scene power must be a non-empty "
+                "[range, elevation, azimuth] cube"
+            )
+        return np.maximum(power, 0.0)
 
 
 class RadarDspConfig(Protocol):
@@ -314,6 +402,180 @@ def compute_point_cloud(
 
     magnitude_db = 10.0 * np.log10(candidate_powers + 1e-12)
     return np.column_stack((xyz_m, magnitude_db)).astype(np.float32, copy=False)
+
+
+def compute_static_angle_power(
+    doppler_cube: np.ndarray,
+    config: RadarDspConfig,
+    *,
+    doppler_half_width_bins: int = DEFAULT_STATIC_DOPPLER_HALF_WIDTH_BINS,
+    angle_fft_size: int = DEFAULT_STATIC_ANGLE_FFT_SIZE,
+) -> np.ndarray:
+    """Return near-zero-Doppler power as [range, elevation, azimuth]."""
+    if doppler_cube.ndim != 4:
+        raise ValueError("Doppler cube must have shape [doppler, tx, rx, range]")
+    if doppler_cube.size == 0:
+        return np.empty((0, 0, 0), dtype=np.float32)
+    if angle_fft_size < 2:
+        raise ValueError("Static angle FFT size must be at least two")
+
+    doppler_bins, tx_count, rx_count, range_bins = doppler_cube.shape
+    half_width = max(int(doppler_half_width_bins), 0)
+    zero_bin = doppler_bins // 2
+    start = max(zero_bin - half_width, 0)
+    end = min(zero_bin + half_width + 1, doppler_bins)
+
+    selected = np.moveaxis(
+        doppler_cube[start:end],
+        -1,
+        1,
+    ).reshape((-1, tx_count, rx_count))
+    virtual_grids = build_virtual_antenna_grids(selected, config)
+    angle_response = np.fft.fftshift(
+        np.fft.fft2(
+            virtual_grids,
+            s=(angle_fft_size, angle_fft_size),
+            axes=(-2, -1),
+        ),
+        axes=(-2, -1),
+    )
+    angle_power = np.abs(angle_response) ** 2
+    angle_power = angle_power.reshape(
+        (end - start, range_bins, angle_fft_size, angle_fft_size)
+    ).sum(axis=0)
+    return angle_power.astype(np.float32, copy=False)
+
+
+def compute_static_point_cloud(
+    doppler_cube: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    config: RadarDspConfig,
+    scene_map: StaticSceneMap,
+    *,
+    max_points: int = DEFAULT_STATIC_MAX_POINTS,
+    min_range_m: float = 0.25,
+    max_range_m: float = 10.0,
+    azimuth_fov_deg: float = 60.0,
+    elevation_fov_deg: float = 60.0,
+    doppler_half_width_bins: int = DEFAULT_STATIC_DOPPLER_HALF_WIDTH_BINS,
+    angle_fft_size: int = DEFAULT_STATIC_ANGLE_FFT_SIZE,
+) -> np.ndarray:
+    """Return changed static reflectors as XYZ, magnitude dB, and change dB."""
+    if max_points <= 0:
+        return np.empty((0, 5), dtype=np.float32)
+
+    power_cube = compute_static_angle_power(
+        doppler_cube,
+        config,
+        doppler_half_width_bins=doppler_half_width_bins,
+        angle_fft_size=angle_fft_size,
+    )
+    if power_cube.size == 0:
+        return np.empty((0, 5), dtype=np.float32)
+    change_db = scene_map.observe(power_cube)
+    if change_db is None:
+        return np.empty((0, 5), dtype=np.float32)
+
+    range_bins = power_cube.shape[0]
+    physical_range_axis = (
+        np.asarray(range_axis, dtype=np.float64)
+        if range_axis is not None and range_axis.size == range_bins
+        else np.arange(range_bins, dtype=np.float64)
+    )
+    valid_ranges = physical_range_axis >= max(float(min_range_m), 0.0)
+    if range_axis is None or range_axis.size != range_bins:
+        valid_ranges[0] = False
+    if max_range_m > 0.0:
+        valid_ranges &= physical_range_axis <= max_range_m
+
+    azimuth_bins = np.arange(angle_fft_size)
+    elevation_bins = np.arange(angle_fft_size)
+    azimuth_u = _spatial_bins_to_direction_cosines(
+        azimuth_bins,
+        angle_fft_size,
+    )
+    elevation_u = _spatial_bins_to_direction_cosines(
+        elevation_bins,
+        angle_fft_size,
+    )
+    elevation_grid, azimuth_grid = np.meshgrid(
+        elevation_u,
+        azimuth_u,
+        indexing="ij",
+    )
+    direction_norm_sq = azimuth_grid**2 + elevation_grid**2
+    valid_angles = direction_norm_sq <= 1.0
+    valid_angles &= (
+        np.abs(azimuth_grid)
+        <= np.sin(np.deg2rad(np.clip(azimuth_fov_deg, 0.0, 90.0))) + 1e-9
+    )
+    valid_angles &= (
+        np.abs(elevation_grid)
+        <= np.sin(np.deg2rad(np.clip(elevation_fov_deg, 0.0, 90.0))) + 1e-9
+    )
+
+    detections = (change_db > 0.0) & (
+        change_db >= scene_map.minimum_change_db
+    )
+    detections &= _local_maxima_3d(change_db)
+    detections &= valid_ranges[:, np.newaxis, np.newaxis]
+    detections &= valid_angles[np.newaxis, :, :]
+    candidate_indices = np.argwhere(detections)
+    if candidate_indices.size == 0:
+        return np.empty((0, 5), dtype=np.float32)
+
+    candidate_changes = change_db[tuple(candidate_indices.T)]
+    order = np.argsort(candidate_changes)[::-1][:max_points]
+    candidate_indices = candidate_indices[order]
+    candidate_changes = candidate_changes[order]
+
+    selected_ranges = physical_range_axis[candidate_indices[:, 0]]
+    selected_elevation_u = elevation_u[candidate_indices[:, 1]]
+    selected_azimuth_u = azimuth_u[candidate_indices[:, 2]]
+    radial_scale = np.sqrt(
+        np.maximum(
+            0.0,
+            1.0 - selected_azimuth_u**2 - selected_elevation_u**2,
+        )
+    )
+    xyz_m = np.column_stack(
+        (
+            selected_ranges * selected_azimuth_u,
+            selected_ranges * radial_scale,
+            -selected_ranges * selected_elevation_u,
+        )
+    )
+    selected_power = power_cube[tuple(candidate_indices.T)]
+    magnitude_db = 10.0 * np.log10(selected_power + 1e-12)
+    return np.column_stack(
+        (xyz_m, magnitude_db, candidate_changes)
+    ).astype(np.float32, copy=False)
+
+
+def _local_maxima_3d(values: np.ndarray) -> np.ndarray:
+    """Return non-wrapping 3x3x3 local maxima for a three-dimensional cube."""
+    if values.ndim != 3 or values.size == 0:
+        return np.zeros_like(values, dtype=bool)
+
+    padded = np.pad(
+        values,
+        ((1, 1), (1, 1), (1, 1)),
+        mode="constant",
+        constant_values=-np.inf,
+    )
+    local_maximum = np.full_like(values, -np.inf)
+    for range_offset in range(3):
+        for elevation_offset in range(3):
+            for azimuth_offset in range(3):
+                local_maximum = np.maximum(
+                    local_maximum,
+                    padded[
+                        range_offset : range_offset + values.shape[0],
+                        elevation_offset : elevation_offset + values.shape[1],
+                        azimuth_offset : azimuth_offset + values.shape[2],
+                    ],
+                )
+    return values >= local_maximum
 
 
 def compute_micro_doppler_spectrum(

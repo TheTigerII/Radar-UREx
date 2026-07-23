@@ -31,6 +31,9 @@ DEFAULT_CLUSTER_MIN_SAMPLES = 2
 DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
 DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
+DEFAULT_STATIC_DETECTION = True
+DEFAULT_STATIC_REFERENCE_FRAMES = 30
+DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
 DISPLAY_CHOICES = (
     "none",
     "range",
@@ -127,6 +130,27 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
         help="Minimum target-to-background power ratio. Defaults to 6 dB.",
+    )
+    parser.add_argument(
+        "--static-detection",
+        action=argparse.BooleanOptionalAction,
+        default=DEFAULT_STATIC_DETECTION,
+        help=(
+            "Detect stationary changes against a frozen startup reference. "
+            "Enabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--static-reference-frames",
+        type=int,
+        default=DEFAULT_STATIC_REFERENCE_FRAMES,
+        help="Processed updates used for static-scene calibration. Defaults to 30.",
+    )
+    parser.add_argument(
+        "--static-min-change-db",
+        type=float,
+        default=DEFAULT_STATIC_MIN_CHANGE_DB,
+        help="Minimum static target-to-reference change. Defaults to 6 dB.",
     )
     parser.add_argument(
         "--duration-minutes",
@@ -406,6 +430,15 @@ def build_capture_command(
         str(max(args.clutter_map_warmup_frames, 1)),
         "--clutter-map-min-snr-db",
         str(max(args.clutter_map_min_snr_db, 0.0)),
+        (
+            "--static-detection"
+            if args.static_detection
+            else "--no-static-detection"
+        ),
+        "--static-reference-frames",
+        str(max(args.static_reference_frames, 1)),
+        "--static-min-change-db",
+        str(max(args.static_min_change_db, 0.0)),
         "--processed-output",
         str(processed_output),
     ]

@@ -7,12 +7,15 @@ import numpy as np
 
 from rawdatacapture.dsp import (
     AdaptiveClutterMap,
+    StaticSceneMap,
     build_virtual_antenna_grid,
     build_virtual_antenna_grids,
     cluster_point_cloud,
     compute_micro_doppler_spectrum,
     compute_per_tx_micro_doppler_spectrogram,
     compute_point_cloud,
+    compute_static_angle_power,
+    compute_static_point_cloud,
     doppler_peak_mask,
     estimate_xyz_from_virtual_array,
     estimate_xyz_from_virtual_arrays,
@@ -70,6 +73,101 @@ class AdaptiveClutterMapTests(unittest.TestCase):
 
         np.testing.assert_array_equal(clutter.normalize(np.ones((3, 2))), 0.0)
         self.assertFalse(clutter.is_ready)
+
+
+class StaticSceneMapTests(unittest.TestCase):
+    def test_frozen_reference_preserves_new_static_change(self) -> None:
+        scene = StaticSceneMap(reference_frames=2, minimum_change_db=6.0)
+        background = np.full((3, 4, 5), 10.0, dtype=np.float32)
+
+        self.assertIsNone(scene.observe(background))
+        self.assertIsNone(scene.observe(background))
+        self.assertTrue(scene.is_ready)
+
+        unchanged = scene.observe(background)
+        assert unchanged is not None
+        np.testing.assert_allclose(unchanged, 0.0)
+
+        changed = background.copy()
+        changed[1, 2, 3] = 100.0
+        change_db = scene.observe(changed)
+        assert change_db is not None
+        self.assertAlmostEqual(float(change_db[1, 2, 3]), 10.0, places=5)
+
+        repeated_change_db = scene.observe(changed)
+        assert repeated_change_db is not None
+        self.assertAlmostEqual(
+            float(repeated_change_db[1, 2, 3]),
+            10.0,
+            places=5,
+        )
+
+    def test_target_present_during_calibration_is_part_of_reference(self) -> None:
+        scene = StaticSceneMap(reference_frames=3)
+        occupied_scene = np.ones((2, 3, 4), dtype=np.float32)
+        occupied_scene[1, 1, 2] = 20.0
+
+        for _ in range(3):
+            self.assertIsNone(scene.observe(occupied_scene))
+
+        change_db = scene.observe(occupied_scene)
+
+        assert change_db is not None
+        np.testing.assert_allclose(change_db, 0.0)
+
+    def test_static_angle_power_integrates_centered_doppler_neighbors(self) -> None:
+        config = SimpleNamespace(tx_channel_masks=(1,))
+        doppler_cube = np.zeros((8, 1, 2, 5), dtype=np.complex64)
+        doppler_cube[3:6] = 1.0
+
+        power = compute_static_angle_power(
+            doppler_cube,
+            config,
+            doppler_half_width_bins=1,
+            angle_fft_size=8,
+        )
+
+        self.assertEqual(power.shape, (5, 8, 8))
+        self.assertGreater(float(np.max(power)), 0.0)
+
+    def test_static_points_separate_changes_at_same_range_by_angle(self) -> None:
+        config = SimpleNamespace(tx_channel_masks=(1,))
+        scene = StaticSceneMap(reference_frames=1, minimum_change_db=6.0)
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+        range_axis = np.arange(5, dtype=np.float32)
+        background = np.ones((5, 8, 8), dtype=np.float32)
+        changed = background.copy()
+        changed[2, 4, 2] = 10.0
+        changed[2, 4, 6] = 20.0
+
+        with patch(
+            "rawdatacapture.dsp.compute_static_angle_power",
+            side_effect=(background, changed),
+        ):
+            calibration_points = compute_static_point_cloud(
+                doppler_cube,
+                range_axis,
+                config,
+                scene,
+                angle_fft_size=8,
+                azimuth_fov_deg=90.0,
+                elevation_fov_deg=90.0,
+            )
+            points = compute_static_point_cloud(
+                doppler_cube,
+                range_axis,
+                config,
+                scene,
+                angle_fft_size=8,
+                azimuth_fov_deg=90.0,
+                elevation_fov_deg=90.0,
+            )
+
+        self.assertEqual(calibration_points.shape, (0, 5))
+        self.assertEqual(points.shape, (2, 5))
+        np.testing.assert_allclose(points[:, 1], np.sqrt(3.0), atol=1e-6)
+        np.testing.assert_allclose(np.sort(points[:, 0]), (-1.0, 1.0))
+        np.testing.assert_allclose(points[:, 2], 0.0)
 
     def test_point_detection_uses_normalized_power_and_updates_map(self) -> None:
         doppler_cube = np.full((5, 1, 1, 8), 2.0, dtype=np.complex64)
@@ -335,6 +433,24 @@ class MicroDopplerSpectrumTests(unittest.TestCase):
             10.0 * np.log10(6.0),
             places=6,
         )
+
+    def test_explicit_static_target_keeps_centered_zero_doppler_bin(self) -> None:
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+        doppler_cube[4, 0, 0, 2] = 10.0
+        doppler_cube[1, 0, 0, 4] = 20.0
+        range_axis = np.arange(5, dtype=np.float32)
+
+        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
+            doppler_cube,
+            range_axis,
+            target_range_m=2.0,
+            range_half_width_bins=0,
+            min_range_m=1.0,
+            max_range_m=4.0,
+        )
+
+        self.assertEqual(selected_range_m, 2.0)
+        self.assertEqual(int(np.argmax(spectrum_db)), 4)
 
     def test_per_tx_stft_uses_64_loop_window_and_32_loop_hop(self) -> None:
         loop_count = 128
