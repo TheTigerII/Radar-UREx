@@ -274,8 +274,9 @@ the complete history through the latest-only display queue prevents GUI queue
 replacement from creating holes in the visible spectrogram. The spectrogram
 follows the selected target by spatial continuity rather than the dynamic or
 static source label. History remains frozen through gaps of up to 30 processed
-updates and continues across a dynamic-to-static handoff within 0.75 m. A
-newly selected target beyond that gate or after a longer gap starts fresh
+updates and continues during uninterrupted motion regardless of displacement.
+A dynamic-to-static handoff also retains history. After a selection gap, a
+reacquired target beyond 0.75 m or a gap longer than 30 updates starts fresh
 history. An explicit static gate retains the centered zero-Doppler bin. The
 Matplotlib image uses a visible-spectrum `turbo` color map, running from dark
 blue at the fixed 60 dB minimum to red at the fixed 120 dB maximum rather than
@@ -286,7 +287,10 @@ and micro-Doppler axes, with a spacer on its right so it does not crowd the
 spectrogram's Doppler-axis label. Both plot titles report measured updates per
 second. Supported Matplotlib backends use artist-level blitting for the dynamic
 scatters, spectrogram, and titles so the static 3D axes and colorbar do not
-require a full redraw every update.
+require a full redraw every update. The combined display renders micro-Doppler
+for every consumed payload but updates the more expensive 3D collections every
+second payload. The 3D collections disable depth shading to avoid redundant
+color processing and preserve the shared magnitude scale.
 
 ## Processed and Raw Recording
 

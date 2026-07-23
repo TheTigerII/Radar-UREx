@@ -19,6 +19,7 @@ from rawdatacapture.livedatacapture import (
     CapturedFrame,
     CombinedDisplayPayload,
     COMBINED_DISPLAY_MODE,
+    COMBINED_POINT_CLOUD_UPDATE_EVERY,
     DEFAULT_CLUSTER_EPS_M,
     DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
@@ -42,6 +43,7 @@ from rawdatacapture.livedatacapture import (
     TargetTrack,
     UdpPacketReceiver,
     _capture_error_counts,
+    _combined_point_cloud_update_due,
     _draw_point_cloud,
     _draw_micro_doppler,
     _point_cloud_track_candidates,
@@ -1291,7 +1293,39 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         self.assertEqual(handoff.point_cloud.target_source, "static")
         self.assertEqual(len(sink.micro_doppler_history), 6)
 
-    def test_micro_doppler_history_resets_for_distant_target(self) -> None:
+    def test_micro_doppler_history_survives_continuous_large_motion(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+            static_detection=False,
+        )
+        first_track = TargetTrack(
+            (0.0, 2.0, 0.0),
+            (0.0, 0.0, 0.0),
+            4,
+            4,
+            0,
+            True,
+        )
+        moved_track = TargetTrack(
+            (0.0, 3.0, 0.0),
+            (0.0, 0.0, 0.0),
+            5,
+            5,
+            0,
+            True,
+        )
+        spectrum = np.ones(4, dtype=np.float32)
+
+        self.assertFalse(sink._update_micro_doppler_history_owner(first_track))
+        sink.micro_doppler_history.append(spectrum)
+
+        self.assertFalse(sink._update_micro_doppler_history_owner(moved_track))
+        self.assertEqual(len(sink.micro_doppler_history), 1)
+
+    def test_micro_doppler_history_resets_for_distant_reacquisition(self) -> None:
         sink = DisplayPayloadSink(
             COMBINED_DISPLAY_MODE,
             1,
@@ -1319,6 +1353,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         self.assertFalse(sink._update_micro_doppler_history_owner(first_track))
         sink.micro_doppler_history.extend(spectra[:, index] for index in range(3))
+        self.assertFalse(sink._update_micro_doppler_history_owner(None))
 
         self.assertTrue(sink._update_micro_doppler_history_owner(distant_track))
         self.assertEqual(len(sink.micro_doppler_history), 0)
@@ -1418,6 +1453,16 @@ class MicroDopplerDisplayTests(unittest.TestCase):
 
     def test_shared_magnitude_colorbar_starts_at_sixty_db(self) -> None:
         self.assertEqual(POINT_CLOUD_MAGNITUDE_DB_MIN, 60.0)
+
+    def test_combined_point_cloud_uses_half_rate_rendering(self) -> None:
+        self.assertEqual(COMBINED_POINT_CLOUD_UPDATE_EVERY, 2)
+        self.assertEqual(
+            [
+                _combined_point_cloud_update_due(update_count)
+                for update_count in range(1, 6)
+            ],
+            [True, False, True, False, True],
+        )
 
     def test_live_history_keeps_150_stft_windows(self) -> None:
         self.assertEqual(MICRO_DOPPLER_HISTORY_UPDATES, 150)

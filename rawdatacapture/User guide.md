@@ -304,14 +304,18 @@ the fixed 60 dB minimum to red at the fixed 120 dB maximum, matching the 3D
 point cloud so colors remain comparable between updates and the two plots.
 One shared magnitude colorbar sits between both plots. Spectrogram history
 remains frozen through target-selection gaps of up to 30 processed updates and
-continues across a nearby dynamic-to-static handoff. It starts fresh when the
-next selected target is more than 0.75 m from the previous target position or
-the gap exceeds 30 updates, preventing different objects from sharing one
-visible history.
+continues across uninterrupted motion and a nearby dynamic-to-static handoff.
+After a selection gap, it starts fresh when the reacquired target is more than
+0.75 m from the previous target position or the gap exceeds 30 updates,
+preventing different objects from sharing one visible history.
 
 The plot titles show their measured refresh rate. On Matplotlib backends that
 support it, the combined view blits only the changing scatter, image, and title
 artists rather than redrawing the full 3D axes and colorbar for every frame.
+The micro-Doppler panel renders every available display payload, while the
+more expensive 3D panel renders every second payload. Its depth shading is
+disabled so the fixed magnitude colors remain unchanged and the GUI can keep
+up with the radar stream.
 
 ### Display performance
 

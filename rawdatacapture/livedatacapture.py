@@ -92,6 +92,7 @@ DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
+COMBINED_POINT_CLOUD_UPDATE_EVERY = 2
 MICRO_DOPPLER_HISTORY_UPDATES = 150
 MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
 MICRO_DOPPLER_WINDOW_LOOPS = 64
@@ -1370,7 +1371,11 @@ class DisplayPayloadSink:
         )
         owner_position_m = self.micro_doppler_history_target_position_m
         target_changed = False
-        if owner_position_m is not None:
+        reacquired_after_gap = (
+            owner_position_m is not None
+            and self.micro_doppler_history_gap_updates > 0
+        )
+        if reacquired_after_gap:
             gap_expired = (
                 self.micro_doppler_history_gap_updates
                 > MICRO_DOPPLER_HISTORY_MAX_GAP_UPDATES
@@ -1820,7 +1825,15 @@ def _run_display_process(
         axis.set_xlabel("Range (m)")
         axis.set_ylabel("Doppler bin")
     elif mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
-        scatter = axis.scatter([], [], [], c=[], s=18, cmap=MAGNITUDE_COLORMAP)
+        scatter = axis.scatter(
+            [],
+            [],
+            [],
+            c=[],
+            s=18,
+            cmap=MAGNITUDE_COLORMAP,
+            depthshade=False,
+        )
         scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
         cluster_scatter = axis.scatter(
             [],
@@ -1831,6 +1844,7 @@ def _run_display_process(
             s=70,
             linewidths=2,
             label="Cluster centers",
+            depthshade=False,
         )
         static_scatter = axis.scatter(
             [],
@@ -1842,6 +1856,7 @@ def _run_display_process(
             edgecolors="black",
             linewidths=0.4,
             label="Static changes",
+            depthshade=False,
         )
         static_cluster_scatter = axis.scatter(
             [],
@@ -1853,6 +1868,7 @@ def _run_display_process(
             edgecolors="black",
             linewidths=0.8,
             label="Static clusters",
+            depthshade=False,
         )
         target_scatter = axis.scatter(
             [],
@@ -1864,6 +1880,7 @@ def _run_display_process(
             s=180,
             linewidths=0.8,
             label="Tracked target",
+            depthshade=False,
         )
         axis.set_title(
             "Live 3D Point Cloud "
@@ -1994,16 +2011,22 @@ def _run_display_process(
         for dynamic_axis in dynamic_axes
     }
 
-    def draw_dynamic_artists() -> None:
+    def draw_dynamic_artists(
+        axes_to_draw: Optional[tuple[Any, ...]] = None,
+    ) -> None:
         for artist in dynamic_artists:
             if not artist.get_visible():
+                continue
+            if axes_to_draw is not None and artist.axes not in axes_to_draw:
                 continue
             if hasattr(artist, "do_3d_projection"):
                 artist.do_3d_projection()
             artist.axes.draw_artist(artist)
 
-    def blit_dynamic_axes() -> None:
-        for dynamic_axis in dynamic_axes:
+    def blit_dynamic_axes(
+        axes_to_blit: Optional[tuple[Any, ...]] = None,
+    ) -> None:
+        for dynamic_axis in axes_to_blit or dynamic_axes:
             figure.canvas.blit(dynamic_axis.bbox)
 
     def invalidate_display_background(_event: Any) -> None:
@@ -2028,10 +2051,15 @@ def _run_display_process(
     figure.canvas.mpl_connect("draw_event", restore_dynamic_artists_after_draw)
     display_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
     display_refresh_rate_hz: Optional[float] = None
+    point_cloud_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
+    point_cloud_refresh_rate_hz: Optional[float] = None
+    combined_update_count = 0
 
     try:
         while not stop_event.is_set():
             refreshed_payload = False
+            point_cloud_refreshed = False
+            axes_to_refresh = dynamic_axes
             try:
                 payload = payload_queue.get(timeout=pause_seconds)
                 stale_payloads = 0
@@ -2042,12 +2070,6 @@ def _run_display_process(
                     except queue.Empty:
                         break
                 _increment_shared_counter(skipped_updates, stale_payloads)
-
-                if point_cloud_rate_text is not None:
-                    _set_rate_indicator(
-                        point_cloud_rate_text,
-                        display_refresh_rate_hz,
-                    )
 
                 if mode == "range" and line is not None:
                     range_axis_m, range_profile = payload
@@ -2078,42 +2100,10 @@ def _run_display_process(
                     and target_scatter is not None
                 ):
                     point_cloud = payload
-                    _draw_point_cloud(
-                        axis,
-                        scatter,
-                        cluster_scatter,
-                        point_cloud.points,
-                        point_cloud.clusters,
-                        point_cloud_range_m,
-                        point_cloud_fov_deg,
-                        target_scatter,
-                        point_cloud.target_track,
-                        static_scatter=static_scatter,
-                        static_cluster_scatter=static_cluster_scatter,
-                        static_points=point_cloud.static_points,
-                        static_clusters=point_cloud.static_clusters,
-                        static_reference_text=static_reference_text,
-                        static_reference=point_cloud.static_reference,
-                        target_source=point_cloud.target_source,
-                        update_static_artists=False,
-                    )
-                elif (
-                    mode == COMBINED_DISPLAY_MODE
-                    and scatter is not None
-                    and cluster_scatter is not None
-                    and static_scatter is not None
-                    and static_cluster_scatter is not None
-                    and target_scatter is not None
-                    and micro_doppler_axis is not None
-                    and micro_doppler_image is not None
-                ):
-                    combined = payload
-                    point_cloud = combined.point_cloud
-                    if micro_doppler_rate_text is not None:
+                    if point_cloud_rate_text is not None:
                         _set_rate_indicator(
-                            micro_doppler_rate_text,
+                            point_cloud_rate_text,
                             display_refresh_rate_hz,
-                            range_gate_m=combined.selected_range_m,
                         )
                     _draw_point_cloud(
                         axis,
@@ -2134,6 +2124,56 @@ def _run_display_process(
                         target_source=point_cloud.target_source,
                         update_static_artists=False,
                     )
+                    point_cloud_refreshed = True
+                elif (
+                    mode == COMBINED_DISPLAY_MODE
+                    and scatter is not None
+                    and cluster_scatter is not None
+                    and static_scatter is not None
+                    and static_cluster_scatter is not None
+                    and target_scatter is not None
+                    and micro_doppler_axis is not None
+                    and micro_doppler_image is not None
+                ):
+                    combined = payload
+                    point_cloud = combined.point_cloud
+                    combined_update_count += 1
+                    point_cloud_refreshed = (
+                        _combined_point_cloud_update_due(combined_update_count)
+                    )
+                    if point_cloud_refreshed:
+                        if point_cloud_rate_text is not None:
+                            _set_rate_indicator(
+                                point_cloud_rate_text,
+                                point_cloud_refresh_rate_hz,
+                            )
+                        _draw_point_cloud(
+                            axis,
+                            scatter,
+                            cluster_scatter,
+                            point_cloud.points,
+                            point_cloud.clusters,
+                            point_cloud_range_m,
+                            point_cloud_fov_deg,
+                            target_scatter,
+                            point_cloud.target_track,
+                            static_scatter=static_scatter,
+                            static_cluster_scatter=static_cluster_scatter,
+                            static_points=point_cloud.static_points,
+                            static_clusters=point_cloud.static_clusters,
+                            static_reference_text=static_reference_text,
+                            static_reference=point_cloud.static_reference,
+                            target_source=point_cloud.target_source,
+                            update_static_artists=False,
+                        )
+                    else:
+                        axes_to_refresh = (micro_doppler_axis,)
+                    if micro_doppler_rate_text is not None:
+                        _set_rate_indicator(
+                            micro_doppler_rate_text,
+                            display_refresh_rate_hz,
+                            range_gate_m=combined.selected_range_m,
+                        )
                     _draw_micro_doppler(
                         micro_doppler_axis,
                         micro_doppler_image,
@@ -2153,10 +2193,12 @@ def _run_display_process(
                             )
                             for dynamic_axis in dynamic_axes
                         )
-                    for dynamic_axis, background in display_backgrounds.items():
-                        figure.canvas.restore_region(background)
-                    draw_dynamic_artists()
-                    blit_dynamic_axes()
+                    for dynamic_axis in axes_to_refresh:
+                        figure.canvas.restore_region(
+                            display_backgrounds[dynamic_axis]
+                        )
+                    draw_dynamic_artists(axes_to_refresh)
+                    blit_dynamic_axes(axes_to_refresh)
                     figure.canvas.flush_events()
                     figure.stale = False
                 else:
@@ -2168,6 +2210,12 @@ def _run_display_process(
                     refreshed_at_s,
                     1.0,
                 )
+                if point_cloud_refreshed:
+                    point_cloud_refresh_rate_hz = _record_event_rate(
+                        point_cloud_rate_events,
+                        refreshed_at_s,
+                        1.0,
+                    )
                 _increment_shared_counter(rendered_updates)
                 refreshed_payload = True
             except queue.Empty:
@@ -2203,6 +2251,14 @@ def _record_event_rate(
     if elapsed_s <= 0.0:
         return None
     return sum(units for _timestamp_s, units in tuple(events)[1:]) / elapsed_s
+
+
+def _combined_point_cloud_update_due(update_count: int) -> bool:
+    """Return whether the combined display should redraw its 3D panel."""
+    return (
+        update_count > 0
+        and (update_count - 1) % COMBINED_POINT_CLOUD_UPDATE_EVERY == 0
+    )
 
 
 def _set_rate_indicator(
