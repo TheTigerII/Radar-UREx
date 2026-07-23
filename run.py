@@ -36,7 +36,7 @@ DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_REFERENCE_FRAMES = 90
 DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
-DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 3
+DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 DISPLAY_CHOICES = (
     "none",
     "range",
@@ -172,7 +172,11 @@ def parse_args() -> argparse.Namespace:
         "--static-cluster-min-samples",
         type=int,
         default=DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
-        help="Minimum points in a static handoff cluster. Defaults to 3.",
+        help=(
+            "Minimum same-frame points in a static handoff cluster. "
+            "Defaults to 1; temporal tracking still requires 3 consecutive "
+            "associated updates."
+        ),
     )
     parser.add_argument(
         "--duration-minutes",

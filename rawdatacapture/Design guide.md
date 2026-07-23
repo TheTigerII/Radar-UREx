@@ -233,16 +233,18 @@ conversion and DBSCAN. Returned raw candidates are
 `[x, y, z, magnitude_db, change_db]`.
 
 Raw static candidates are diagnostic activity, not targets. The static tracker
-receives only DBSCAN clusters containing at least three points, never isolated
-point fallbacks. A cluster can start a static track only when a confirmed
-dynamic track moved at least 0.3 m within the preceding 30 processed frames,
-the cluster is within 0.75 m of the last dynamic position, and it persists for
-three consecutive frames. Handoff remains eligible for 60 frames. The selected
-target's range, azimuth, and elevation cells are protected by ±2 bins while
-validated; motion-only protection is released after 30 consecutive misses.
-The static tracker also releases after 30 misses, allowing removed objects to
-be absorbed into the adaptive map. Only the exact DBSCAN members of the
-validated target are displayed and saved. All suppressed raw activity is
+receives DBSCAN clusters with a default minimum of one point because the 3D
+local-maximum pass has already reduced a reflector to one spatial candidate.
+A cluster can start a static track only when a confirmed dynamic track moved
+at least 0.3 m within the preceding 30 processed frames, the cluster is within
+0.75 m of the last dynamic position, and it remains associated for three
+consecutive frames. Deployments can restore stricter same-frame density with
+`--static-cluster-min-samples 3`. Handoff remains eligible for 60 frames. The
+selected target's range, azimuth, and elevation cells are protected by ±2 bins
+while validated; motion-only protection is released after 30 consecutive
+misses. The static tracker also releases after 30 misses, allowing removed
+objects to be absorbed into the adaptive map. Only the exact DBSCAN members of
+the validated target are displayed and saved. All suppressed raw activity is
 reported separately as `static_candidate_count`.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
@@ -270,12 +272,15 @@ calibration. A 128-loop frame produces three short-time spectra. Each spectrum
 is appended to a 150-window history in the frame-processing process. Sending
 the complete history through the latest-only display queue prevents GUI queue
 replacement from creating holes in the visible spectrogram. The spectrogram
-follows the selected track while its association remains valid. History is
-cleared when the target source changes or the track is lost. An explicit static
-gate retains the centered zero-Doppler bin. The Matplotlib image uses a
-visible-spectrum `turbo` color map, running from dark blue at the fixed
-40 dB minimum to red at the fixed 120 dB maximum rather than rescaling each
-history update. The combined layout uses one shared magnitude colorbar for both axes.
+follows the selected target by spatial continuity rather than the dynamic or
+static source label. History remains frozen through gaps of up to 30 processed
+updates and continues across a dynamic-to-static handoff within 0.75 m. A
+newly selected target beyond that gate or after a longer gap starts fresh
+history. An explicit static gate retains the centered zero-Doppler bin. The
+Matplotlib image uses a visible-spectrum `turbo` color map, running from dark
+blue at the fixed 60 dB minimum to red at the fixed 120 dB maximum rather than
+rescaling each history update. The combined layout uses one shared magnitude
+colorbar for both axes.
 The colorbar occupies a dedicated narrow grid column between the point cloud
 and micro-Doppler axes, with a spacer on its right so it does not crowd the
 spectrogram's Doppler-axis label. Both plot titles report measured updates per

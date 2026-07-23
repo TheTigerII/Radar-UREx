@@ -218,14 +218,15 @@ drift.
 
 Raw changes do not become displayed static targets by themselves. A confirmed
 dynamic track must move at least 0.3 m during the preceding 30 frames. For the
-next 60 frames, a static cluster can take over only if it contains at least
-three points, is within 0.75 m of the last dynamic position, and persists for
-three consecutive frames. The validated target is protected by ±2 range,
-azimuth, and elevation cells and remains visible after stopping. Protection is
-released after 30 consecutive misses so removed targets are eventually
-absorbed. Only the exact points in the validated cluster are shown as orange
-squares; its center is shown as a cyan diamond. Isolated and static-only
-clutter is suppressed.
+next 60 frames, a static local maximum or cluster can take over only if it is
+within 0.75 m of the last dynamic position and remains associated for three
+consecutive frames. One point is sufficient in each frame by default because
+local-maximum filtering has already reduced a reflector to one candidate.
+The validated target is protected by ±2 range, azimuth, and elevation cells
+and remains visible after stopping. Protection is released after 30
+consecutive misses so removed targets are eventually absorbed. Only the exact
+points in the validated cluster are shown as orange squares; its center is
+shown as a cyan diamond. Transient and static-only clutter is suppressed.
 
 Static angle processing remains full rate: it runs for every processed
 point-cloud update with the complete 32-by-32 angle FFT. Temporal smoothing
@@ -265,7 +266,9 @@ Use `--static-warmup-frames`, `--static-reference-frames`,
 `--static-background-update-rate`, `--static-cluster-min-samples`, and
 `--static-min-change-db` to tune calibration, adaptation, validation, and the
 absolute sensitivity floor. Defaults are 30 warm-up frames, 90 reference
-frames, a 0.01 adaptation rate, three cluster members, and 6 dB. The learned
+frames, a 0.01 adaptation rate, one same-frame cluster member, and 6 dB. Set
+`--static-cluster-min-samples 3` to require three spatially adjacent candidates
+in every update in addition to temporal confirmation. The learned
 noise threshold can make the effective threshold higher in unstable cells.
 Disable the static branch without changing the moving-target path with:
 
@@ -297,11 +300,14 @@ current gate range is shown in the spectrogram title.
 The horizontal spectrogram axis is measured in STFT windows, with the newest
 column at zero. The vertical axis is centered Doppler bin because velocity is
 not yet calibrated. Its visible-spectrum `turbo` scale runs from dark blue at
-the fixed 40 dB minimum to red at the fixed 120 dB maximum, matching the 3D
+the fixed 60 dB minimum to red at the fixed 120 dB maximum, matching the 3D
 point cloud so colors remain comparable between updates and the two plots.
-One shared magnitude colorbar sits between both plots. Spectrogram history is
-cleared when the selected track is lost or changes between the static and
-dynamic sources, preventing two objects from sharing one visible history.
+One shared magnitude colorbar sits between both plots. Spectrogram history
+remains frozen through target-selection gaps of up to 30 processed updates and
+continues across a nearby dynamic-to-static handoff. It starts fresh when the
+next selected target is more than 0.75 m from the previous target position or
+the gap exceeds 30 updates, preventing different objects from sharing one
+visible history.
 
 The plot titles show their measured refresh rate. On Matplotlib backends that
 support it, the combined view blits only the changing scatter, image, and title

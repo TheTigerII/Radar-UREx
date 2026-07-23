@@ -908,6 +908,154 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         self.assertEqual(payload.static_points.shape, (3, 5))
         self.assertFalse(np.any(payload.static_points[:, 3] == 120.0))
 
+    def test_single_static_maximum_requires_three_temporal_hits(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+        )
+        self.assertEqual(sink.static_cluster_min_samples, 1)
+        motion_handoff = Mock()
+        motion_handoff.update.return_value = np.asarray((0.0, 2.0, 0.0))
+        motion_handoff.protection_position_m = np.asarray((0.0, 2.0, 0.0))
+        sink.motion_handoff = motion_handoff
+        empty_points = np.empty((0, 4), dtype=np.float32)
+        static_point = np.asarray(
+            ((0.0, 2.0, 0.0, 70.0, 9.0),),
+            dtype=np.float32,
+        )
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                return_value=static_point,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=empty_points,
+            ),
+        ):
+            for _ in range(2):
+                payload, _cube = sink._compute_point_cloud_payload(
+                    np.empty((0,), dtype=np.complex64),
+                    np.arange(5),
+                )
+                self.assertIsNone(payload.target_source)
+                self.assertEqual(payload.static_validation, "handoff_pending")
+
+            payload, _cube = sink._compute_point_cloud_payload(
+                np.empty((0,), dtype=np.complex64),
+                np.arange(5),
+            )
+
+        self.assertEqual(payload.target_source, "static")
+        self.assertEqual(payload.static_validation, "validated")
+        self.assertEqual(payload.static_points.shape, (1, 5))
+        self.assertEqual(payload.static_clusters.shape, (1, 4))
+
+    def test_strict_static_cluster_override_rejects_single_maximum(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+            static_cluster_min_samples=3,
+        )
+        motion_handoff = Mock()
+        motion_handoff.update.return_value = np.asarray((0.0, 2.0, 0.0))
+        motion_handoff.protection_position_m = np.asarray((0.0, 2.0, 0.0))
+        sink.motion_handoff = motion_handoff
+        empty_points = np.empty((0, 4), dtype=np.float32)
+        static_point = np.asarray(
+            ((0.0, 2.0, 0.0, 70.0, 9.0),),
+            dtype=np.float32,
+        )
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                return_value=static_point,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=empty_points,
+            ),
+        ):
+            for _ in range(3):
+                payload, _cube = sink._compute_point_cloud_payload(
+                    np.empty((0,), dtype=np.complex64),
+                    np.arange(5),
+                )
+
+        self.assertIsNone(payload.target_source)
+        self.assertEqual(payload.static_validation, "handoff_pending")
+        self.assertEqual(payload.static_points.shape, (0, 5))
+
+    def test_static_maximum_outside_handoff_gate_is_rejected(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+        )
+        motion_handoff = Mock()
+        motion_handoff.update.return_value = np.asarray((0.0, 2.0, 0.0))
+        motion_handoff.protection_position_m = np.asarray((0.0, 2.0, 0.0))
+        sink.motion_handoff = motion_handoff
+        empty_points = np.empty((0, 4), dtype=np.float32)
+        static_point = np.asarray(
+            ((0.0, 3.0, 0.0, 70.0, 9.0),),
+            dtype=np.float32,
+        )
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                return_value=static_point,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=empty_points,
+            ),
+        ):
+            for _ in range(3):
+                payload, _cube = sink._compute_point_cloud_payload(
+                    np.empty((0,), dtype=np.complex64),
+                    np.arange(5),
+                )
+
+        self.assertIsNone(payload.target_source)
+        self.assertEqual(payload.static_validation, "handoff_pending")
+        self.assertEqual(payload.static_points.shape, (0, 5))
+
     def test_disabling_static_detection_skips_static_processing(self) -> None:
         sink = DisplayPayloadSink(
             "point-cloud",
@@ -985,7 +1133,90 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         self.assertEqual(static_point_cloud.call_count, 5)
 
-    def test_micro_doppler_history_resets_when_target_source_changes(self) -> None:
+    def test_micro_doppler_history_survives_brief_track_gap(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+            static_detection=False,
+        )
+        first_track = TargetTrack(
+            (0.0, 2.0, 0.0),
+            (0.0, 0.0, 0.0),
+            4,
+            4,
+            0,
+            True,
+        )
+        reacquired_track = TargetTrack(
+            (0.1, 2.1, 0.0),
+            (0.0, 0.0, 0.0),
+            3,
+            3,
+            0,
+            True,
+        )
+        empty_points = np.empty((0, 4), dtype=np.float32)
+        empty_static_points = np.empty((0, 5), dtype=np.float32)
+        status = StaticReferenceStatus(False, False, 0, 0)
+
+        def payload(track, source) -> PointCloudDisplayPayload:
+            return PointCloudDisplayPayload(
+                empty_points,
+                empty_points,
+                empty_static_points,
+                empty_points,
+                track,
+                source,
+                status,
+            )
+
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+        spectra = np.arange(12, dtype=np.float32).reshape(4, 3)
+        with (
+            patch.object(
+                sink,
+                "_compute_point_cloud_payload",
+                side_effect=(
+                    (payload(first_track, "dynamic"), doppler_cube),
+                    (payload(None, None), doppler_cube),
+                    (payload(reacquired_track, "dynamic"), doppler_cube),
+                ),
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
+                side_effect=(
+                    (np.ones(8, dtype=np.float32), 2.0),
+                    (np.ones(8, dtype=np.float32), 2.1),
+                ),
+            ),
+            patch(
+                "rawdatacapture.livedatacapture."
+                "compute_per_tx_micro_doppler_spectrogram",
+                return_value=spectra,
+            ),
+        ):
+            first = sink._compute_combined_payload(
+                np.empty((0,), dtype=np.complex64),
+                np.arange(5),
+            )
+            gap = sink._compute_combined_payload(
+                np.empty((0,), dtype=np.complex64),
+                np.arange(5),
+            )
+            resumed = sink._compute_combined_payload(
+                np.empty((0,), dtype=np.complex64),
+                np.arange(5),
+            )
+
+        self.assertEqual(first.point_cloud.target_source, "dynamic")
+        self.assertIsNone(gap.point_cloud.target_source)
+        self.assertEqual(gap.spectrogram_db.shape[1], 3)
+        self.assertEqual(resumed.point_cloud.target_source, "dynamic")
+        self.assertEqual(len(sink.micro_doppler_history), 6)
+
+    def test_micro_doppler_history_survives_nearby_static_handoff(self) -> None:
         sink = DisplayPayloadSink(
             COMBINED_DISPLAY_MODE,
             1,
@@ -1002,7 +1233,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
             True,
         )
         static_track = TargetTrack(
-            (0.0, 3.0, 0.0),
+            (0.1, 2.4, 0.0),
             (0.0, 0.0, 0.0),
             4,
             4,
@@ -1013,7 +1244,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         empty_static_points = np.empty((0, 5), dtype=np.float32)
         status = StaticReferenceStatus(False, False, 0, 0)
 
-        def payload(track: TargetTrack, source: str) -> PointCloudDisplayPayload:
+        def payload(track, source) -> PointCloudDisplayPayload:
             return PointCloudDisplayPayload(
                 empty_points,
                 empty_points,
@@ -1039,7 +1270,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
                 side_effect=(
                     (np.ones(8, dtype=np.float32), 2.0),
-                    (np.ones(8, dtype=np.float32), 3.0),
+                    (np.ones(8, dtype=np.float32), 2.4),
                 ),
             ),
             patch(
@@ -1048,18 +1279,99 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 return_value=spectra,
             ),
         ):
-            first = sink._compute_combined_payload(
+            sink._compute_combined_payload(
                 np.empty((0,), dtype=np.complex64),
                 np.arange(5),
             )
-            second = sink._compute_combined_payload(
+            handoff = sink._compute_combined_payload(
                 np.empty((0,), dtype=np.complex64),
                 np.arange(5),
             )
 
-        self.assertEqual(first.point_cloud.target_source, "dynamic")
-        self.assertEqual(second.point_cloud.target_source, "static")
-        self.assertEqual(len(sink.micro_doppler_history), 3)
+        self.assertEqual(handoff.point_cloud.target_source, "static")
+        self.assertEqual(len(sink.micro_doppler_history), 6)
+
+    def test_micro_doppler_history_resets_for_distant_target(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+            static_detection=False,
+        )
+        first_track = TargetTrack(
+            (0.0, 2.0, 0.0),
+            (0.0, 0.0, 0.0),
+            4,
+            4,
+            0,
+            True,
+        )
+        distant_track = TargetTrack(
+            (0.0, 3.0, 0.0),
+            (0.0, 0.0, 0.0),
+            3,
+            3,
+            0,
+            True,
+        )
+        spectra = np.arange(12, dtype=np.float32).reshape(4, 3)
+
+        self.assertFalse(sink._update_micro_doppler_history_owner(first_track))
+        sink.micro_doppler_history.extend(spectra[:, index] for index in range(3))
+
+        self.assertTrue(sink._update_micro_doppler_history_owner(distant_track))
+        self.assertEqual(len(sink.micro_doppler_history), 0)
+
+    def test_micro_doppler_history_expires_after_long_gap(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+            static_detection=False,
+        )
+        track = TargetTrack(
+            (0.0, 2.0, 0.0),
+            (0.0, 0.0, 0.0),
+            4,
+            4,
+            0,
+            True,
+        )
+
+        self.assertFalse(sink._update_micro_doppler_history_owner(track))
+        sink.micro_doppler_history.append(np.ones(4, dtype=np.float32))
+        for _ in range(31):
+            self.assertFalse(sink._update_micro_doppler_history_owner(None))
+
+        self.assertTrue(sink._update_micro_doppler_history_owner(track))
+        self.assertEqual(len(sink.micro_doppler_history), 0)
+
+    def test_micro_doppler_history_accepts_thirty_update_gap(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+            static_detection=False,
+        )
+        track = TargetTrack(
+            (0.0, 2.0, 0.0),
+            (0.0, 0.0, 0.0),
+            4,
+            4,
+            0,
+            True,
+        )
+
+        self.assertFalse(sink._update_micro_doppler_history_owner(track))
+        sink.micro_doppler_history.append(np.ones(4, dtype=np.float32))
+        for _ in range(30):
+            self.assertFalse(sink._update_micro_doppler_history_owner(None))
+
+        self.assertFalse(sink._update_micro_doppler_history_owner(track))
+        self.assertEqual(len(sink.micro_doppler_history), 1)
 
 
 class RangeDisplayBoundsTests(unittest.TestCase):
@@ -1103,6 +1415,9 @@ class RangeDisplayBoundsTests(unittest.TestCase):
 class MicroDopplerDisplayTests(unittest.TestCase):
     def test_magnitude_colormap_runs_from_dark_blue_to_red(self) -> None:
         self.assertEqual(MAGNITUDE_COLORMAP, "turbo")
+
+    def test_shared_magnitude_colorbar_starts_at_sixty_db(self) -> None:
+        self.assertEqual(POINT_CLOUD_MAGNITUDE_DB_MIN, 60.0)
 
     def test_live_history_keeps_150_stft_windows(self) -> None:
         self.assertEqual(MICRO_DOPPLER_HISTORY_UPDATES, 150)

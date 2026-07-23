@@ -81,7 +81,7 @@ DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_REFERENCE_FRAMES = 90
 DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
-DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 3
+DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 STATIC_MOTION_HISTORY_UPDATES = 30
 STATIC_MOTION_MIN_DISPLACEMENT_M = 0.3
 STATIC_HANDOFF_WINDOW_UPDATES = 60
@@ -97,8 +97,12 @@ MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
 MICRO_DOPPLER_WINDOW_LOOPS = 64
 MICRO_DOPPLER_HOP_LOOPS = 32
 MICRO_DOPPLER_FFT_SIZE = 128
+MICRO_DOPPLER_HISTORY_MAX_GAP_UPDATES = 30
+MICRO_DOPPLER_HISTORY_ASSOCIATION_DISTANCE_M = (
+    DEFAULT_TRACK_ASSOCIATION_DISTANCE_M
+)
 MAGNITUDE_COLORMAP = "turbo"
-POINT_CLOUD_MAGNITUDE_DB_MIN = 40.0
+POINT_CLOUD_MAGNITUDE_DB_MIN = 60.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
 _LOG_FILE: Optional[TextIO] = None
@@ -992,7 +996,8 @@ class ProcessedOutputWriter:
                 ),
                 "validation_policy": (
                     "recent dynamic motion followed by a persistent nearby "
-                    "static cluster"
+                    "static local maximum or cluster across three associated "
+                    "updates"
                 ),
             },
             "micro_doppler_units": "dB power",
@@ -1190,8 +1195,9 @@ class DisplayPayloadSink:
         )
         # Retain the old attribute for callers that inspect the dynamic tracker.
         self.target_tracker = self.dynamic_target_tracker
-        self.active_target_source: Optional[str] = None
         self.micro_doppler_history = deque(maxlen=MICRO_DOPPLER_HISTORY_UPDATES)
+        self.micro_doppler_history_target_position_m: Optional[np.ndarray] = None
+        self.micro_doppler_history_gap_updates = 0
         self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
         self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
         self.frame_count = 0
@@ -1293,18 +1299,7 @@ class DisplayPayloadSink:
             range_axis_m,
         )
         target_track = point_cloud.target_track
-        target_source = point_cloud.target_source
-        selection_changed = target_source != self.active_target_source
-        if target_track is not None and target_track.age_updates == 1:
-            selection_changed = True
-        if selection_changed:
-            self.micro_doppler_history.clear()
-            self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
-            self.latest_micro_doppler_windows_db = np.empty(
-                (0, 0),
-                dtype=np.float32,
-            )
-        self.active_target_source = target_source
+        self._update_micro_doppler_history_owner(target_track)
 
         micro_doppler_started = time.perf_counter()
         selected_range_m = None
@@ -1358,6 +1353,47 @@ class DisplayPayloadSink:
             spectrogram_db=spectrogram_db,
             selected_range_m=selected_range_m,
         )
+
+    def _update_micro_doppler_history_owner(
+        self,
+        target_track: Optional[TargetTrack],
+    ) -> bool:
+        """Update history ownership and report a discontinuous target change."""
+        if target_track is None:
+            if self.micro_doppler_history_target_position_m is not None:
+                self.micro_doppler_history_gap_updates += 1
+            return False
+
+        target_position_m = np.asarray(
+            target_track.position_m,
+            dtype=np.float64,
+        )
+        owner_position_m = self.micro_doppler_history_target_position_m
+        target_changed = False
+        if owner_position_m is not None:
+            gap_expired = (
+                self.micro_doppler_history_gap_updates
+                > MICRO_DOPPLER_HISTORY_MAX_GAP_UPDATES
+            )
+            target_distance_m = float(
+                np.linalg.norm(target_position_m - owner_position_m)
+            )
+            target_changed = (
+                gap_expired
+                or target_distance_m
+                > MICRO_DOPPLER_HISTORY_ASSOCIATION_DISTANCE_M
+            )
+
+        if target_changed:
+            self.micro_doppler_history.clear()
+            self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
+            self.latest_micro_doppler_windows_db = np.empty(
+                (0, 0),
+                dtype=np.float32,
+            )
+        self.micro_doppler_history_target_position_m = target_position_m.copy()
+        self.micro_doppler_history_gap_updates = 0
+        return target_changed
 
     def _compute_point_cloud_payload(
         self,
@@ -2995,8 +3031,9 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
         help=(
-            "Minimum points in a static handoff cluster. "
-            f"Defaults to {DEFAULT_STATIC_CLUSTER_MIN_SAMPLES}."
+            "Minimum same-frame points in a static handoff cluster. "
+            f"Defaults to {DEFAULT_STATIC_CLUSTER_MIN_SAMPLES}; temporal "
+            "tracking still requires 3 consecutive associated updates."
         ),
     )
     return parser.parse_args()
