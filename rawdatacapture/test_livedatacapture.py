@@ -1,7 +1,9 @@
 import json
 import math
 import queue
+import socket
 import tempfile
+import threading
 import unittest
 from collections import deque
 from pathlib import Path
@@ -34,6 +36,7 @@ from rawdatacapture.livedatacapture import (
     RadarCaptureConfig,
     SingleTargetTracker,
     TargetTrack,
+    UdpPacketReceiver,
     _capture_error_counts,
     _draw_point_cloud,
     _draw_micro_doppler,
@@ -41,7 +44,11 @@ from rawdatacapture.livedatacapture import (
     _draw_range_doppler,
     _draw_range_profile,
     _point_cloud_range_limit_m,
+    _format_capture_summary,
+    _put_latest_queue_payload,
     _record_event_rate,
+    _report_new_error_stats,
+    _request_processor_stop,
     _set_rate_indicator,
     _set_point_cloud_axes,
     process_complete_frame,
@@ -77,6 +84,63 @@ class FrameBufferTests(unittest.TestCase):
         self.assertEqual(stats.stream_resyncs, 1)
         self.assertEqual(stats.byte_gap_bytes, 0)
         self.assertEqual(len(buffer.buffer), 0)
+
+    def test_memoryview_payload_is_assembled_without_a_slice_copy(self) -> None:
+        stats = CaptureStats()
+        buffer = FrameBuffer(bytes_per_frame=8, stats=stats)
+        packet = memoryview(b"abcdefgh")
+
+        frames = buffer.add_payload(DCA1000PacketHeader(1, 0), packet, 1.0)
+
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].data, b"abcdefgh")
+
+
+class _FakeDatagramSocket:
+    def __init__(self, packets: list[bytes]) -> None:
+        self.packets = deque(packets)
+        self.exhausted = threading.Event()
+
+    def recv(self, _buffer_size: int) -> bytes:
+        try:
+            return self.packets.popleft()
+        except IndexError:
+            self.exhausted.set()
+            raise socket.timeout
+
+
+class UdpPacketReceiverTests(unittest.TestCase):
+    def test_receiver_preserves_datagram_order(self) -> None:
+        sock = _FakeDatagramSocket([b"one", b"two", b"three"])
+        packet_queue = queue.Queue(maxsize=3)
+        stats = CaptureStats()
+        receiver = UdpPacketReceiver(sock, packet_queue, 65535, stats)
+
+        receiver.start()
+        self.assertTrue(sock.exhausted.wait(timeout=1.0))
+        receiver.stop()
+        receiver.join(timeout=1.0)
+
+        self.assertEqual(
+            [packet_queue.get_nowait()[0] for _ in range(3)],
+            [b"one", b"two", b"three"],
+        )
+        self.assertEqual(stats.receiver_queue_drops, 0)
+
+    def test_receiver_counts_bounded_queue_drops(self) -> None:
+        sock = _FakeDatagramSocket([b"dropped"])
+        packet_queue = queue.Queue(maxsize=1)
+        packet_queue.put_nowait((b"existing", 0.0))
+        stats = CaptureStats()
+        receiver = UdpPacketReceiver(sock, packet_queue, 65535, stats)
+
+        receiver.start()
+        self.assertTrue(sock.exhausted.wait(timeout=1.0))
+        receiver.stop()
+        receiver.join(timeout=1.0)
+
+        self.assertEqual(stats.receiver_queue_drops, 1)
+        self.assertEqual(packet_queue.get_nowait()[0], b"existing")
 
 
 class FrameDiagnosticsTests(unittest.TestCase):
@@ -132,6 +196,62 @@ class FrameDiagnosticsTests(unittest.TestCase):
             _capture_error_counts(initial),
             _capture_error_counts(later_success),
         )
+
+    def test_errors_are_reported_immediately_on_each_counter_change(self) -> None:
+        stats = CaptureStats()
+        reported = _capture_error_counts(stats)
+        emit_func = Mock()
+
+        stats.lost_packets = 2
+        reported = _report_new_error_stats(stats, reported, emit_func)
+        _report_new_error_stats(stats, reported, emit_func)
+        stats.receiver_queue_drops = 1
+        _report_new_error_stats(stats, reported, emit_func)
+
+        self.assertEqual(emit_func.call_count, 2)
+        self.assertIn("lost_packets=2", emit_func.call_args_list[0].args[0])
+        self.assertIn(
+            "receiver_queue_drops=1",
+            emit_func.call_args_list[1].args[0],
+        )
+
+    def test_capture_summary_separates_valid_and_queued_frames(self) -> None:
+        stats = CaptureStats(
+            frames_emitted=100,
+            invalid_frames=3,
+            processing_frames_dropped=2,
+        )
+
+        summary = _format_capture_summary(stats)
+
+        self.assertIn("valid_frames=97", summary)
+        self.assertIn("queued_frames=95", summary)
+
+    def test_graceful_processor_stop_does_not_discard_a_queued_frame(self) -> None:
+        frame_queue = queue.Queue(maxsize=1)
+        original_frame = object()
+        consumed = []
+        frame_queue.put_nowait(original_frame)
+
+        consumer = threading.Thread(
+            target=lambda: consumed.append(frame_queue.get(timeout=1.0))
+        )
+        consumer.start()
+
+        self.assertTrue(_request_processor_stop(frame_queue, timeout_seconds=1.0))
+        consumer.join(timeout=1.0)
+
+        self.assertEqual(consumed, [original_frame])
+        self.assertIsNone(frame_queue.get_nowait())
+
+    def test_latest_payload_replacement_is_counted(self) -> None:
+        payload_queue = queue.Queue(maxsize=1)
+        payload_queue.put_nowait("old")
+
+        skipped = _put_latest_queue_payload(payload_queue, "new")
+
+        self.assertEqual(skipped, 1)
+        self.assertEqual(payload_queue.get_nowait(), "new")
 
 
 class ProcessedOutputWriterTests(unittest.TestCase):

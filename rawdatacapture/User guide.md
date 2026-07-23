@@ -129,8 +129,8 @@ python run.py --radar-port COM4
 python3 run.py --radar-port /dev/ttyUSB0
 ```
 
-Point-cloud display defaults to updating every two valid frames; other modes
-default to every frame. Override it with `--display-update-every N`.
+All display modes default to processing every valid frame. Override this with
+`--display-update-every N`.
 
 ## Capture Receiver Only
 
@@ -141,9 +141,18 @@ python rawdatacapture\livedatacapture.py
 ```
 
 Its defaults are `mmwave.json`, `setup.json`, host `192.168.33.30`, UDP port
-4098, no display, processing queue size 4, and a requested 4 MiB socket receive
-buffer. The operating system may grant a different receive-buffer size; the
-actual value is printed.
+4098, no display, an 8,192-datagram receiver queue, a 32-frame processing
+queue, and a requested 4 MiB socket receive buffer. The operating system may
+grant a different receive-buffer size; the actual value is printed.
+
+The integrated launcher exposes all three buffering controls:
+
+```powershell
+python run.py `
+  --socket-recv-buffer 4194304 `
+  --packet-queue-size 8192 `
+  --processing-queue-size 32
+```
 
 Use the same config that programmed the radar:
 
@@ -323,6 +332,8 @@ python rawdatacapture\livedatacapture.py `
 Important counters are:
 
 - `lost_packets`: missing DCA1000 sequence numbers.
+- `receiver_queue_drops`: UDP datagrams discarded because the in-process
+  receiver queue was full.
 - `out_of_order`: late/backward packets or byte counts.
 - `duplicates`: repeated sequence/payload data.
 - `byte_gaps`: discontinuities inserted into normal frame assembly.
@@ -335,22 +346,45 @@ Important counters are:
 Healthy capture normally keeps all of these at zero. Frames containing gap
 padding are neither processed nor saved.
 
-Successful frames and display latency are not printed. A statistics line is
-emitted only when one or more capture or processing error counters change.
+Successful frames and display latency are not printed continuously. A
+statistics line is emitted immediately whenever one or more capture or
+processing error counters change. Clean shutdown always prints:
 
-If `processing_drops` grows while packet-loss counters remain zero, reduce
-display updates or use `--display none`. Increasing `--processing-queue-size`
-can absorb short bursts but does not fix processing that is consistently too
-slow.
+- a capture summary with total, valid, invalid, and queued frames;
+- a processing summary with queued and completed frames;
+- a display summary with physically rendered updates, latest-update
+  replacements, and frames not rendered over total assembled frames.
+
+The display deliberately keeps only the latest result. A skipped display
+update is therefore distinct from packet loss, an invalid frame, or a
+processing drop.
+
+If `processing_drops` grows while packet-loss counters remain zero, first
+confirm that the 32-frame queue is active. Reducing display updates or using
+`--display none` lowers sustained DSP load; increasing the queue further only
+absorbs short bursts.
 
 ## Packet-Loss Troubleshooting
 
 - Connect the PC directly to DCA1000 over wired Ethernet.
 - Ensure `packetDelay_us` in `setup.json` matches the DCA1000 configuration.
+- The repository default is 50 us. If loss remains after host buffering is
+  fixed, test 75 us and ensure the DCA1000 FPGA error LED remains off.
 - Avoid routing capture traffic through Wi-Fi, VPNs, or busy switches.
 - Increase the OS/network-adapter receive buffers where supported.
 - Check the logged requested and actual socket receive-buffer sizes.
 - Run with `--display none` to distinguish capture loss from DSP load.
+
+On Linux, if the logged actual receive buffer is below the requested 4 MiB,
+raise the host limit before capture:
+
+```bash
+sudo sysctl -w net.core.rmem_max=4194304
+```
+
+To persist that setting, place `net.core.rmem_max=4194304` in a dedicated file
+under `/etc/sysctl.d/` and reload the system settings. The capture program only
+diagnoses this condition; it never changes privileged host configuration.
 
 When `packetSequenceEnable` is false, capture still assembles received bytes but
 cannot reliably report network packet loss.

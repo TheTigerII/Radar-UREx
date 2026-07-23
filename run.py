@@ -17,6 +17,9 @@ DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
 DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
 DEFAULT_HOST_IP = "192.168.33.30"
 DEFAULT_DATA_PORT = 4098
+DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
+DEFAULT_PACKET_QUEUE_SIZE = 8192
+DEFAULT_PROCESSING_QUEUE_SIZE = 32
 DEFAULT_RADAR_BAUD = 115200
 DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
@@ -55,6 +58,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--setup", type=Path, default=DEFAULT_SETUP_PATH)
     parser.add_argument("--host-ip", default=DEFAULT_HOST_IP)
     parser.add_argument("--data-port", type=int, default=DEFAULT_DATA_PORT)
+    parser.add_argument(
+        "--socket-recv-buffer",
+        type=int,
+        default=DEFAULT_SOCKET_RECV_BUFFER_BYTES,
+        help="Requested UDP socket receive buffer in bytes; use 0 for OS default.",
+    )
+    parser.add_argument(
+        "--packet-queue-size",
+        type=int,
+        default=DEFAULT_PACKET_QUEUE_SIZE,
+        help="Maximum UDP datagrams buffered before frame assembly.",
+    )
+    parser.add_argument(
+        "--processing-queue-size",
+        type=int,
+        default=DEFAULT_PROCESSING_QUEUE_SIZE,
+        help="Maximum complete frames waiting for DSP processing.",
+    )
     parser.add_argument("--radar-port")
     parser.add_argument("--radar-baud", type=int, default=DEFAULT_RADAR_BAUD)
     parser.add_argument(
@@ -363,6 +384,12 @@ def build_capture_command(
         args.host_ip,
         "--data-port",
         str(args.data_port),
+        "--socket-recv-buffer",
+        str(max(args.socket_recv_buffer, 0)),
+        "--packet-queue-size",
+        str(max(args.packet_queue_size, 1)),
+        "--processing-queue-size",
+        str(max(args.processing_queue_size, 1)),
         "--display",
         display,
         "--display-update-every",

@@ -3,6 +3,7 @@ import json
 import multiprocessing as mp
 import queue
 import socket
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -54,7 +55,8 @@ BUFFER_SIZE = 65535       # Max UDP packet payload allocation
 DCA1000_HEADER_SIZE = 10
 UINT32_MODULO = 2**32
 SOCKET_TIMEOUT_SECONDS = 0.5
-DEFAULT_PROCESSING_QUEUE_SIZE = 4
+DEFAULT_PACKET_QUEUE_SIZE = 8192
+DEFAULT_PROCESSING_QUEUE_SIZE = 32
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
@@ -94,7 +96,10 @@ class DCA1000PacketHeader:
     byte_count: int
 
     @classmethod
-    def parse(cls, packet: bytes) -> "DCA1000PacketHeader":
+    def parse(
+        cls,
+        packet: bytes | bytearray | memoryview,
+    ) -> "DCA1000PacketHeader":
         if len(packet) < DCA1000_HEADER_SIZE:
             raise ValueError(
                 f"DCA1000 packet is too short for a {DCA1000_HEADER_SIZE}-byte header"
@@ -120,7 +125,61 @@ class CaptureStats:
     byte_overlaps: int = 0
     byte_overlap_bytes: int = 0
     invalid_frames: int = 0
+    receiver_queue_drops: int = 0
     processing_frames_dropped: int = 0
+
+
+class UdpPacketReceiver:
+    """Drain UDP datagrams into a bounded in-process queue."""
+
+    def __init__(
+        self,
+        sock: socket.socket,
+        packet_queue: queue.Queue[tuple[bytes, float]],
+        buffer_size: int,
+        stats: CaptureStats,
+    ) -> None:
+        self.sock = sock
+        self.packet_queue = packet_queue
+        self.buffer_size = buffer_size
+        self.stats = stats
+        self.stop_event = threading.Event()
+        self.error: Optional[OSError] = None
+        self.thread = threading.Thread(
+            target=self._receive_loop,
+            name="RadarUdpReceiver",
+            daemon=True,
+        )
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        self.thread.join(timeout=timeout)
+
+    @property
+    def is_alive(self) -> bool:
+        return self.thread.is_alive()
+
+    def _receive_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                packet = self.sock.recv(self.buffer_size)
+            except socket.timeout:
+                continue
+            except OSError as exc:
+                if not self.stop_event.is_set():
+                    self.error = exc
+                return
+
+            packet_received_at_s = time.perf_counter()
+            try:
+                self.packet_queue.put_nowait((packet, packet_received_at_s))
+            except queue.Full:
+                self.stats.receiver_queue_drops += 1
 
 
 @dataclass(frozen=True)
@@ -444,7 +503,7 @@ class FrameBuffer:
     def add_payload(
         self,
         header: DCA1000PacketHeader,
-        payload: bytes,
+        payload: bytes | bytearray | memoryview,
         payload_received_at_s: float,
     ) -> list[CapturedFrame]:
         if self.base_byte_count is None:
@@ -577,12 +636,16 @@ class LiveDisplay:
         self.stop_event: Optional[mp.Event] = None
         self.payload_queue: Optional[mp.Queue] = None
         self.process: Optional[mp.Process] = None
+        self.rendered_updates: Optional[Any] = None
+        self.skipped_updates: Optional[Any] = None
 
         if self.mode == "none":
             return
 
         self.stop_event = mp.Event()
         self.payload_queue = mp.Queue(maxsize=1)
+        self.rendered_updates = mp.Value("Q", 0)
+        self.skipped_updates = mp.Value("Q", 0)
         self.process = mp.Process(
             target=_run_display_process,
             args=(
@@ -593,6 +656,8 @@ class LiveDisplay:
                 self.point_cloud_fov_deg,
                 self.payload_queue,
                 self.stop_event,
+                self.rendered_updates,
+                self.skipped_updates,
             ),
             name="RadarLiveDisplay",
             daemon=True,
@@ -610,6 +675,14 @@ class LiveDisplay:
         if self.payload_queue is not None:
             self.payload_queue.close()
             self.payload_queue.join_thread()
+
+    @property
+    def rendered_update_count(self) -> int:
+        return _shared_counter_value(self.rendered_updates)
+
+    @property
+    def skipped_update_count(self) -> int:
+        return _shared_counter_value(self.skipped_updates)
 
 
 def _point_cloud_track_candidates(
@@ -784,6 +857,7 @@ class DisplayPayloadSink:
         clutter_map_warmup_frames: int = DEFAULT_CLUTTER_MAP_WARMUP_FRAMES,
         clutter_map_min_snr_db: float = DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
         processed_writer: Optional[ProcessedOutputWriter] = None,
+        display_skipped_counter: Optional[Any] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -794,6 +868,7 @@ class DisplayPayloadSink:
         self.cluster_eps_m = max(float(cluster_eps_m), 0.0)
         self.cluster_min_samples = max(int(cluster_min_samples), 1)
         self.processed_writer = processed_writer
+        self.display_skipped_counter = display_skipped_counter
         self.clutter_map = (
             AdaptiveClutterMap(
                 update_rate=clutter_map_update_rate,
@@ -905,7 +980,14 @@ class DisplayPayloadSink:
             return
 
         if self.payload_queue is not None:
-            _put_latest_queue_payload(self.payload_queue, payload)
+            skipped_updates = _put_latest_queue_payload(
+                self.payload_queue,
+                payload,
+            )
+            _increment_shared_counter(
+                self.display_skipped_counter,
+                skipped_updates,
+            )
 
     def _compute_combined_payload(
         self,
@@ -991,22 +1073,39 @@ class DisplayPayloadSink:
         )
 
 
-def _put_latest_queue_payload(payload_queue: mp.Queue, payload: Any) -> None:
+def _put_latest_queue_payload(payload_queue: mp.Queue, payload: Any) -> int:
+    skipped_updates = 0
     try:
         payload_queue.put_nowait(payload)
-        return
+        return skipped_updates
     except queue.Full:
         pass
 
     try:
         payload_queue.get_nowait()
+        skipped_updates += 1
     except queue.Empty:
         pass
 
     try:
         payload_queue.put_nowait(payload)
     except queue.Full:
-        pass
+        skipped_updates += 1
+    return skipped_updates
+
+
+def _increment_shared_counter(counter: Optional[Any], amount: int = 1) -> None:
+    if counter is None or amount <= 0:
+        return
+    with counter.get_lock():
+        counter.value += amount
+
+
+def _shared_counter_value(counter: Optional[Any]) -> int:
+    if counter is None:
+        return 0
+    with counter.get_lock():
+        return int(counter.value)
 
 
 class RawFrameWriter:
@@ -1121,6 +1220,8 @@ def _run_display_process(
     point_cloud_fov_deg: float,
     payload_queue: mp.Queue,
     stop_event: mp.Event,
+    rendered_updates: Any,
+    skipped_updates: Any,
 ) -> None:
     try:
         import signal
@@ -1361,11 +1462,14 @@ def _run_display_process(
             refreshed_payload = False
             try:
                 payload = payload_queue.get(timeout=pause_seconds)
+                stale_payloads = 0
                 while True:
                     try:
                         payload = payload_queue.get_nowait()
+                        stale_payloads += 1
                     except queue.Empty:
                         break
+                _increment_shared_counter(skipped_updates, stale_payloads)
 
                 if point_cloud_rate_text is not None:
                     _set_rate_indicator(
@@ -1479,6 +1583,7 @@ def _run_display_process(
                     refreshed_at_s,
                     1.0,
                 )
+                _increment_shared_counter(rendered_updates)
                 refreshed_payload = True
             except queue.Empty:
                 pass
@@ -1776,29 +1881,24 @@ def _drain_log_queue(log_queue: mp.Queue) -> None:
             return
 
 
-def _request_processor_stop(frame_queue: mp.Queue) -> None:
+def _request_processor_stop(
+    frame_queue: mp.Queue,
+    timeout_seconds: float = 5.0,
+) -> bool:
     try:
-        frame_queue.put(None, timeout=0.2)
-        return
+        frame_queue.put(None, timeout=timeout_seconds)
+        return True
     except queue.Full:
-        pass
-
-    try:
-        frame_queue.get(timeout=0.2)
-    except queue.Empty:
-        pass
-
-    try:
-        frame_queue.put(None, timeout=0.2)
-    except queue.Full:
-        pass
+        return False
 
 
 def _run_frame_processor(
     config: RadarCaptureConfig,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
+    processed_frames_counter: Any,
     display_payload_queue: Optional[mp.Queue],
+    display_skipped_counter: Optional[Any],
     raw_output: Optional[Path],
     raw_metadata: Optional[Path],
     processed_output: Optional[Path],
@@ -1835,6 +1935,7 @@ def _run_frame_processor(
         clutter_map_warmup_frames,
         clutter_map_min_snr_db,
         processed_writer,
+        display_skipped_counter,
     )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -1854,6 +1955,7 @@ def _run_frame_processor(
                 break
 
             process_complete_frame(frame, config, display, raw_writer, worker_emit)
+            _increment_shared_counter(processed_frames_counter)
     except KeyboardInterrupt:
         pass
     except Exception as exc:
@@ -1872,6 +1974,7 @@ def listen_for_frames(
     buffer_size: int,
     socket_recv_buffer_bytes: int,
     socket_timeout_seconds: float,
+    packet_queue_size: int,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
     display: LiveDisplay,
@@ -1882,14 +1985,17 @@ def listen_for_frames(
     synthetic_sequence_number = 0
     synthetic_byte_count = 0
     reported_error_counts = _capture_error_counts(stats)
+    packet_queue: queue.Queue[tuple[bytes, float]] = queue.Queue(
+        maxsize=max(packet_queue_size, 1)
+    )
 
     def emit_new_error_stats() -> None:
         nonlocal reported_error_counts
-        error_counts = _capture_error_counts(stats)
-        if error_counts == reported_error_counts:
-            return
-        emit(_format_stats(stats))
-        reported_error_counts = error_counts
+        reported_error_counts = _report_new_error_stats(
+            stats,
+            reported_error_counts,
+            emit,
+        )
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     if socket_recv_buffer_bytes > 0:
@@ -1931,30 +2037,52 @@ def listen_for_frames(
         "UDP socket receive buffer: "
         f"requested={socket_recv_buffer_bytes}B, actual={actual_recv_buffer_bytes}B"
     )
+    if (
+        socket_recv_buffer_bytes > 0
+        and actual_recv_buffer_bytes < socket_recv_buffer_bytes
+    ):
+        emit(
+            "WARNING: The operating system granted less UDP receive buffering "
+            "than requested. On Linux, raise the limit before capture with "
+            f"'sudo sysctl -w net.core.rmem_max={socket_recv_buffer_bytes}'."
+        )
+    emit(f"UDP packet queue capacity: {max(packet_queue_size, 1)} datagrams")
     emit("Trigger frames now. Press Ctrl+C to stop.")
 
+    receiver = UdpPacketReceiver(
+        sock,
+        packet_queue,
+        buffer_size,
+        stats,
+    )
+    receiver.start()
     try:
         while True:
             try:
-                packet, _addr = sock.recvfrom(buffer_size)
-                packet_received_at_s = time.perf_counter()
-            except socket.timeout:
+                packet, packet_received_at_s = packet_queue.get(
+                    timeout=socket_timeout_seconds
+                )
+            except queue.Empty:
                 _drain_log_queue(log_queue)
                 emit_new_error_stats()
+                if receiver.error is not None:
+                    emit(f"UDP receiver stopped after error: {receiver.error}")
+                    break
                 continue
 
+            packet_view = memoryview(packet)
             if setup_config.packet_sequence_enable:
                 try:
-                    header = DCA1000PacketHeader.parse(packet)
+                    header = DCA1000PacketHeader.parse(packet_view)
                 except ValueError:
                     stats.malformed_packets += 1
                     emit_new_error_stats()
                     continue
 
-                payload = packet[DCA1000_HEADER_SIZE:]
+                payload = packet_view[DCA1000_HEADER_SIZE:]
                 sequence_tracker.observe(header.sequence_number)
             else:
-                payload = packet
+                payload = packet_view
                 header = DCA1000PacketHeader(
                     sequence_number=synthetic_sequence_number,
                     byte_count=synthetic_byte_count,
@@ -1988,9 +2116,14 @@ def listen_for_frames(
         emit_new_error_stats()
         emit("Streaming stopped.")
     finally:
+        receiver.stop()
         sock.close()
+        receiver.join(timeout=max(socket_timeout_seconds + 0.5, 1.0))
+        if receiver.is_alive:
+            emit("WARNING: UDP receiver thread did not stop cleanly.")
         _drain_log_queue(log_queue)
         emit_new_error_stats()
+        emit(_format_capture_summary(stats))
     return stats
 
 
@@ -2026,6 +2159,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Requested UDP socket receive buffer size in bytes. "
             "Use 0 to keep the Windows default. The actual granted size is logged."
+        ),
+    )
+    parser.add_argument(
+        "--packet-queue-size",
+        type=int,
+        default=DEFAULT_PACKET_QUEUE_SIZE,
+        help=(
+            "Maximum UDP datagrams buffered between the receiver thread and "
+            f"frame assembly. Defaults to {DEFAULT_PACKET_QUEUE_SIZE}."
         ),
     )
     parser.add_argument(
@@ -2173,7 +2315,25 @@ def _format_stats(stats: CaptureStats) -> str:
         f"stream_resyncs={stats.stream_resyncs}, "
         f"byte_overlaps={stats.byte_overlaps}/{stats.byte_overlap_bytes}B, "
         f"malformed={stats.malformed_packets}, "
+        f"receiver_queue_drops={stats.receiver_queue_drops}, "
         f"processing_drops={stats.processing_frames_dropped}"
+    )
+
+
+def _format_capture_summary(stats: CaptureStats) -> str:
+    valid_frames = max(stats.frames_emitted - stats.invalid_frames, 0)
+    queued_frames = max(valid_frames - stats.processing_frames_dropped, 0)
+    return (
+        "Capture summary: "
+        f"packets={stats.packets_received}, "
+        f"frames={stats.frames_emitted}, "
+        f"valid_frames={valid_frames}, "
+        f"invalid_frames={stats.invalid_frames}, "
+        f"queued_frames={queued_frames}, "
+        f"lost_packets={stats.lost_packets}, "
+        f"receiver_queue_drops={stats.receiver_queue_drops}, "
+        f"processing_drops={stats.processing_frames_dropped}, "
+        f"stream_resyncs={stats.stream_resyncs}"
     )
 
 
@@ -2190,8 +2350,21 @@ def _capture_error_counts(stats: CaptureStats) -> tuple[int, ...]:
         stats.byte_overlaps,
         stats.byte_overlap_bytes,
         stats.malformed_packets,
+        stats.receiver_queue_drops,
         stats.processing_frames_dropped,
     )
+
+
+def _report_new_error_stats(
+    stats: CaptureStats,
+    reported_error_counts: tuple[int, ...],
+    emit_func: EmitFunc,
+) -> tuple[int, ...]:
+    """Emit immediately when any capture or processing error counter changes."""
+    error_counts = _capture_error_counts(stats)
+    if error_counts != reported_error_counts:
+        emit_func(_format_stats(stats))
+    return error_counts
 
 
 def _resolve_config_path(config_path: Path) -> Path:
@@ -2634,6 +2807,8 @@ def main() -> None:
     log_queue: Optional[mp.Queue] = None
     processor: Optional[mp.Process] = None
     display: Optional[LiveDisplay] = None
+    capture_stats: Optional[CaptureStats] = None
+    processed_frames_counter: Optional[Any] = None
     try:
         config = RadarCaptureConfig.from_file(args.config)
         emit(f"Loaded radar config: {config}")
@@ -2657,13 +2832,16 @@ def main() -> None:
         )
         frame_queue = mp.Queue(maxsize=max(args.processing_queue_size, 1))
         log_queue = mp.Queue(maxsize=1000)
+        processed_frames_counter = mp.Value("Q", 0)
         processor = mp.Process(
             target=_run_frame_processor,
             args=(
                 config,
                 frame_queue,
                 log_queue,
+                processed_frames_counter,
                 display.payload_queue if display is not None else None,
+                display.skipped_updates if display is not None else None,
                 args.raw_output,
                 args.raw_metadata,
                 args.processed_output,
@@ -2680,7 +2858,7 @@ def main() -> None:
             name="RadarFrameProcessor",
         )
         processor.start()
-        listen_for_frames(
+        capture_stats = listen_for_frames(
             host_ip=args.host_ip,
             data_port=args.data_port,
             config=config,
@@ -2688,6 +2866,7 @@ def main() -> None:
             buffer_size=args.buffer_size,
             socket_recv_buffer_bytes=args.socket_recv_buffer,
             socket_timeout_seconds=args.socket_timeout,
+            packet_queue_size=args.packet_queue_size,
             frame_queue=frame_queue,
             log_queue=log_queue,
             display=display,
@@ -2697,10 +2876,14 @@ def main() -> None:
     finally:
         emit("Shutting down capture pipeline...")
         if frame_queue is not None:
-            _request_processor_stop(frame_queue)
+            if not _request_processor_stop(frame_queue):
+                emit(
+                    "Frame processor stop marker could not be queued; "
+                    "no queued frame was discarded."
+                )
 
         if processor is not None:
-            processor.join(timeout=5.0)
+            processor.join(timeout=10.0)
             if processor.is_alive():
                 emit("Frame processor did not stop in time; terminating.")
                 processor.terminate()
@@ -2709,9 +2892,47 @@ def main() -> None:
         if log_queue is not None:
             _drain_log_queue(log_queue)
 
+        if capture_stats is not None and processed_frames_counter is not None:
+            valid_frames = max(
+                capture_stats.frames_emitted - capture_stats.invalid_frames,
+                0,
+            )
+            queued_frames = max(
+                valid_frames - capture_stats.processing_frames_dropped,
+                0,
+            )
+            processed_frames = _shared_counter_value(processed_frames_counter)
+            emit(
+                "Processing summary: "
+                f"valid_frames={valid_frames}, "
+                f"queued_frames={queued_frames}, "
+                f"processed_frames={processed_frames}, "
+                f"processing_drops={capture_stats.processing_frames_dropped}"
+            )
+
         if display is not None:
             display.close()
             emit("Live display closed.")
+            if capture_stats is not None and display.mode != "none":
+                rendered_updates = display.rendered_update_count
+                skipped_updates = display.skipped_update_count
+                not_rendered = max(
+                    capture_stats.frames_emitted - rendered_updates,
+                    0,
+                )
+                not_rendered_rate = (
+                    (100.0 * not_rendered / capture_stats.frames_emitted)
+                    if capture_stats.frames_emitted
+                    else 0.0
+                )
+                emit(
+                    "Display summary: "
+                    f"rendered_updates={rendered_updates}, "
+                    f"latest_updates_skipped={skipped_updates}, "
+                    f"frames_not_rendered="
+                    f"{not_rendered}/{capture_stats.frames_emitted} "
+                    f"({not_rendered_rate:.3f}%)"
+                )
 
         if frame_queue is not None:
             frame_queue.close()

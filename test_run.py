@@ -59,6 +59,9 @@ class CaptureCommandTests(unittest.TestCase):
             setup=Path("setup.json"),
             host_ip="192.168.33.30",
             data_port=4098,
+            socket_recv_buffer=4 * 1024 * 1024,
+            packet_queue_size=8192,
+            processing_queue_size=32,
             max_range_m=10.0,
             cluster_eps_m=0.5,
             cluster_min_samples=2,
@@ -75,6 +78,9 @@ class CaptureCommandTests(unittest.TestCase):
 
         self.assertIn("--processed-output", command)
         self.assertIn("processed.jsonl", command)
+        self.assertIn("--socket-recv-buffer", command)
+        self.assertIn("--packet-queue-size", command)
+        self.assertIn("--processing-queue-size", command)
         self.assertNotIn("--raw-output", command)
 
 

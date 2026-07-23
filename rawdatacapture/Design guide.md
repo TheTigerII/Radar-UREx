@@ -37,6 +37,8 @@ only `dry-run`.
 ```text
 DCA1000 UDP packets (host 192.168.33.30, port 4098)
   -> main capture process
+       dedicated receiver thread drains the UDP socket
+       bounded in-process packet queue absorbs short host stalls
        parse optional 10-byte sequence/byte-count header
        track packet order and loss
        assemble a continuous byte stream
@@ -52,22 +54,27 @@ DCA1000 UDP packets (host 192.168.33.30, port 4098)
        update an existing Matplotlib artist
 ```
 
-Capture, processing, and display use bounded queues. The UDP receiver never
-waits for FFT or plotting. A full processing queue increments
+Capture, processing, and display use bounded queues. The UDP receiver thread
+never waits for frame assembly, FFT, logging, or plotting. A full packet queue
+increments `receiver_queue_drops`; a full processing queue increments
 `processing_frames_dropped`; the one-item display queue discards stale display
 results in favor of the newest one.
 
 ### Processes and queue sizes
 
-- Main process: socket receive and `FrameBuffer` assembly.
+- UDP receiver thread: socket receive only.
+- Main process: packet dequeue and `FrameBuffer` assembly.
 - `RadarFrameProcessor`: frame conversion, DSP, logging, and optional raw write.
 - `RadarLiveDisplay`: Matplotlib UI for any display other than `none`.
-- Processing queue: `--processing-queue-size`, default 4 frames.
+- Packet queue: `--packet-queue-size`, default 8,192 datagrams.
+- Processing queue: `--processing-queue-size`, default 32 frames.
 - Display payload queue: one result.
 - Processor log queue: 1,000 messages.
 
 Routine successful frames and display latency are silent. Capture statistics
-are emitted only when an error counter changes.
+are emitted immediately whenever an error counter changes. Shutdown emits
+capture, processing, and display summaries, including the number of updates
+actually rendered by the GUI.
 
 ## Configuration
 
@@ -101,9 +108,12 @@ The factor 4 is two bytes for I plus two bytes for Q. The current reshape code
 supports complex, 16-bit, two-lane LVDS data.
 
 `setup.json` supplies DCA1000 settings including `packetSequenceEnable` and
-`packetDelay_us`. When packet sequence headers are disabled, the receiver uses
-synthetic sequence and byte counts; it can assemble received bytes but cannot
-detect network loss from DCA1000 metadata.
+`packetDelay_us`. The current 50-us delay remains comfortably above the data
+rate required by the 33.33-ms radar profile while smoothing Ethernet bursts.
+The supported hardware range is validated as 5 to 500 us. When packet sequence
+headers are disabled, the receiver uses synthetic sequence and byte counts; it
+can assemble received bytes but cannot detect network loss from DCA1000
+metadata.
 
 ## Packet and Frame Integrity
 

@@ -37,6 +37,8 @@ DCA1000_MAX_BYTES_PER_PACKET = 1470
 DCA1000_FPGA_CONFIG_DEFAULT_TIMER = 30
 DCA1000_FPGA_CLK_CONVERSION_FACTOR = 1000
 DCA1000_FPGA_CLK_PERIOD_NS = 8
+DCA1000_MIN_PACKET_DELAY_US = 5
+DCA1000_MAX_PACKET_DELAY_US = 500
 DEFAULT_SDK_PROFILE_PATH = Path(__file__).with_name("profile.cfg")
 EmitFunc = Callable[[str], None]
 
@@ -219,8 +221,16 @@ class PreflightValidator:
         dca = config.dca1000
         if dca.capture_hardware and dca.capture_hardware.upper() != "DCA1000":
             errors.append(f"unsupported capture hardware: {dca.capture_hardware}")
-        if dca.packet_delay_us is not None and dca.packet_delay_us < 0:
-            errors.append("packetDelay_us must be non-negative")
+        if dca.packet_delay_us is not None and not (
+            DCA1000_MIN_PACKET_DELAY_US
+            <= dca.packet_delay_us
+            <= DCA1000_MAX_PACKET_DELAY_US
+        ):
+            errors.append(
+                "packetDelay_us must be between "
+                f"{DCA1000_MIN_PACKET_DELAY_US} and "
+                f"{DCA1000_MAX_PACKET_DELAY_US} microseconds"
+            )
         if not (1 <= self.options.dca_config_port <= 65535):
             errors.append(f"invalid DCA1000 config port: {self.options.dca_config_port}")
         if not (1 <= self.options.data_port <= 65535):
