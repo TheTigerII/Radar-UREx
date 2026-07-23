@@ -1454,14 +1454,14 @@ class MicroDopplerDisplayTests(unittest.TestCase):
     def test_shared_magnitude_colorbar_starts_at_sixty_db(self) -> None:
         self.assertEqual(POINT_CLOUD_MAGNITUDE_DB_MIN, 60.0)
 
-    def test_combined_point_cloud_uses_half_rate_rendering(self) -> None:
-        self.assertEqual(COMBINED_POINT_CLOUD_UPDATE_EVERY, 2)
+    def test_combined_point_cloud_keeps_full_rate_rendering(self) -> None:
+        self.assertEqual(COMBINED_POINT_CLOUD_UPDATE_EVERY, 1)
         self.assertEqual(
             [
                 _combined_point_cloud_update_due(update_count)
                 for update_count in range(1, 6)
             ],
-            [True, False, True, False, True],
+            [True, True, True, True, True],
         )
 
     def test_live_history_keeps_150_stft_windows(self) -> None:

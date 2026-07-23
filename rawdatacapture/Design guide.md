@@ -288,9 +288,9 @@ spectrogram's Doppler-axis label. Both plot titles report measured updates per
 second. Supported Matplotlib backends use artist-level blitting for the dynamic
 scatters, spectrogram, and titles so the static 3D axes and colorbar do not
 require a full redraw every update. The combined display renders micro-Doppler
-for every consumed payload but updates the more expensive 3D collections every
-second payload. The 3D collections disable depth shading to avoid redundant
-color processing and preserve the shared magnitude scale.
+and the 3D collections for every consumed payload. The 3D collections disable
+depth shading to avoid redundant color processing and preserve the shared
+magnitude scale.
 
 ## Processed and Raw Recording
 

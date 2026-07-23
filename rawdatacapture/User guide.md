@@ -312,10 +312,9 @@ preventing different objects from sharing one visible history.
 The plot titles show their measured refresh rate. On Matplotlib backends that
 support it, the combined view blits only the changing scatter, image, and title
 artists rather than redrawing the full 3D axes and colorbar for every frame.
-The micro-Doppler panel renders every available display payload, while the
-more expensive 3D panel renders every second payload. Its depth shading is
-disabled so the fixed magnitude colors remain unchanged and the GUI can keep
-up with the radar stream.
+Both the micro-Doppler and 3D panels render every available display payload.
+The 3D collections disable depth shading so the fixed magnitude colors remain
+unchanged while reducing GUI rendering work.
 
 ### Display performance
 
