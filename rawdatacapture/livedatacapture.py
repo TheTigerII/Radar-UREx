@@ -1,9 +1,12 @@
 import argparse
+import importlib.util
 import json
 import multiprocessing as mp
+import os
 import queue
 import signal
 import socket
+import sys
 import threading
 import time
 from collections import deque
@@ -17,7 +20,13 @@ import numpy as np
 try:
     from .dsp import (
         AdaptiveClutterMap,
+        DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
+        DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
+        DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
+        DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE,
         StaticSceneMap,
+        MicroDopplerResult,
+        RotorEstimate,
         cluster_point_cloud,
         cluster_point_cloud_with_labels,
         compute_micro_doppler_spectrum,
@@ -27,7 +36,9 @@ try:
         compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
+        compute_rotor_micro_doppler_frame,
         compute_static_point_cloud,
+        estimate_rotor_rpm,
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
@@ -37,7 +48,13 @@ try:
 except ImportError:
     from dsp import (
         AdaptiveClutterMap,
+        DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
+        DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
+        DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
+        DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE,
         StaticSceneMap,
+        MicroDopplerResult,
+        RotorEstimate,
         cluster_point_cloud,
         cluster_point_cloud_with_labels,
         compute_micro_doppler_spectrum,
@@ -47,7 +64,9 @@ except ImportError:
         compute_point_cloud,
         compute_range_fft,
         compute_range_profile,
+        compute_rotor_micro_doppler_frame,
         compute_static_point_cloud,
+        estimate_rotor_rpm,
         frame_bytes_to_radar_cube,
         range_axis_m,
         range_resolution_m,
@@ -92,6 +111,7 @@ DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
+ROTOR_DISPLAY_MODE = "micro-doppler"
 COMBINED_POINT_CLOUD_UPDATE_EVERY = 1
 MICRO_DOPPLER_HISTORY_UPDATES = 150
 MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
@@ -102,6 +122,21 @@ MICRO_DOPPLER_HISTORY_MAX_GAP_UPDATES = 30
 MICRO_DOPPLER_HISTORY_ASSOCIATION_DISTANCE_M = (
     DEFAULT_TRACK_ASSOCIATION_DISTANCE_M
 )
+ROTOR_MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 1
+ROTOR_MICRO_DOPPLER_WINDOW_LOOPS = 16
+ROTOR_MICRO_DOPPLER_HOP_LOOPS = 2
+ROTOR_MICRO_DOPPLER_FFT_SIZE = 128
+ROTOR_MICRO_DOPPLER_DC_NOTCH_BINS = 2
+ROTOR_MICRO_DOPPLER_HISTORY_SECONDS = 2.0
+ROTOR_DISPLAY_HISTORY_SECONDS = 0.2
+ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX = 30.0
+DEFAULT_ROTOR_BLADES = 2
+DEFAULT_ROTOR_RPM_MAX = 10_700.0
+ROTOR_RPM_ESTIMATE_UPDATE_SECONDS = 1.0
+ROTOR_DISPLAY_MAX_RATE_HZ = 60.0
+ROTOR_DISPLAY_TIME_BINS = 512
+PROCESSED_OUTPUT_BUFFER_BYTES = 1024 * 1024
+ROTOR_SPECTRUM_OUTPUT_DECIMALS = 2
 MAGNITUDE_COLORMAP = "turbo"
 POINT_CLOUD_MAGNITUDE_DB_MIN = 60.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
@@ -284,6 +319,21 @@ class CombinedDisplayPayload:
     point_cloud: PointCloudDisplayPayload
     spectrogram_db: np.ndarray
     selected_range_m: Optional[float]
+
+
+@dataclass(frozen=True)
+class RotorDisplayPayload:
+    result: MicroDopplerResult
+
+
+@dataclass(frozen=True)
+class RotorDisplayFrame:
+    spectrogram_db: np.ndarray
+    extent: tuple[float, float, float, float]
+    flash_times_s: np.ndarray
+    flash_scores_db: np.ndarray
+    status_text: str
+    dc_notch_velocity_bounds: tuple[float, float]
 
 
 class ProcessingTimingStats:
@@ -576,6 +626,10 @@ class RadarCaptureConfig:
     tx_channel_masks: Optional[tuple[int, ...]] = None
     sample_rate_ksps: Optional[float] = None
     frequency_slope_mhz_per_us: Optional[float] = None
+    start_frequency_ghz: Optional[float] = None
+    idle_time_us: Optional[float] = None
+    ramp_end_time_us: Optional[float] = None
+    frame_periodicity_ms: Optional[float] = None
 
     @classmethod
     def from_dimensions(
@@ -592,6 +646,10 @@ class RadarCaptureConfig:
         tx_channel_masks: Optional[Iterable[int]] = None,
         sample_rate_ksps: Optional[float] = None,
         frequency_slope_mhz_per_us: Optional[float] = None,
+        start_frequency_ghz: Optional[float] = None,
+        idle_time_us: Optional[float] = None,
+        ramp_end_time_us: Optional[float] = None,
+        frame_periodicity_ms: Optional[float] = None,
     ) -> "RadarCaptureConfig":
         bytes_per_complex_sample = 4  # int16 I + int16 Q
         bytes_per_frame = (
@@ -617,6 +675,10 @@ class RadarCaptureConfig:
             ),
             sample_rate_ksps=sample_rate_ksps,
             frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
+            start_frequency_ghz=start_frequency_ghz,
+            idle_time_us=idle_time_us,
+            ramp_end_time_us=ramp_end_time_us,
+            frame_periodicity_ms=frame_periodicity_ms,
         )
 
     @classmethod
@@ -653,6 +715,31 @@ class RadarCaptureConfig:
 
     def range_axis_m(self) -> Optional[np.ndarray]:
         return range_axis_m(self)
+
+    @property
+    def chirp_period_s(self) -> Optional[float]:
+        if self.idle_time_us is None or self.ramp_end_time_us is None:
+            return None
+        return (self.idle_time_us + self.ramp_end_time_us) * 1e-6
+
+    @property
+    def slow_time_interval_s(self) -> Optional[float]:
+        if self.chirp_period_s is None:
+            return None
+        return self.chirp_period_s * (self.num_chirps_per_loop or 1)
+
+    @property
+    def slow_time_rate_hz(self) -> Optional[float]:
+        if not self.slow_time_interval_s:
+            return None
+        return 1.0 / self.slow_time_interval_s
+
+    @property
+    def frame_duty_cycle(self) -> Optional[float]:
+        if self.chirp_period_s is None or not self.frame_periodicity_ms:
+            return None
+        active_time_s = self.num_chirps_per_frame * self.chirp_period_s
+        return active_time_s / (self.frame_periodicity_ms * 1e-3)
 
 
 @dataclass(frozen=True)
@@ -840,14 +927,19 @@ class LiveDisplay:
         self.process: Optional[mp.Process] = None
         self.rendered_updates: Optional[Any] = None
         self.skipped_updates: Optional[Any] = None
+        self.startup_status_queue: Optional[mp.Queue] = None
 
         if self.mode == "none":
             return
+        dependency_error = _display_dependency_error(self.mode)
+        if dependency_error is not None:
+            raise CaptureStartupError(dependency_error)
 
         self.stop_event = mp.Event()
         self.payload_queue = mp.Queue(maxsize=1)
         self.rendered_updates = mp.Value("Q", 0)
         self.skipped_updates = mp.Value("Q", 0)
+        self.startup_status_queue = mp.Queue(maxsize=1)
         self.process = mp.Process(
             target=_run_display_process,
             args=(
@@ -860,11 +952,35 @@ class LiveDisplay:
                 self.stop_event,
                 self.rendered_updates,
                 self.skipped_updates,
+                self.startup_status_queue,
             ),
             name="RadarLiveDisplay",
             daemon=True,
         )
         self.process.start()
+        try:
+            startup_status = self.startup_status_queue.get(timeout=8.0)
+        except queue.Empty as exc:
+            exit_code = self.process.exitcode
+            self.close()
+            detail = (
+                f" (display process exited with code {exit_code})"
+                if exit_code is not None
+                else ""
+            )
+            raise CaptureStartupError(
+                "Live display did not report readiness within 8 seconds"
+                f"{detail}."
+            ) from exc
+        if startup_status.get("state") != "ready":
+            self.close()
+            raise CaptureStartupError(
+                startup_status.get(
+                    "message",
+                    "Live display failed during startup.",
+                )
+            )
+        emit(startup_status["message"])
 
     def close(self) -> None:
         if self.stop_event is not None:
@@ -877,6 +993,9 @@ class LiveDisplay:
         if self.payload_queue is not None:
             self.payload_queue.close()
             self.payload_queue.join_thread()
+        if self.startup_status_queue is not None:
+            self.startup_status_queue.close()
+            self.startup_status_queue.join_thread()
 
     @property
     def rendered_update_count(self) -> int:
@@ -941,6 +1060,7 @@ class ProcessedOutputWriter:
             DEFAULT_STATIC_BACKGROUND_UPDATE_RATE
         ),
         static_cluster_min_samples: int = DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
+        rotor_processing: Optional[dict[str, Any]] = None,
     ) -> None:
         self.emit = emit_func or emit
         self.output_path = _resolve_output_path(output_path) if output_path else None
@@ -951,11 +1071,15 @@ class ProcessedOutputWriter:
             return
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = self.output_path.open("w", encoding="utf-8", buffering=1)
+        self.file = self.output_path.open(
+            "w",
+            encoding="utf-8",
+            buffering=PROCESSED_OUTPUT_BUFFER_BYTES,
+        )
         metadata = {
             "record_type": "metadata",
             "format": "radar-processed-jsonl",
-            "version": 3,
+            "version": 4,
             "created_at": _timestamp(),
             "display_update_every": max(int(update_every), 1),
             "point_columns": ["x_m", "y_m", "z_m", "magnitude_db"],
@@ -1012,6 +1136,7 @@ class ProcessedOutputWriter:
                 "fft_size": MICRO_DOPPLER_FFT_SIZE,
                 "tx_rx_combination": "incoherent power sum",
             },
+            "rotor_micro_doppler_processing": rotor_processing,
             "radar_config": {
                 "num_adc_samples": config.num_adc_samples,
                 "num_rx_channels": config.num_rx_channels,
@@ -1021,6 +1146,12 @@ class ProcessedOutputWriter:
                 "tx_channel_masks": config.tx_channel_masks,
                 "sample_rate_ksps": config.sample_rate_ksps,
                 "frequency_slope_mhz_per_us": config.frequency_slope_mhz_per_us,
+                "start_frequency_ghz": config.start_frequency_ghz,
+                "idle_time_us": config.idle_time_us,
+                "ramp_end_time_us": config.ramp_end_time_us,
+                "frame_periodicity_ms": config.frame_periodicity_ms,
+                "slow_time_rate_hz": config.slow_time_rate_hz,
+                "frame_duty_cycle": config.frame_duty_cycle,
                 "range_resolution_m": config.range_resolution_m,
             },
         }
@@ -1047,6 +1178,7 @@ class ProcessedOutputWriter:
         target_source: Optional[str] = None,
         static_candidate_count: int = 0,
         static_validation: str = "disabled",
+        rotor_micro_doppler: Optional[MicroDopplerResult] = None,
     ) -> None:
         if self.file is None:
             return
@@ -1115,6 +1247,82 @@ class ProcessedOutputWriter:
             "selected_range_m": (
                 float(selected_range_m) if selected_range_m is not None else None
             ),
+            "rotor_micro_doppler": (
+                {
+                    "raw_spectrogram_db": np.asarray(
+                        np.round(
+                            np.asarray(
+                                rotor_micro_doppler.raw_spectrogram_db,
+                                dtype=np.float64,
+                            ),
+                            decimals=ROTOR_SPECTRUM_OUTPUT_DECIMALS,
+                        ),
+                        dtype=np.float64,
+                    ).T.tolist(),
+                    "enhanced_spectrogram_db": np.asarray(
+                        np.round(
+                            np.asarray(
+                                rotor_micro_doppler.enhanced_spectrogram_db,
+                                dtype=np.float64,
+                            ),
+                            decimals=ROTOR_SPECTRUM_OUTPUT_DECIMALS,
+                        ),
+                        dtype=np.float64,
+                    ).T.tolist(),
+                    "window_times_s": np.asarray(
+                        rotor_micro_doppler.window_times_s,
+                        dtype=np.float64,
+                    ).tolist(),
+                    "velocity_axis_m_s": np.asarray(
+                        rotor_micro_doppler.velocity_axis_m_s,
+                        dtype=np.float32,
+                    ).tolist(),
+                    "flash_scores_db": np.asarray(
+                        rotor_micro_doppler.flash_scores_db,
+                        dtype=np.float32,
+                    ).tolist(),
+                    "noise_floor_db": np.asarray(
+                        rotor_micro_doppler.noise_floor_db,
+                        dtype=np.float32,
+                    ).tolist(),
+                    "noise_gate_db": np.asarray(
+                        rotor_micro_doppler.noise_gate_db
+                        if rotor_micro_doppler.noise_gate_db is not None
+                        else np.empty((0,), dtype=np.float32),
+                        dtype=np.float32,
+                    ).tolist(),
+                    "selected_range_m": float(
+                        rotor_micro_doppler.selected_range_m
+                    ),
+                    "nominal_hop_s": float(
+                        rotor_micro_doppler.nominal_hop_s
+                    ),
+                    "unambiguous_velocity_m_s": (
+                        float(rotor_micro_doppler.unambiguous_velocity_m_s)
+                        if rotor_micro_doppler.unambiguous_velocity_m_s
+                        is not None
+                        else None
+                    ),
+                    "velocity_alias_risk": bool(
+                        rotor_micro_doppler.velocity_alias_risk
+                    ),
+                    "alias_warning": rotor_micro_doppler.alias_warning,
+                    "rotor_estimates": [
+                        {
+                            "blade_passage_hz": estimate.blade_passage_hz,
+                            "rpm": estimate.rpm,
+                            "confidence": estimate.confidence,
+                            "harmonic_rank": estimate.harmonic_rank,
+                            "velocity_alias_risk": (
+                                estimate.velocity_alias_risk
+                            ),
+                        }
+                        for estimate in rotor_micro_doppler.rotor_estimates
+                    ],
+                }
+                if rotor_micro_doppler is not None
+                else None
+            ),
         }
         self.file.write(json.dumps(record, separators=(",", ":")) + "\n")
         self.updates_saved += 1
@@ -1154,6 +1362,15 @@ class DisplayPayloadSink:
             DEFAULT_STATIC_BACKGROUND_UPDATE_RATE
         ),
         static_cluster_min_samples: int = DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
+        micro_doppler_range_m: Optional[float] = None,
+        micro_doppler_range_half_width_bins: int = (
+            ROTOR_MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS
+        ),
+        rotor_blades: int = DEFAULT_ROTOR_BLADES,
+        rotor_count: int = 1,
+        rotor_radius_m: Optional[float] = None,
+        rotor_rpm_min: float = 500.0,
+        rotor_rpm_max: float = DEFAULT_ROTOR_RPM_MAX,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -1206,11 +1423,37 @@ class DisplayPayloadSink:
         self.static_candidate_total = 0
         self.static_validated_updates = 0
         self.static_handoff_pending_updates = 0
+        self.micro_doppler_range_m = (
+            float(micro_doppler_range_m)
+            if micro_doppler_range_m is not None
+            else None
+        )
+        self.micro_doppler_range_half_width_bins = max(
+            int(micro_doppler_range_half_width_bins),
+            0,
+        )
+        self.rotor_blades = max(int(rotor_blades), 1)
+        self.rotor_count = max(int(rotor_count), 1)
+        self.rotor_radius_m = (
+            float(rotor_radius_m) if rotor_radius_m is not None else None
+        )
+        self.rotor_rpm_min = max(float(rotor_rpm_min), 1.0)
+        self.rotor_rpm_max = max(float(rotor_rpm_max), self.rotor_rpm_min + 1.0)
+        self.rotor_raw_history: deque[np.ndarray] = deque()
+        self.rotor_enhanced_history: deque[np.ndarray] = deque()
+        self.rotor_time_history: deque[float] = deque()
+        self.rotor_flash_history: deque[float] = deque()
+        self.rotor_noise_history: deque[float] = deque()
+        self.capture_time_origin_s: Optional[float] = None
+        self.latest_rotor_estimates: tuple[RotorEstimate, ...] = ()
+        self.last_rotor_estimate_time_s: Optional[float] = None
 
     def update(
         self,
         range_fft: np.ndarray,
         range_axis_m: Optional[np.ndarray],
+        *,
+        captured_at_s: Optional[float] = None,
     ) -> None:
         save_processed = bool(
             self.processed_writer is not None and self.processed_writer.enabled
@@ -1222,6 +1465,69 @@ class DisplayPayloadSink:
 
         self.frame_count += 1
         if self.frame_count % self.update_every != 0:
+            return
+
+        if self.mode == ROTOR_DISPLAY_MODE:
+            frame_period_s = (
+                float(self.config.frame_periodicity_ms) * 1e-3
+                if self.config.frame_periodicity_ms is not None
+                else 0.0
+            )
+            rotor_display_every = (
+                max(
+                    int(round(1.0 / (frame_period_s * ROTOR_DISPLAY_MAX_RATE_HZ))),
+                    1,
+                )
+                if frame_period_s > 0.0
+                else 1
+            )
+            publish_rotor_display = (
+                self.payload_queue is not None
+                and (
+                    self.frame_count == 1
+                    or self.frame_count % rotor_display_every == 0
+                )
+            )
+            rotor_payload, frame_result = self._compute_rotor_payload(
+                range_fft,
+                range_axis_m,
+                captured_at_s=captured_at_s,
+                build_display_payload=publish_rotor_display,
+            )
+            if save_processed:
+                assert self.processed_writer is not None
+                serialization_started = time.perf_counter()
+                self.processed_writer.write_update(
+                    frame_index=self.frame_count,
+                    points=np.empty((0, 4), dtype=np.float32),
+                    clusters=np.empty((0, 4), dtype=np.float32),
+                    target_track=None,
+                    micro_doppler_db=(
+                        frame_result.raw_spectrogram_db[:, -1]
+                        if frame_result.raw_spectrogram_db.size
+                        else np.empty((0,), dtype=np.float32)
+                    ),
+                    micro_doppler_windows_db=(
+                        frame_result.raw_spectrogram_db[:, -1:]
+                        if frame_result.raw_spectrogram_db.size
+                        else np.empty((0, 0), dtype=np.float32)
+                    ),
+                    selected_range_m=frame_result.selected_range_m,
+                    rotor_micro_doppler=frame_result,
+                )
+                self.timings.add(
+                    "serialization",
+                    time.perf_counter() - serialization_started,
+                )
+            if self.payload_queue is not None and rotor_payload is not None:
+                skipped_updates = _put_latest_queue_payload(
+                    self.payload_queue,
+                    rotor_payload,
+                )
+                _increment_shared_counter(
+                    self.display_skipped_counter,
+                    skipped_updates,
+                )
             return
 
         combined_payload = None
@@ -1289,6 +1595,178 @@ class DisplayPayloadSink:
                 self.display_skipped_counter,
                 skipped_updates,
             )
+
+    def _compute_rotor_payload(
+        self,
+        range_fft: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+        *,
+        captured_at_s: Optional[float],
+        build_display_payload: bool = True,
+    ) -> tuple[Optional[RotorDisplayPayload], MicroDopplerResult]:
+        if self.micro_doppler_range_m is None:
+            raise ValueError(
+                "Dedicated micro-Doppler mode requires --micro-doppler-range-m"
+            )
+        if captured_at_s is not None:
+            if self.capture_time_origin_s is None:
+                self.capture_time_origin_s = float(captured_at_s)
+            frame_time_s = float(captured_at_s) - self.capture_time_origin_s
+        else:
+            frame_period_s = (
+                float(self.config.frame_periodicity_ms) * 1e-3
+                if self.config.frame_periodicity_ms is not None
+                else 0.0
+            )
+            frame_time_s = (self.frame_count - 1) * frame_period_s
+
+        micro_doppler_started = time.perf_counter()
+        frame_result = compute_rotor_micro_doppler_frame(
+            range_fft,
+            range_axis_m,
+            self.config,
+            target_range_m=self.micro_doppler_range_m,
+            frame_time_s=frame_time_s,
+            range_half_width_bins=self.micro_doppler_range_half_width_bins,
+            window_loops=ROTOR_MICRO_DOPPLER_WINDOW_LOOPS,
+            hop_loops=ROTOR_MICRO_DOPPLER_HOP_LOOPS,
+            fft_size=ROTOR_MICRO_DOPPLER_FFT_SIZE,
+            dc_notch_bins=ROTOR_MICRO_DOPPLER_DC_NOTCH_BINS,
+            rotor_radius_m=self.rotor_radius_m,
+            rotor_rpm_max=self.rotor_rpm_max,
+        )
+        for index, window_time_s in enumerate(frame_result.window_times_s):
+            self.rotor_raw_history.append(
+                frame_result.raw_spectrogram_db[:, index]
+            )
+            self.rotor_enhanced_history.append(
+                frame_result.enhanced_spectrogram_db[:, index]
+            )
+            self.rotor_time_history.append(float(window_time_s))
+            self.rotor_flash_history.append(
+                float(frame_result.flash_scores_db[index])
+            )
+            self.rotor_noise_history.append(
+                float(frame_result.noise_floor_db[index])
+            )
+        if self.rotor_time_history:
+            cutoff_s = (
+                self.rotor_time_history[-1]
+                - ROTOR_MICRO_DOPPLER_HISTORY_SECONDS
+            )
+            while (
+                self.rotor_time_history
+                and self.rotor_time_history[0] < cutoff_s
+            ):
+                self.rotor_raw_history.popleft()
+                self.rotor_enhanced_history.popleft()
+                self.rotor_time_history.popleft()
+                self.rotor_flash_history.popleft()
+                self.rotor_noise_history.popleft()
+
+        history_times = np.asarray(self.rotor_time_history, dtype=np.float64)
+        history_scores = np.asarray(
+            self.rotor_flash_history,
+            dtype=np.float32,
+        )
+        newest_history_time_s = (
+            float(history_times[-1]) if history_times.size else None
+        )
+        estimate_due = (
+            newest_history_time_s is not None
+            and (
+                self.last_rotor_estimate_time_s is None
+                or newest_history_time_s - self.last_rotor_estimate_time_s
+                >= ROTOR_RPM_ESTIMATE_UPDATE_SECONDS
+            )
+        )
+        if estimate_due:
+            self.latest_rotor_estimates = estimate_rotor_rpm(
+                history_times,
+                history_scores,
+                blade_count=self.rotor_blades,
+                rotor_count=self.rotor_count,
+                rpm_min=self.rotor_rpm_min,
+                rpm_max=self.rotor_rpm_max,
+                velocity_alias_risk=frame_result.velocity_alias_risk,
+            )
+            self.last_rotor_estimate_time_s = newest_history_time_s
+        rotor_payload = None
+        if build_display_payload:
+            display_window_limit = max(
+                int(
+                    np.floor(
+                        ROTOR_DISPLAY_HISTORY_SECONDS
+                        / max(frame_result.nominal_hop_s, 1e-9)
+                    )
+                )
+                + 1,
+                2,
+            )
+            display_history_start = max(
+                int(history_times.size) - display_window_limit,
+                0,
+            )
+            enhanced_history = tuple(self.rotor_enhanced_history)
+            display_window_count = (
+                int(history_times.size) - display_history_start
+            )
+            history_result = MicroDopplerResult(
+                # The GUI only draws the enhanced spectrum. Raw spectra and
+                # noise floors remain in processed output but are deliberately
+                # omitted from the cross-process display payload.
+                raw_spectrogram_db=np.empty((0, 0), dtype=np.float32),
+                enhanced_spectrogram_db=(
+                    np.stack(
+                        enhanced_history[display_history_start:],
+                        axis=1,
+                    )
+                    if enhanced_history
+                    else np.empty((0, 0), dtype=np.float32)
+                ),
+                # The GUI intentionally concatenates only measured STFT
+                # centres. Physical capture timestamps remain in frame_result
+                # for RPM estimation and processed output.
+                window_times_s=_concatenated_active_window_times(
+                    display_window_count,
+                    frame_result.nominal_hop_s,
+                ),
+                velocity_axis_m_s=frame_result.velocity_axis_m_s,
+                flash_scores_db=history_scores[display_history_start:],
+                noise_floor_db=np.empty((0,), dtype=np.float32),
+                selected_range_m=frame_result.selected_range_m,
+                nominal_hop_s=frame_result.nominal_hop_s,
+                unambiguous_velocity_m_s=(
+                    frame_result.unambiguous_velocity_m_s
+                ),
+                noise_gate_db=None,
+                rotor_estimates=self.latest_rotor_estimates,
+                velocity_alias_risk=frame_result.velocity_alias_risk,
+                alias_warning=frame_result.alias_warning,
+            )
+            rotor_payload = RotorDisplayPayload(history_result)
+        frame_result_with_estimates = MicroDopplerResult(
+            raw_spectrogram_db=frame_result.raw_spectrogram_db,
+            enhanced_spectrogram_db=frame_result.enhanced_spectrogram_db,
+            window_times_s=frame_result.window_times_s,
+            velocity_axis_m_s=frame_result.velocity_axis_m_s,
+            flash_scores_db=frame_result.flash_scores_db,
+            noise_floor_db=frame_result.noise_floor_db,
+            selected_range_m=frame_result.selected_range_m,
+            nominal_hop_s=frame_result.nominal_hop_s,
+            unambiguous_velocity_m_s=(
+                frame_result.unambiguous_velocity_m_s
+            ),
+            noise_gate_db=frame_result.noise_gate_db,
+            rotor_estimates=self.latest_rotor_estimates,
+            velocity_alias_risk=frame_result.velocity_alias_risk,
+            alias_warning=frame_result.alias_warning,
+        )
+        self.timings.add(
+            "micro_doppler",
+            time.perf_counter() - micro_doppler_started,
+        )
+        return rotor_payload, frame_result_with_estimates
 
     def _compute_combined_payload(
         self,
@@ -1744,12 +2222,429 @@ class RawFrameWriter:
                 "frequency_slope_mhz_per_us": self.config.frequency_slope_mhz_per_us,
                 "range_resolution_m": self.config.range_resolution_m,
             },
+            "slow_time_processing": {
+                "start_frequency_ghz": self.config.start_frequency_ghz,
+                "idle_time_us": self.config.idle_time_us,
+                "ramp_end_time_us": self.config.ramp_end_time_us,
+                "chirp_period_s": self.config.chirp_period_s,
+                "frame_periodicity_ms": self.config.frame_periodicity_ms,
+                "slow_time_rate_hz": self.config.slow_time_rate_hz,
+                "frame_duty_cycle": self.config.frame_duty_cycle,
+            },
         }
         self.metadata_path.write_text(
             json.dumps(metadata, indent=2) + "\n",
             encoding="utf-8",
         )
         self.emit(f"Raw capture metadata saved to {self.metadata_path}")
+
+
+def _display_dependency_error(mode: str) -> Optional[str]:
+    if mode != ROTOR_DISPLAY_MODE:
+        return None
+    if importlib.util.find_spec("pyqtgraph") is None:
+        return (
+            "Dedicated rotor display requires PyQtGraph. Install "
+            "'pyqtgraph>=0.13.7,<0.15' and 'PySide6>=6.7,<7'."
+        )
+    qt_bindings = ("PySide6", "PyQt6", "PySide2", "PyQt5")
+    if not any(importlib.util.find_spec(name) is not None for name in qt_bindings):
+        return (
+            "Dedicated rotor display requires a Qt binding. Install "
+            "'PySide6>=6.7,<7'."
+        )
+    if (
+        sys.platform.startswith("linux")
+        and os.environ.get("XDG_SESSION_TYPE", "").lower() == "x11"
+    ):
+        from ctypes.util import find_library
+
+        if (
+            find_library("xcb-cursor") is None
+            and _bundled_xcb_cursor_library() is None
+        ):
+            return (
+                "PySide6 cannot open an X11 window because libxcb-cursor0 is "
+                "missing. Install it with 'sudo apt-get install "
+                "libxcb-cursor0'."
+            )
+    return None
+
+
+def _bundled_xcb_cursor_library() -> Optional[Path]:
+    if not sys.platform.startswith("linux"):
+        return None
+    candidate = Path(sys.prefix) / "lib" / "libxcb-cursor.so.0"
+    return candidate if candidate.is_file() else None
+
+
+def _preload_bundled_xcb_cursor_library() -> Optional[str]:
+    library_path = _bundled_xcb_cursor_library()
+    if library_path is None:
+        return None
+    try:
+        import ctypes
+
+        ctypes.CDLL(str(library_path), mode=ctypes.RTLD_GLOBAL)
+    except OSError as exc:
+        return f"Unable to preload {library_path}: {exc}"
+    return None
+
+
+def _report_display_startup(
+    startup_status_queue: mp.Queue,
+    state: str,
+    message: str,
+) -> None:
+    try:
+        startup_status_queue.put_nowait(
+            {"state": state, "message": message}
+        )
+    except queue.Full:
+        pass
+
+
+def _rotor_qt_application_arguments() -> list[str]:
+    """Keep radar's --display option away from Qt's X11 argument parser."""
+    return ["radar-rotor-display"]
+
+
+def _run_rotor_pyqtgraph_display(
+    pause_seconds: float,
+    payload_queue: mp.Queue,
+    stop_event: mp.Event,
+    rendered_updates: Any,
+    skipped_updates: Any,
+    startup_status_queue: mp.Queue,
+) -> None:
+    """Run the dedicated high-rate rotor renderer in its display process."""
+    preload_error = _preload_bundled_xcb_cursor_library()
+    if preload_error is not None:
+        print(f"Rotor display runtime warning: {preload_error}")
+    try:
+        import pyqtgraph as pg
+        from pyqtgraph.Qt import QtCore, QtWidgets
+    except (ImportError, RuntimeError) as exc:
+        message = f"Rotor display could not load PyQtGraph/Qt: {exc}"
+        print(message)
+        _report_display_startup(startup_status_queue, "error", message)
+        return
+
+    pg.setConfigOption("imageAxisOrder", "row-major")
+    application = QtWidgets.QApplication.instance()
+    if application is None:
+        application = QtWidgets.QApplication(
+            _rotor_qt_application_arguments()
+        )
+    application.setApplicationName("Radar Rotor Micro-Doppler")
+    qt_platform = application.platformName().lower()
+    if qt_platform in {"offscreen", "minimal", "minimalegl"}:
+        message = (
+            "Rotor display cannot open a visible window: Qt selected the "
+            f"'{qt_platform}' platform. On Ubuntu/X11 install "
+            "'libxcb-cursor0'."
+        )
+        print(message)
+        _report_display_startup(startup_status_queue, "error", message)
+        application.quit()
+        return
+    window = pg.GraphicsLayoutWidget(
+        title="Live Rotor Micro-Doppler",
+        show=False,
+    )
+    window.resize(1200, 700)
+    status_label = window.addLabel(
+        "RPM: collecting history...",
+        row=0,
+        col=0,
+        colspan=2,
+        justify="left",
+        color="#f0f0f0",
+    )
+
+    spectrogram_plot = window.addPlot(row=1, col=0)
+    spectrogram_plot.setLabel("left", "Radial velocity", units="m/s")
+    spectrogram_plot.setTitle("Enhanced rotor micro-Doppler")
+    spectrogram_plot.setXRange(
+        -ROTOR_DISPLAY_HISTORY_SECONDS,
+        0.0,
+        padding=0.0,
+    )
+    spectrogram_plot.hideAxis("bottom")
+    spectrogram_plot.showGrid(x=False, y=True, alpha=0.18)
+    spectrogram_plot.setMouseEnabled(x=False, y=False)
+    spectrogram_plot.hideButtons()
+
+    initial_image = np.zeros(
+        (ROTOR_MICRO_DOPPLER_FFT_SIZE, ROTOR_DISPLAY_TIME_BINS, 4),
+        dtype=np.uint8,
+    )
+    initial_image[:, :, 3] = 255
+    image_item = pg.ImageItem(
+        initial_image,
+        axisOrder="row-major",
+        levels=None,
+        autoDownsample=False,
+    )
+    spectrogram_plot.addItem(image_item)
+    image_item.setRect(
+        QtCore.QRectF(
+            -ROTOR_DISPLAY_HISTORY_SECONDS,
+            -1.0,
+            ROTOR_DISPLAY_HISTORY_SECONDS,
+            2.0,
+        )
+    )
+
+    rotor_lut = _turbo_lookup_table()
+    rotor_colormap = pg.ColorMap(
+        np.linspace(0.0, 1.0, rotor_lut.shape[0]),
+        rotor_lut,
+    )
+    colorbar_source = pg.ImageItem(
+        np.asarray(((0.0, ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX),)),
+        levels=(0.0, ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX),
+    )
+    spectrogram_plot.addColorBar(
+        colorbar_source,
+        colorMap=rotor_colormap,
+        values=(0.0, ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX),
+        interactive=False,
+        colorMapMenu=False,
+        label="Relative power above robust floor (dB)",
+    )
+
+    dc_notch_region = pg.LinearRegionItem(
+        values=(-0.05, 0.05),
+        orientation="horizontal",
+        movable=False,
+        brush=pg.mkBrush(90, 90, 90, 230),
+        pen=pg.mkPen(None),
+    )
+    dc_notch_region.setZValue(10.0)
+    spectrogram_plot.addItem(dc_notch_region)
+
+    flash_plot = window.addPlot(row=2, col=0)
+    flash_plot.setLabel(
+        "bottom",
+        "Active acquisition time relative to newest window",
+        units="s",
+    )
+    flash_plot.setLabel("left", "Flash score", units="dB")
+    flash_plot.setXRange(
+        -ROTOR_DISPLAY_HISTORY_SECONDS,
+        0.0,
+        padding=0.0,
+    )
+    flash_plot.setYRange(
+        0.0,
+        ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
+        padding=0.0,
+    )
+    flash_plot.setXLink(spectrogram_plot)
+    flash_plot.showGrid(x=True, y=True, alpha=0.25)
+    flash_plot.setMouseEnabled(x=False, y=False)
+    flash_plot.hideButtons()
+    flash_curve = flash_plot.plot(
+        [],
+        [],
+        pen=pg.mkPen("#ff9f1c", width=2),
+    )
+    window.ci.layout.setRowStretchFactor(1, 3)
+    window.ci.layout.setRowStretchFactor(2, 1)
+
+    timer = QtCore.QTimer()
+    last_extent: Optional[tuple[float, float, float, float]] = None
+    last_status_text: Optional[str] = None
+
+    def poll_latest_payload() -> None:
+        nonlocal last_extent, last_status_text
+        if stop_event.is_set():
+            timer.stop()
+            window.close()
+            application.quit()
+            return
+
+        try:
+            payload = payload_queue.get_nowait()
+        except queue.Empty:
+            return
+
+        stale_payloads = 0
+        while True:
+            try:
+                payload = payload_queue.get_nowait()
+                stale_payloads += 1
+            except queue.Empty:
+                break
+        _increment_shared_counter(skipped_updates, stale_payloads)
+
+        try:
+            display_frame = _prepare_rotor_display_frame(payload.result)
+            if display_frame is None:
+                return
+            colored_image = _colorize_rotor_spectrogram(
+                display_frame.spectrogram_db,
+                rotor_lut,
+            )
+            image_item.setImage(
+                colored_image,
+                autoLevels=False,
+                levels=None,
+            )
+            if display_frame.extent != last_extent:
+                x_min, x_max, velocity_min, velocity_max = display_frame.extent
+                image_item.setRect(
+                    QtCore.QRectF(
+                        x_min,
+                        velocity_min,
+                        x_max - x_min,
+                        velocity_max - velocity_min,
+                    )
+                )
+                spectrogram_plot.setYRange(
+                    velocity_min,
+                    velocity_max,
+                    padding=0.0,
+                )
+                dc_notch_region.setRegion(
+                    display_frame.dc_notch_velocity_bounds
+                )
+                last_extent = display_frame.extent
+            flash_curve.setData(
+                display_frame.flash_times_s,
+                display_frame.flash_scores_db,
+                connect="finite",
+            )
+            if display_frame.status_text != last_status_text:
+                status_label.setText(
+                    display_frame.status_text.replace("\n", " · ")
+                )
+                last_status_text = display_frame.status_text
+            _increment_shared_counter(rendered_updates)
+        except Exception as exc:
+            print(f"Rotor PyQtGraph update failed: {exc}")
+            timer.stop()
+            window.close()
+            application.quit()
+
+    timer.timeout.connect(poll_latest_payload)
+    polling_interval_ms = max(
+        1,
+        min(
+            int(round(max(pause_seconds, 0.001) * 1000.0)),
+            int(round(1000.0 / ROTOR_DISPLAY_MAX_RATE_HZ)),
+        ),
+    )
+    timer.start(polling_interval_ms)
+    primary_screen = application.primaryScreen()
+    if primary_screen is not None:
+        available_geometry = primary_screen.availableGeometry()
+        window.move(
+            available_geometry.center() - window.rect().center()
+        )
+    window.showNormal()
+    window.raise_()
+    window.activateWindow()
+    application.alert(window, 5000)
+    application.processEvents()
+    if not window.isVisible():
+        message = "Rotor display window was created but is not visible."
+        _report_display_startup(startup_status_queue, "error", message)
+        timer.stop()
+        window.close()
+        application.quit()
+        return
+    screen_name = (
+        window.screen().name()
+        if window.screen() is not None
+        else "unknown"
+    )
+    geometry = window.geometry()
+    _report_display_startup(
+        startup_status_queue,
+        "ready",
+        (
+            "Live rotor display ready: "
+            f"backend=PyQtGraph/{qt_platform}, "
+            f"DISPLAY={os.environ.get('DISPLAY', '<unset>')}, "
+            f"screen={screen_name}, "
+            f"geometry={geometry.width()}x{geometry.height()}"
+            f"+{geometry.x()}+{geometry.y()}."
+        ),
+    )
+    try:
+        application.exec()
+    finally:
+        timer.stop()
+        window.close()
+
+
+def _turbo_lookup_table(size: int = 256) -> np.ndarray:
+    """Return Google's polynomial approximation of the Turbo color map."""
+    sample_count = max(int(size), 2)
+    positions = np.linspace(0.0, 1.0, sample_count, dtype=np.float64)
+    powers = np.stack(
+        tuple(positions**power for power in range(6)),
+        axis=1,
+    )
+    coefficients = np.asarray(
+        (
+            (
+                0.13572138,
+                4.61539260,
+                -42.66032258,
+                132.13108234,
+                -152.94239396,
+                59.28637943,
+            ),
+            (
+                0.09140261,
+                2.19418839,
+                4.84296658,
+                -14.18503333,
+                4.27729857,
+                2.82956604,
+            ),
+            (
+                0.10667330,
+                12.64194608,
+                -60.58204836,
+                110.36276771,
+                -89.90310912,
+                27.34824973,
+            ),
+        ),
+        dtype=np.float64,
+    )
+    colors = np.clip(powers @ coefficients.T, 0.0, 1.0)
+    return np.rint(colors * 255.0).astype(np.uint8)
+
+
+def _colorize_rotor_spectrogram(
+    spectrogram_db: np.ndarray,
+    lookup_table: np.ndarray,
+) -> np.ndarray:
+    """Map the relative-dB raster to direct-rendering uint8 RGBA pixels."""
+    relative_db = np.nan_to_num(
+        np.asarray(spectrogram_db, dtype=np.float32),
+        nan=0.0,
+        posinf=ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
+        neginf=0.0,
+    )
+    color_indices = np.rint(
+        np.clip(
+            relative_db / ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
+            0.0,
+            1.0,
+        )
+        * (lookup_table.shape[0] - 1)
+    ).astype(np.intp)
+    rgb = lookup_table[color_indices]
+    rgba = np.empty((*rgb.shape[:2], 4), dtype=np.uint8)
+    rgba[:, :, :3] = rgb
+    rgba[:, :, 3] = 255
+    return np.ascontiguousarray(rgba)
 
 
 def _run_display_process(
@@ -1762,6 +2657,7 @@ def _run_display_process(
     stop_event: mp.Event,
     rendered_updates: Any,
     skipped_updates: Any,
+    startup_status_queue: mp.Queue,
 ) -> None:
     try:
         import signal
@@ -1770,18 +2666,45 @@ def _run_display_process(
     except Exception:
         pass
 
+    if mode == ROTOR_DISPLAY_MODE:
+        _run_rotor_pyqtgraph_display(
+            pause_seconds,
+            payload_queue,
+            stop_event,
+            rendered_updates,
+            skipped_updates,
+            startup_status_queue,
+        )
+        return
+
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        print("Live display disabled: matplotlib is not installed.")
+        message = "Live display requires Matplotlib, but it is not installed."
+        print(message)
+        _report_display_startup(startup_status_queue, "error", message)
         return
 
     plt.ion()
-    figure = plt.figure(figsize=(12, 5) if mode == COMBINED_DISPLAY_MODE else None)
+    figure = plt.figure(
+        figsize=(12, 6)
+        if mode in {COMBINED_DISPLAY_MODE, ROTOR_DISPLAY_MODE}
+        else None
+    )
     micro_doppler_axis = None
+    rotor_flash_axis = None
     magnitude_colorbar_axis = None
     if mode == "point-cloud":
         axis = figure.add_subplot(111, projection="3d")
+    elif mode == ROTOR_DISPLAY_MODE:
+        layout = figure.add_gridspec(
+            2,
+            1,
+            height_ratios=(3.0, 1.0),
+            hspace=0.12,
+        )
+        axis = figure.add_subplot(layout[0, 0])
+        rotor_flash_axis = figure.add_subplot(layout[1, 0], sharex=axis)
     elif mode == COMBINED_DISPLAY_MODE:
         layout = figure.add_gridspec(
             1,
@@ -1805,6 +2728,8 @@ def _run_display_process(
     point_cloud_rate_text = None
     static_reference_text = None
     micro_doppler_rate_text = None
+    rotor_flash_line = None
+    rotor_status_text = None
 
     if mode == "range":
         line = axis.plot([], [], lw=1.5)[0]
@@ -1824,6 +2749,57 @@ def _run_display_process(
         axis.set_title("Live Range-Doppler Heatmap")
         axis.set_xlabel("Range (m)")
         axis.set_ylabel("Doppler bin")
+    elif mode == ROTOR_DISPLAY_MODE:
+        rotor_colormap = plt.get_cmap(MAGNITUDE_COLORMAP).copy()
+        rotor_colormap.set_bad(color="0.35")
+        image = axis.imshow(
+            np.full((ROTOR_MICRO_DOPPLER_FFT_SIZE, 2), np.nan),
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+            cmap=rotor_colormap,
+            vmin=0.0,
+            vmax=ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
+            resample=False,
+            extent=(
+                -ROTOR_DISPLAY_HISTORY_SECONDS,
+                0.0,
+                -1.0,
+                1.0,
+            ),
+        )
+        figure.colorbar(
+            image,
+            ax=axis,
+            label="Relative power above robust floor (dB)",
+        )
+        axis.set_title("Live Rotor Micro-Doppler")
+        axis.set_ylabel("Radial velocity (m/s)")
+        axis.set_xlim(-ROTOR_DISPLAY_HISTORY_SECONDS, 0.0)
+        axis.tick_params(labelbottom=False)
+        assert rotor_flash_axis is not None
+        rotor_flash_line = rotor_flash_axis.plot(
+            [],
+            [],
+            lw=1.2,
+            color="tab:orange",
+        )[0]
+        rotor_flash_axis.set_xlabel(
+            "Active acquisition time relative to newest window (s)"
+        )
+        rotor_flash_axis.set_ylabel("Flash score (dB)")
+        rotor_flash_axis.set_xlim(-ROTOR_DISPLAY_HISTORY_SECONDS, 0.0)
+        rotor_flash_axis.set_ylim(0.0, ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX)
+        rotor_flash_axis.grid(True, alpha=0.25)
+        rotor_status_text = axis.text(
+            0.01,
+            0.98,
+            "RPM: collecting history...",
+            transform=axis.transAxes,
+            horizontalalignment="left",
+            verticalalignment="top",
+            bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+        )
     elif mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
         scatter = axis.scatter(
             [],
@@ -1965,17 +2941,37 @@ def _run_display_process(
                 label="Magnitude (dB)",
                 pad=0.12,
             )
-    if mode == COMBINED_DISPLAY_MODE:
+    if mode in {COMBINED_DISPLAY_MODE, ROTOR_DISPLAY_MODE}:
         figure.subplots_adjust(left=0.04, right=0.97, bottom=0.12, top=0.90)
     else:
         figure.tight_layout()
     plt.show(block=False)
+    _report_display_startup(
+        startup_status_queue,
+        "ready",
+        (
+            "Live display ready: "
+            f"backend=Matplotlib/{plt.get_backend()}, "
+            f"DISPLAY={os.environ.get('DISPLAY', '<unset>')}."
+        ),
+    )
 
     dynamic_artists = []
     if getattr(figure.canvas, "supports_blit", False) and mode in {
         "point-cloud",
         COMBINED_DISPLAY_MODE,
+        ROTOR_DISPLAY_MODE,
     }:
+        if mode == ROTOR_DISPLAY_MODE:
+            dynamic_artists.extend(
+                artist
+                for artist in (
+                    image,
+                    rotor_flash_line,
+                    rotor_status_text,
+                )
+                if artist is not None
+            )
         dynamic_artists.extend(
             artist
             for artist in (
@@ -2054,6 +3050,7 @@ def _run_display_process(
     point_cloud_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
     point_cloud_refresh_rate_hz: Optional[float] = None
     combined_update_count = 0
+    rotor_axes_initialized = False
 
     try:
         while not stop_event.is_set():
@@ -2090,6 +3087,22 @@ def _run_display_process(
                         heatmap,
                         max_range_m,
                         display_refresh_rate_hz,
+                    )
+                elif (
+                    mode == ROTOR_DISPLAY_MODE
+                    and image is not None
+                    and rotor_flash_axis is not None
+                    and rotor_flash_line is not None
+                    and rotor_status_text is not None
+                ):
+                    rotor_payload = payload
+                    _draw_rotor_micro_doppler(
+                        axis,
+                        image,
+                        rotor_flash_axis,
+                        rotor_flash_line,
+                        rotor_status_text,
+                        rotor_payload.result,
                     )
                 elif (
                     mode == "point-cloud"
@@ -2183,6 +3196,12 @@ def _run_display_process(
                         update_title=False,
                     )
                 if dynamic_artists:
+                    if mode == ROTOR_DISPLAY_MODE and not rotor_axes_initialized:
+                        # The first payload supplies the physical velocity
+                        # limits. Refresh the static ticks/background once,
+                        # then use fast artist-only blitting.
+                        figure.canvas.draw()
+                        rotor_axes_initialized = True
                     if len(display_backgrounds) != len(dynamic_axes):
                         figure.canvas.draw()
                     if len(display_backgrounds) != len(dynamic_axes):
@@ -2357,6 +3376,247 @@ def _draw_micro_doppler(
             else ""
         )
         axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}{rate_text}")
+
+
+def _draw_rotor_micro_doppler(
+    axis: Any,
+    image: Any,
+    flash_axis: Any,
+    flash_line: Any,
+    status_text: Any,
+    result: MicroDopplerResult,
+) -> None:
+    display_frame = _prepare_rotor_display_frame(result)
+    if display_frame is None:
+        return
+
+    velocity_min = display_frame.extent[2]
+    velocity_max = display_frame.extent[3]
+    image.set_data(display_frame.spectrogram_db)
+    image.set_extent(display_frame.extent)
+    try:
+        velocity_limits_match = np.allclose(
+            axis.get_ylim(),
+            (velocity_min, velocity_max),
+        )
+    except (TypeError, ValueError):
+        velocity_limits_match = False
+    if not velocity_limits_match:
+        axis.set_ylim(velocity_min, velocity_max)
+
+    flash_line.set_data(
+        display_frame.flash_times_s,
+        display_frame.flash_scores_db,
+    )
+    status_text.set_text(display_frame.status_text)
+
+
+def _prepare_rotor_display_frame(
+    result: MicroDopplerResult,
+) -> Optional[RotorDisplayFrame]:
+    if (
+        result.enhanced_spectrogram_db.ndim != 2
+        or result.enhanced_spectrogram_db.size == 0
+        or result.window_times_s.size == 0
+        or result.velocity_axis_m_s.size == 0
+    ):
+        return None
+
+    hop_s = max(float(result.nominal_hop_s), 1e-6)
+    newest_time_s = float(result.window_times_s[-1])
+    display_data, extent = _rasterize_rotor_spectrogram(
+        result.enhanced_spectrogram_db,
+        result.window_times_s,
+        result.velocity_axis_m_s,
+    )
+    display_data = _fill_rotor_display_time_gaps(display_data)
+    fft_center = display_data.shape[0] // 2
+    notch_start = max(
+        fft_center - ROTOR_MICRO_DOPPLER_DC_NOTCH_BINS,
+        0,
+    )
+    notch_stop = min(
+        fft_center + ROTOR_MICRO_DOPPLER_DC_NOTCH_BINS + 1,
+        display_data.shape[0],
+    )
+    display_data[
+        notch_start:notch_stop,
+        :,
+    ] = np.nan
+
+    velocity_min = float(result.velocity_axis_m_s[0])
+    velocity_max = float(result.velocity_axis_m_s[-1])
+    if result.velocity_axis_m_s.size > 1:
+        velocity_bin_width = float(
+            np.median(np.abs(np.diff(result.velocity_axis_m_s)))
+        )
+    else:
+        velocity_bin_width = max(velocity_max - velocity_min, 1e-6)
+    dc_notch_velocity_bounds = (
+        max(
+            velocity_min,
+            float(result.velocity_axis_m_s[notch_start])
+            - 0.5 * velocity_bin_width,
+        ),
+        min(
+            velocity_max,
+            float(result.velocity_axis_m_s[notch_stop - 1])
+            + 0.5 * velocity_bin_width,
+        ),
+    )
+
+    flash_times_s, flash_scores_db = _gap_aware_series(
+        result.window_times_s - newest_time_s,
+        result.flash_scores_db,
+        maximum_gap_s=hop_s * 2.5,
+    )
+
+    estimate_text = "RPM: collecting history..."
+    if result.rotor_estimates:
+        estimates = []
+        for estimate in result.rotor_estimates:
+            harmonic = (
+                f", harmonic ×{estimate.harmonic_rank}"
+                if estimate.harmonic_rank > 1
+                else ""
+            )
+            estimates.append(
+                f"{estimate.rpm:.0f} RPM "
+                f"({estimate.confidence:.0%} confidence{harmonic})"
+            )
+        estimate_text = "RPM: " + "; ".join(estimates)
+    alias_text = (
+        "\nALIAS RISK: " + (result.alias_warning or "velocity may be aliased")
+        if result.velocity_alias_risk
+        else ""
+    )
+    return RotorDisplayFrame(
+        spectrogram_db=display_data,
+        extent=extent,
+        flash_times_s=flash_times_s,
+        flash_scores_db=flash_scores_db,
+        status_text=(
+            f"Gate: {result.selected_range_m:.2f} m\n"
+            f"{estimate_text}{alias_text}"
+        ),
+        dc_notch_velocity_bounds=dc_notch_velocity_bounds,
+    )
+
+
+def _rasterize_rotor_spectrogram(
+    enhanced_spectrogram_db: np.ndarray,
+    window_times_s: np.ndarray,
+    velocity_axis_m_s: np.ndarray,
+    *,
+    history_seconds: float = ROTOR_DISPLAY_HISTORY_SECONDS,
+    time_bins: int = ROTOR_DISPLAY_TIME_BINS,
+) -> tuple[np.ndarray, tuple[float, float, float, float]]:
+    """Build a bounded, gap-preserving display grid using temporal max pooling."""
+    spectra = np.asarray(enhanced_spectrogram_db, dtype=np.float32)
+    times = np.asarray(window_times_s, dtype=np.float64)
+    velocity = np.asarray(velocity_axis_m_s, dtype=np.float32)
+    bin_count = max(int(time_bins), 2)
+    span_s = max(float(history_seconds), 1e-6)
+    velocity_min = float(velocity[0])
+    velocity_max = float(velocity[-1])
+    extent = (-span_s, 0.0, velocity_min, velocity_max)
+    raster = np.full((spectra.shape[0], bin_count), np.nan, dtype=np.float32)
+    if spectra.size == 0 or times.size == 0:
+        return raster, extent
+
+    newest_time_s = float(times[-1])
+    relative_times_s = times - newest_time_s
+    valid = (
+        np.isfinite(relative_times_s)
+        & (relative_times_s >= -span_s)
+        & (relative_times_s <= 0.0)
+    )
+    if not np.any(valid):
+        return raster, extent
+
+    normalized = (relative_times_s[valid] + span_s) / span_s
+    column_indices = np.minimum(
+        np.floor(normalized * bin_count).astype(np.intp),
+        bin_count - 1,
+    )
+    pooled = np.full(raster.shape, -np.inf, dtype=np.float32)
+    frequency_indices = np.arange(spectra.shape[0], dtype=np.intp)[:, None]
+    np.maximum.at(
+        pooled,
+        (frequency_indices, column_indices[None, :]),
+        spectra[:, valid],
+    )
+    occupied = np.isfinite(pooled)
+    raster[occupied] = pooled[occupied]
+    return raster, extent
+
+
+def _concatenated_active_window_times(
+    window_count: int,
+    nominal_hop_s: float,
+) -> np.ndarray:
+    """Return a uniform active-time axis ending at zero for display only."""
+    count = max(int(window_count), 0)
+    if count == 0:
+        return np.empty((0,), dtype=np.float64)
+    hop_s = max(float(nominal_hop_s), 1e-9)
+    return (
+        np.arange(count, dtype=np.float64) - float(count - 1)
+    ) * hop_s
+
+
+def _fill_rotor_display_time_gaps(raster: np.ndarray) -> np.ndarray:
+    """Fill unmeasured display columns from the nearest measured spectrum."""
+    filled = np.asarray(raster, dtype=np.float32).copy()
+    if filled.ndim != 2 or filled.shape[1] == 0:
+        return filled
+
+    measured_columns = np.flatnonzero(np.any(np.isfinite(filled), axis=0))
+    if measured_columns.size == 0:
+        return filled
+
+    columns = np.arange(filled.shape[1], dtype=np.intp)
+    insertion_points = np.searchsorted(measured_columns, columns, side="left")
+    right_columns = measured_columns[
+        np.minimum(insertion_points, measured_columns.size - 1)
+    ]
+    left_columns = measured_columns[np.maximum(insertion_points - 1, 0)]
+    nearest_columns = np.where(
+        np.abs(right_columns - columns) < np.abs(columns - left_columns),
+        right_columns,
+        left_columns,
+    )
+    missing_columns = ~np.any(np.isfinite(filled), axis=0)
+    filled[:, missing_columns] = filled[:, nearest_columns[missing_columns]]
+    return filled
+
+
+def _gap_aware_series(
+    times_s: np.ndarray,
+    values: np.ndarray,
+    *,
+    maximum_gap_s: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    times = np.asarray(times_s, dtype=np.float64)
+    samples = np.asarray(values, dtype=np.float32)
+    if times.size <= 1:
+        return times, samples
+    gap_indices = np.flatnonzero(np.diff(times) > maximum_gap_s)
+    if gap_indices.size == 0:
+        return times, samples
+    expanded_times = []
+    expanded_samples = []
+    gap_set = set(int(index) for index in gap_indices)
+    for index, (sample_time_s, sample) in enumerate(zip(times, samples)):
+        expanded_times.append(float(sample_time_s))
+        expanded_samples.append(float(sample))
+        if index in gap_set:
+            expanded_times.append(float(sample_time_s))
+            expanded_samples.append(np.nan)
+    return (
+        np.asarray(expanded_times, dtype=np.float64),
+        np.asarray(expanded_samples, dtype=np.float32),
+    )
 
 
 def _micro_doppler_extent(
@@ -2565,7 +3825,11 @@ def process_complete_frame(
         time.perf_counter() - range_fft_started,
     )
     range_axis_m = config.range_axis_m()
-    display.update(range_fft, range_axis_m)
+    display.update(
+        range_fft,
+        range_axis_m,
+        captured_at_s=frame.first_byte_at_s,
+    )
     display.timings.add("total", time.perf_counter() - total_started)
 
 
@@ -2595,7 +3859,7 @@ def _request_processor_stop(
         return False
 
 
-def _run_frame_processor(
+def _run_frame_processor_impl(
     config: RadarCaptureConfig,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
@@ -2620,6 +3884,13 @@ def _run_frame_processor(
     static_min_change_db: float,
     static_background_update_rate: float,
     static_cluster_min_samples: int,
+    micro_doppler_range_m: Optional[float],
+    micro_doppler_range_half_width_bins: int,
+    rotor_blades: int,
+    rotor_count: int,
+    rotor_radius_m: Optional[float],
+    rotor_rpm_min: float,
+    rotor_rpm_max: float,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -2638,6 +3909,67 @@ def _run_frame_processor(
         static_min_change_db=static_min_change_db,
         static_background_update_rate=static_background_update_rate,
         static_cluster_min_samples=static_cluster_min_samples,
+        rotor_processing=(
+            {
+                "mode": "per-TX clutter-rejected STFT",
+                "window": "Hann",
+                "window_loops": ROTOR_MICRO_DOPPLER_WINDOW_LOOPS,
+                "hop_loops": ROTOR_MICRO_DOPPLER_HOP_LOOPS,
+                "fft_size": ROTOR_MICRO_DOPPLER_FFT_SIZE,
+                "range_half_width_bins": (
+                    micro_doppler_range_half_width_bins
+                ),
+                "dc_notch_bins": ROTOR_MICRO_DOPPLER_DC_NOTCH_BINS,
+                "relative_display_db": [
+                    0.0,
+                    ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
+                ],
+                "estimator_history_seconds": (
+                    ROTOR_MICRO_DOPPLER_HISTORY_SECONDS
+                ),
+                "display_history_seconds": ROTOR_DISPLAY_HISTORY_SECONDS,
+                "display_time_basis": (
+                    "concatenated active acquisition intervals"
+                ),
+                "estimator_time_basis": "physical capture timestamps",
+                "display_time_bins": ROTOR_DISPLAY_TIME_BINS,
+                "processed_spectrum_db_decimals": (
+                    ROTOR_SPECTRUM_OUTPUT_DECIMALS
+                ),
+                "legacy_windows_policy": (
+                    "latest window only; full windows are in "
+                    "rotor_micro_doppler"
+                ),
+                "weighted_complex_mean_cancellation": True,
+                "adaptive_noise_filter": {
+                    "minimum_gate_db": DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
+                    "robust_sigma_multiplier": (
+                        DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER
+                    ),
+                    "mad_scale": 1.4826,
+                    "mad_policy": (
+                        "lower half below median to avoid positive blade bias"
+                    ),
+                    "support_shape": list(
+                        DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE
+                    ),
+                    "minimum_support_cells": (
+                        DEFAULT_ROTOR_NOISE_MIN_SUPPORT
+                    ),
+                    "amplitude_policy": (
+                        "preserve retained relative dB; blank rejected cells"
+                    ),
+                },
+                "target_range_m": micro_doppler_range_m,
+                "rotor_blades": rotor_blades,
+                "rotor_count": rotor_count,
+                "rotor_radius_m": rotor_radius_m,
+                "rotor_rpm_min": rotor_rpm_min,
+                "rotor_rpm_max": rotor_rpm_max,
+            }
+            if display_mode == ROTOR_DISPLAY_MODE
+            else None
+        ),
     )
     display = DisplayPayloadSink(
         display_mode,
@@ -2659,6 +3991,15 @@ def _run_frame_processor(
         static_min_change_db=static_min_change_db,
         static_background_update_rate=static_background_update_rate,
         static_cluster_min_samples=static_cluster_min_samples,
+        micro_doppler_range_m=micro_doppler_range_m,
+        micro_doppler_range_half_width_bins=(
+            micro_doppler_range_half_width_bins
+        ),
+        rotor_blades=rotor_blades,
+        rotor_count=rotor_count,
+        rotor_radius_m=rotor_radius_m,
+        rotor_rpm_min=rotor_rpm_min,
+        rotor_rpm_max=rotor_rpm_max,
     )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -2681,6 +4022,35 @@ def _run_frame_processor(
             f"minimum_change={static_min_change_db:g} dB, "
             f"background_update_rate={static_background_update_rate:g}. "
             "Keep the target absent until calibration is complete."
+    )
+    if display_mode == ROTOR_DISPLAY_MODE:
+        chirps_per_loop = config.num_chirps_per_loop or 1
+        slow_time_rate_hz = config.slow_time_rate_hz
+        slow_time_interval_s = config.slow_time_interval_s
+        slow_time_text = (
+            f"per-TX slow_time_rate={slow_time_rate_hz:.2f} Hz, "
+            if slow_time_rate_hz is not None
+            else ""
+        )
+        resolution_text = (
+            "STFT time span/hop="
+            f"{ROTOR_MICRO_DOPPLER_WINDOW_LOOPS * slow_time_interval_s * 1e3:.3f}/"
+            f"{ROTOR_MICRO_DOPPLER_HOP_LOOPS * slow_time_interval_s * 1e3:.3f} ms, "
+            if slow_time_interval_s is not None
+            else ""
+        )
+        worker_emit(
+            "Dedicated rotor micro-Doppler enabled: "
+            f"gate={micro_doppler_range_m:.2f} m, "
+            f"range_bins={2 * micro_doppler_range_half_width_bins + 1}, "
+            f"window/hop={ROTOR_MICRO_DOPPLER_WINDOW_LOOPS}/"
+            f"{ROTOR_MICRO_DOPPLER_HOP_LOOPS} loops, "
+            f"chirps_per_loop={chirps_per_loop}, "
+            f"{slow_time_text}"
+            f"{resolution_text}"
+            f"active_display_span={ROTOR_DISPLAY_HISTORY_SECONDS:g} s, "
+            f"blades={rotor_blades}, rotors={rotor_count}, "
+            f"RPM band={rotor_rpm_min:g}-{rotor_rpm_max:g}."
         )
 
     try:
@@ -2700,6 +4070,22 @@ def _run_frame_processor(
         processed_writer.close()
         worker_emit(display.format_static_summary())
         worker_emit(display.timings.format_summary())
+
+
+def _run_frame_processor(*args: Any, **kwargs: Any) -> None:
+    """Run the DSP worker and report failures that occur during initialization."""
+    log_queue = kwargs.get("log_queue")
+    if log_queue is None and len(args) >= 3:
+        log_queue = args[2]
+    try:
+        _run_frame_processor_impl(*args, **kwargs)
+    except KeyboardInterrupt:
+        pass
+    except Exception as exc:
+        message = f"Frame processor failed during startup: {exc!r}"
+        if log_queue is None:
+            raise
+        _queue_emit(log_queue, message)
 
 
 def listen_for_frames(
@@ -2959,6 +4345,7 @@ def parse_args() -> argparse.Namespace:
             "range",
             "range-doppler",
             "point-cloud",
+            ROTOR_DISPLAY_MODE,
             COMBINED_DISPLAY_MODE,
         ),
         default="none",
@@ -2983,6 +4370,55 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Maximum range in meters for all live displays. "
             "Defaults to 10 m; use 0 for the full computed range."
+        ),
+    )
+    parser.add_argument(
+        "--micro-doppler-range-m",
+        type=float,
+        help=(
+            "Required fixed range gate in meters for the dedicated "
+            "micro-doppler display."
+        ),
+    )
+    parser.add_argument(
+        "--micro-doppler-range-half-width-bins",
+        type=int,
+        default=ROTOR_MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+        help="Range bins on each side of the dedicated rotor gate. Defaults to 1.",
+    )
+    parser.add_argument(
+        "--rotor-blades",
+        type=int,
+        default=DEFAULT_ROTOR_BLADES,
+        help=(
+            "Blade count per rotor used to convert blade-passage rate to RPM. "
+            "Defaults to 2."
+        ),
+    )
+    parser.add_argument(
+        "--rotor-count",
+        type=int,
+        default=1,
+        help="Number of separated rotor-rate peaks to report.",
+    )
+    parser.add_argument(
+        "--rotor-radius-m",
+        type=float,
+        help="Rotor radius in meters for velocity-alias diagnostics.",
+    )
+    parser.add_argument(
+        "--rotor-rpm-min",
+        type=float,
+        default=500.0,
+        help="Minimum RPM searched by the blade-passage estimator.",
+    )
+    parser.add_argument(
+        "--rotor-rpm-max",
+        type=float,
+        default=DEFAULT_ROTOR_RPM_MAX,
+        help=(
+            "Maximum RPM searched by the blade-passage estimator. "
+            "Defaults to 10700."
         ),
     )
     parser.add_argument(
@@ -3262,6 +4698,26 @@ def _config_from_mmwave_studio_json(data: Any) -> Optional[RadarCaptureConfig]:
             "freqSlopeConst_MHz_usec",
             "freqSlopeConst",
         ),
+        start_frequency_ghz=_optional_float(
+            profile_config,
+            "startFreqConst_GHz",
+            "startFreq",
+        ),
+        idle_time_us=_optional_float(
+            profile_config,
+            "idleTimeConst_usec",
+            "idleTime",
+        ),
+        ramp_end_time_us=_optional_float(
+            profile_config,
+            "rampEndTime_usec",
+            "rampEndTime",
+        ),
+        frame_periodicity_ms=_optional_float(
+            frame_config,
+            "framePeriodicity_msec",
+            "framePeriodicity",
+        ),
     )
 
 
@@ -3335,6 +4791,30 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         "frequencySlopeMhzPerUs",
         "frequency_slope_mhz_per_us",
     )
+    start_frequency_ghz = _optional_float(
+        data,
+        "startFreq",
+        "startFreqConst_GHz",
+        "start_frequency_ghz",
+    )
+    idle_time_us = _optional_float(
+        data,
+        "idleTime",
+        "idleTimeConst_usec",
+        "idle_time_us",
+    )
+    ramp_end_time_us = _optional_float(
+        data,
+        "rampEndTime",
+        "rampEndTime_usec",
+        "ramp_end_time_us",
+    )
+    frame_periodicity_ms = _optional_float(
+        data,
+        "framePeriodicity",
+        "framePeriodicity_msec",
+        "frame_periodicity_ms",
+    )
     channel_interleave_value = _optional_int(
         data, "channelInterleave", "ChannelInterleave", "chInterleave"
     )
@@ -3372,6 +4852,10 @@ def _config_from_mapping(data: Any, *, source_name: str) -> RadarCaptureConfig:
         ),
         sample_rate_ksps=sample_rate_ksps,
         frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
+        start_frequency_ghz=start_frequency_ghz,
+        idle_time_us=idle_time_us,
+        ramp_end_time_us=ramp_end_time_us,
+        frame_periodicity_ms=frame_periodicity_ms,
     )
 
 
@@ -3386,6 +4870,10 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
     lvds_lanes = 2
     sample_rate_ksps: Optional[float] = None
     frequency_slope_mhz_per_us: Optional[float] = None
+    start_frequency_ghz: Optional[float] = None
+    idle_time_us: Optional[float] = None
+    ramp_end_time_us: Optional[float] = None
+    frame_periodicity_ms: Optional[float] = None
     chirp_tx_masks: dict[int, int] = {}
 
     for raw_line in lines:
@@ -3396,6 +4884,9 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         tokens = line.split()
         command = tokens[0]
         if command == "profileCfg" and len(tokens) > 10:
+            start_frequency_ghz = float(tokens[2])
+            idle_time_us = float(tokens[3])
+            ramp_end_time_us = float(tokens[5])
             frequency_slope_mhz_per_us = float(tokens[8])
             profile_adc_samples = int(float(tokens[10]))
             sample_rate_ksps = float(tokens[11])
@@ -3405,6 +4896,8 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
             chirp_start_idx = int(tokens[1])
             chirp_end_idx = int(tokens[2])
             num_loops = int(tokens[3])
+            if len(tokens) > 5:
+                frame_periodicity_ms = float(tokens[5])
         elif command == "chirpCfg" and len(tokens) > 8:
             chirp_cfg_start_idx = int(tokens[1])
             chirp_cfg_end_idx = int(tokens[2])
@@ -3443,6 +4936,10 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         ),
         sample_rate_ksps=sample_rate_ksps,
         frequency_slope_mhz_per_us=frequency_slope_mhz_per_us,
+        start_frequency_ghz=start_frequency_ghz,
+        idle_time_us=idle_time_us,
+        ramp_end_time_us=ramp_end_time_us,
+        frame_periodicity_ms=frame_periodicity_ms,
     )
 
 
@@ -3603,7 +5100,70 @@ def main() -> None:
     capture_stats: Optional[CaptureStats] = None
     processed_frames_counter: Optional[Any] = None
     try:
+        if args.display == ROTOR_DISPLAY_MODE:
+            if (
+                args.micro_doppler_range_m is None
+                or not np.isfinite(args.micro_doppler_range_m)
+                or args.micro_doppler_range_m <= 0.0
+            ):
+                raise CaptureStartupError(
+                    "--micro-doppler-range-m must be a finite positive value "
+                    "for the dedicated micro-doppler display"
+                )
+            if args.rotor_blades < 1 or args.rotor_count < 1:
+                raise CaptureStartupError(
+                    "--rotor-blades and --rotor-count must be positive"
+                )
+            if (
+                not np.isfinite(args.rotor_rpm_min)
+                or not np.isfinite(args.rotor_rpm_max)
+                or args.rotor_rpm_min <= 0.0
+                or args.rotor_rpm_max <= args.rotor_rpm_min
+            ):
+                raise CaptureStartupError(
+                    "Rotor RPM bounds must be finite, positive, and increasing"
+                )
+            args.static_detection = False
         config = RadarCaptureConfig.from_file(args.config)
+        if args.display == ROTOR_DISPLAY_MODE and (
+            config.start_frequency_ghz is None
+            or config.slow_time_interval_s is None
+        ):
+            raise CaptureStartupError(
+                "Dedicated micro-Doppler mode requires profile start "
+                "frequency, idle time, and ramp-end time"
+            )
+        if args.display == ROTOR_DISPLAY_MODE and (
+            config.num_chirps_per_loop is None
+            or config.num_chirps_per_loop <= 0
+            or config.tx_channel_masks is None
+            or not config.tx_channel_masks
+            or any(mask <= 0 for mask in config.tx_channel_masks)
+        ):
+            raise CaptureStartupError(
+                "Dedicated micro-Doppler mode requires a valid TX chirp "
+                "schedule in the radar profile"
+            )
+        if (
+            args.display == ROTOR_DISPLAY_MODE
+            and config.frame_duty_cycle is not None
+            and config.frame_duty_cycle > 0.505
+        ):
+            raise CaptureStartupError(
+                "Dedicated rotor profile exceeds the 50% frame-duty target"
+            )
+        if args.display == ROTOR_DISPLAY_MODE:
+            configured_range_axis = config.range_axis_m()
+            if (
+                configured_range_axis is None
+                or configured_range_axis.size == 0
+                or args.micro_doppler_range_m
+                > float(configured_range_axis[-1])
+            ):
+                raise CaptureStartupError(
+                    "The requested micro-Doppler range is outside the "
+                    "configured range axis"
+                )
         emit(f"Loaded radar config: {config}")
         try:
             dsp_backend = validate_openradar_backend()
@@ -3653,6 +5213,17 @@ def main() -> None:
                 max(args.static_min_change_db, 0.0),
                 min(max(args.static_background_update_rate, 0.0), 1.0),
                 max(args.static_cluster_min_samples, 1),
+                args.micro_doppler_range_m,
+                max(args.micro_doppler_range_half_width_bins, 0),
+                max(args.rotor_blades, 1),
+                max(args.rotor_count, 1),
+                (
+                    max(args.rotor_radius_m, 0.0)
+                    if args.rotor_radius_m is not None
+                    else None
+                ),
+                max(args.rotor_rpm_min, 1.0),
+                max(args.rotor_rpm_max, args.rotor_rpm_min + 1.0),
             ),
             name="RadarFrameProcessor",
         )
@@ -3724,13 +5295,15 @@ def main() -> None:
                     if capture_stats.frames_emitted
                     else 0.0
                 )
+                redraw_coverage = 100.0 - not_rendered_rate
                 emit(
                     "Display summary: "
                     f"rendered_updates={rendered_updates}, "
-                    f"latest_updates_skipped={skipped_updates}, "
-                    f"frames_not_rendered="
-                    f"{not_rendered}/{capture_stats.frames_emitted} "
-                    f"({not_rendered_rate:.3f}%)"
+                    f"coalesced_updates={skipped_updates}, "
+                    f"radar_frame_redraw_coverage={redraw_coverage:.3f}%, "
+                    f"radar_frames_without_dedicated_redraw="
+                    f"{not_rendered}/{capture_stats.frames_emitted}. "
+                    "This is GUI cadence, not capture or processing loss."
                 )
 
         if frame_queue is not None:

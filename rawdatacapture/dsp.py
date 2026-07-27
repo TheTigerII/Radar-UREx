@@ -1,9 +1,12 @@
 from collections import deque
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional, Protocol
 
 import numpy as np
 from scipy import fft as scipy_fft
+from scipy import ndimage as scipy_ndimage
+from scipy import signal as scipy_signal
 
 try:
     from .openradar_backend import (
@@ -31,6 +34,11 @@ DEFAULT_STATIC_SMOOTHING_RATE = 0.35
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
 DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE = 20.0
 DEFAULT_STATIC_MINIMUM_NOISE_DB = 1.0
+DEFAULT_ROTOR_NOISE_GATE_MIN_DB = 3.0
+DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER = 3.0
+DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE = (3, 3)
+DEFAULT_ROTOR_NOISE_MIN_SUPPORT = 3
+ROBUST_GAUSSIAN_MAD_SCALE = 1.4826
 
 
 class AdaptiveClutterMap:
@@ -479,6 +487,10 @@ class RadarDspConfig(Protocol):
     tx_channel_masks: Optional[tuple[int, ...]]
     sample_rate_ksps: Optional[float]
     frequency_slope_mhz_per_us: Optional[float]
+    start_frequency_ghz: Optional[float]
+    idle_time_us: Optional[float]
+    ramp_end_time_us: Optional[float]
+    frame_periodicity_ms: Optional[float]
 
 
 def range_resolution_m(config: RadarDspConfig) -> Optional[float]:
@@ -1077,11 +1089,532 @@ def compute_per_tx_micro_doppler_spectrogram(
     return np.stack(spectra, axis=1).astype(np.float32, copy=False)
 
 
+@dataclass(frozen=True)
+class RotorEstimate:
+    blade_passage_hz: float
+    rpm: float
+    confidence: float
+    harmonic_rank: int = 1
+    velocity_alias_risk: bool = False
+
+
+@dataclass(frozen=True)
+class MicroDopplerResult:
+    raw_spectrogram_db: np.ndarray
+    enhanced_spectrogram_db: np.ndarray
+    window_times_s: np.ndarray
+    velocity_axis_m_s: np.ndarray
+    flash_scores_db: np.ndarray
+    noise_floor_db: np.ndarray
+    selected_range_m: float
+    nominal_hop_s: float
+    unambiguous_velocity_m_s: Optional[float]
+    rotor_estimates: tuple[RotorEstimate, ...] = ()
+    velocity_alias_risk: bool = False
+    alias_warning: Optional[str] = None
+    noise_gate_db: Optional[np.ndarray] = None
+
+
+def radar_slow_time_interval_s(config: RadarDspConfig) -> Optional[float]:
+    if (
+        config.idle_time_us is None
+        or config.ramp_end_time_us is None
+        or config.idle_time_us < 0.0
+        or config.ramp_end_time_us <= 0.0
+    ):
+        return None
+    chirps_per_loop = config.num_chirps_per_loop or 1
+    return (
+        float(config.idle_time_us + config.ramp_end_time_us)
+        * 1e-6
+        * chirps_per_loop
+    )
+
+
+def micro_doppler_velocity_axis_m_s(
+    config: RadarDspConfig,
+    fft_size: int,
+) -> np.ndarray:
+    interval_s = radar_slow_time_interval_s(config)
+    if (
+        interval_s is None
+        or not config.start_frequency_ghz
+        or config.start_frequency_ghz <= 0.0
+        or fft_size <= 0
+    ):
+        return np.empty((0,), dtype=np.float32)
+    wavelength_m = SPEED_OF_LIGHT_M_PER_S / (
+        float(config.start_frequency_ghz) * 1e9
+    )
+    frequencies_hz = scipy_fft.fftshift(
+        scipy_fft.fftfreq(fft_size, d=interval_s)
+    )
+    return (frequencies_hz * wavelength_m * 0.5).astype(
+        np.float32,
+        copy=False,
+    )
+
+
+def rotor_velocity_alias_diagnostic(
+    config: RadarDspConfig,
+    *,
+    rotor_radius_m: Optional[float],
+    rotor_rpm_max: Optional[float],
+    warning_fraction: float = 0.8,
+) -> tuple[Optional[float], bool, Optional[str]]:
+    velocity_axis = micro_doppler_velocity_axis_m_s(config, 2)
+    if velocity_axis.size == 0:
+        return None, False, "Doppler velocity is unavailable from this profile."
+
+    unambiguous_velocity_m_s = float(abs(velocity_axis[0]))
+    if (
+        rotor_radius_m is None
+        or rotor_rpm_max is None
+        or rotor_radius_m <= 0.0
+        or rotor_rpm_max <= 0.0
+    ):
+        return unambiguous_velocity_m_s, False, None
+
+    tip_speed_m_s = (
+        2.0 * np.pi * float(rotor_radius_m) * float(rotor_rpm_max) / 60.0
+    )
+    threshold_m_s = warning_fraction * unambiguous_velocity_m_s
+    alias_risk = bool(tip_speed_m_s > threshold_m_s)
+    warning = None
+    if alias_risk:
+        warning = (
+            f"Expected tip speed {tip_speed_m_s:.1f} m/s exceeds "
+            f"{warning_fraction:.0%} of the ±{unambiguous_velocity_m_s:.1f} "
+            "m/s unambiguous velocity; spectral velocity may alias."
+        )
+    return unambiguous_velocity_m_s, alias_risk, warning
+
+
+def compute_rotor_micro_doppler_frame(
+    range_fft: np.ndarray,
+    range_axis: Optional[np.ndarray],
+    config: RadarDspConfig,
+    *,
+    target_range_m: float,
+    frame_time_s: float,
+    range_half_width_bins: int = 1,
+    window_loops: int = 16,
+    hop_loops: int = 2,
+    fft_size: int = 128,
+    dc_notch_bins: int = 2,
+    rotor_radius_m: Optional[float] = None,
+    rotor_rpm_max: Optional[float] = None,
+) -> MicroDopplerResult:
+    """Return raw and clutter-rejected spectra for one radar frame."""
+    empty = np.empty((0, 0), dtype=np.float32)
+    empty_axis = np.empty((0,), dtype=np.float32)
+    interval_s = radar_slow_time_interval_s(config)
+    if interval_s is None:
+        raise ValueError(
+            "Rotor micro-Doppler requires start frequency, idle time, and "
+            "ramp-end timing in the radar configuration"
+        )
+    if range_fft.ndim != 3 or range_fft.size == 0:
+        return MicroDopplerResult(
+            empty,
+            empty,
+            empty_axis,
+            empty_axis,
+            empty_axis,
+            empty_axis,
+            float(target_range_m),
+            hop_loops * interval_s,
+            None,
+        )
+    if window_loops <= 0 or hop_loops <= 0 or fft_size < window_loops:
+        raise ValueError(
+            "Rotor micro-Doppler window/hop must be positive and FFT size "
+            "must cover the window"
+        )
+
+    chirps_per_loop = config.num_chirps_per_loop or 1
+    if range_fft.shape[0] % chirps_per_loop:
+        raise ValueError("Frame chirp count is not divisible by chirps per loop")
+    loop_count = range_fft.shape[0] // chirps_per_loop
+    if loop_count < window_loops:
+        return MicroDopplerResult(
+            empty,
+            empty,
+            empty_axis,
+            micro_doppler_velocity_axis_m_s(config, fft_size),
+            empty_axis,
+            empty_axis,
+            float(target_range_m),
+            hop_loops * interval_s,
+            None,
+        )
+
+    physical_range_axis = (
+        np.asarray(range_axis, dtype=np.float64)
+        if range_axis is not None and range_axis.size == range_fft.shape[-1]
+        else None
+    )
+    if physical_range_axis is None or not np.isfinite(target_range_m):
+        raise ValueError(
+            "Rotor micro-Doppler requires a finite target range and physical "
+            "range axis"
+        )
+    center_bin = int(np.argmin(np.abs(physical_range_axis - target_range_m)))
+    half_width = max(int(range_half_width_bins), 0)
+    gate_start = max(center_bin - half_width, 0)
+    gate_end = min(center_bin + half_width + 1, range_fft.shape[-1])
+    selected_range_m = float(physical_range_axis[center_bin])
+
+    loop_cube = range_fft.reshape(
+        loop_count,
+        chirps_per_loop,
+        range_fft.shape[1],
+        range_fft.shape[2],
+    )
+    gated = loop_cube[..., gate_start:gate_end]
+    window = _hann_window_float32(window_loops)
+    window_sum = float(np.sum(window))
+    window_starts = np.arange(
+        0,
+        loop_count - window_loops + 1,
+        hop_loops,
+        dtype=np.intp,
+    )
+    samples = np.stack(
+        [gated[start : start + window_loops] for start in window_starts],
+        axis=0,
+    )
+    weights = window[np.newaxis, :, np.newaxis, np.newaxis, np.newaxis]
+    weighted_mean = np.sum(samples * weights, axis=1, keepdims=True) / max(
+        window_sum,
+        1e-12,
+    )
+    raw_fft = scipy_fft.fftshift(
+        scipy_fft.fft(
+            samples * weights,
+            n=fft_size,
+            axis=1,
+            workers=2,
+        ),
+        axes=1,
+    )
+    window_spectrum = _centered_hann_fft_complex64(
+        window_loops,
+        fft_size,
+    )
+    # FFT((x - mean) * window) is exactly FFT(x * window) minus the
+    # weighted mean times FFT(window). Reusing raw_fft avoids a second
+    # batched FFT for every highly overlapped STFT window.
+    cancelled_fft = raw_fft - (
+        weighted_mean
+        * window_spectrum[
+            np.newaxis,
+            :,
+            np.newaxis,
+            np.newaxis,
+            np.newaxis,
+        ]
+    )
+    raw_power = np.sum(
+        raw_fft.real * raw_fft.real + raw_fft.imag * raw_fft.imag,
+        axis=(2, 3, 4),
+    )
+    cancelled_power = np.sum(
+        cancelled_fft.real * cancelled_fft.real
+        + cancelled_fft.imag * cancelled_fft.imag,
+        axis=(2, 3, 4),
+    )
+    raw_spectrogram_db = (
+        10.0 * np.log10(raw_power + 1e-12)
+    ).T.astype(
+        np.float32,
+        copy=False,
+    )
+    cancelled_spectrogram_db = (
+        10.0 * np.log10(cancelled_power + 1e-12)
+    ).T.astype(
+        np.float32,
+        copy=False,
+    )
+    window_times_s = (
+        float(frame_time_s)
+        + (window_starts + (window_loops - 1) * 0.5) * interval_s
+    )
+    fft_center = fft_size // 2
+    notch = max(int(dc_notch_bins), 0)
+    off_center = np.ones(fft_size, dtype=bool)
+    off_center[
+        max(fft_center - notch, 0) : min(fft_center + notch + 1, fft_size)
+    ] = False
+    if not np.any(off_center):
+        raise ValueError("DC notch excludes every Doppler bin")
+    noise_floor_db, noise_gate_db = _rotor_noise_floor_and_gate(
+        cancelled_spectrogram_db,
+        off_center,
+    )
+    relative_spectrogram_db = np.maximum(
+        cancelled_spectrogram_db - noise_floor_db[np.newaxis, :],
+        0.0,
+    ).astype(np.float32, copy=False)
+    enhanced_spectrogram_db = _apply_rotor_noise_support_filter(
+        relative_spectrogram_db,
+        noise_gate_db,
+        off_center,
+    )
+    excess_linear = np.maximum(
+        10.0 ** (
+            np.clip(enhanced_spectrogram_db[off_center], 0.0, 30.0) / 10.0
+        )
+        - 1.0,
+        0.0,
+    )
+    flash_scores_db = (
+        10.0 * np.log10(1.0 + np.mean(excess_linear, axis=0))
+    ).astype(np.float32, copy=False)
+    velocity_axis = micro_doppler_velocity_axis_m_s(config, fft_size)
+    unambiguous_velocity_m_s, alias_risk, alias_warning = (
+        rotor_velocity_alias_diagnostic(
+            config,
+            rotor_radius_m=rotor_radius_m,
+            rotor_rpm_max=rotor_rpm_max,
+        )
+    )
+    return MicroDopplerResult(
+        raw_spectrogram_db=raw_spectrogram_db,
+        enhanced_spectrogram_db=enhanced_spectrogram_db,
+        window_times_s=np.asarray(window_times_s, dtype=np.float64),
+        velocity_axis_m_s=velocity_axis,
+        flash_scores_db=flash_scores_db,
+        noise_floor_db=noise_floor_db,
+        selected_range_m=selected_range_m,
+        nominal_hop_s=hop_loops * interval_s,
+        unambiguous_velocity_m_s=unambiguous_velocity_m_s,
+        noise_gate_db=noise_gate_db,
+        velocity_alias_risk=alias_risk,
+        alias_warning=alias_warning,
+    )
+
+
+def _rotor_noise_floor_and_gate(
+    cancelled_spectrogram_db: np.ndarray,
+    off_center_mask: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate per-window floor and lower-tail MAD without blade bias."""
+    spectrogram = np.asarray(cancelled_spectrogram_db, dtype=np.float32)
+    off_center = np.asarray(off_center_mask, dtype=bool)
+    if spectrogram.ndim != 2:
+        raise ValueError("Rotor cancelled spectrogram must be two-dimensional")
+    if off_center.shape != (spectrogram.shape[0],):
+        raise ValueError("Rotor off-centre mask must contain one value per bin")
+
+    noise_samples_db = spectrogram[off_center]
+    noise_floor_db = np.median(
+        noise_samples_db,
+        axis=0,
+    ).astype(np.float32, copy=False)
+    lower_deviations_db = np.where(
+        noise_samples_db <= noise_floor_db[np.newaxis, :],
+        noise_floor_db[np.newaxis, :] - noise_samples_db,
+        np.nan,
+    )
+    noise_mad_db = np.nanmedian(
+        lower_deviations_db,
+        axis=0,
+    )
+    robust_noise_sigma_db = (
+        ROBUST_GAUSSIAN_MAD_SCALE * noise_mad_db
+    ).astype(np.float32, copy=False)
+    noise_gate_db = np.maximum(
+        DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
+        DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER * robust_noise_sigma_db,
+    ).astype(np.float32, copy=False)
+    return noise_floor_db, noise_gate_db
+
+
+def _apply_rotor_noise_support_filter(
+    relative_spectrogram_db: np.ndarray,
+    noise_gate_db: np.ndarray,
+    off_center_mask: np.ndarray,
+) -> np.ndarray:
+    """Blank sub-gate and isolated rotor STFT cells without attenuating peaks."""
+    relative = np.asarray(relative_spectrogram_db, dtype=np.float32)
+    gates = np.asarray(noise_gate_db, dtype=np.float32)
+    off_center = np.asarray(off_center_mask, dtype=bool)
+    if relative.ndim != 2:
+        raise ValueError("Rotor relative spectrogram must be two-dimensional")
+    if gates.shape != (relative.shape[1],):
+        raise ValueError("Rotor noise gate must contain one value per window")
+    if off_center.shape != (relative.shape[0],):
+        raise ValueError("Rotor off-centre mask must contain one value per bin")
+
+    candidates = (
+        (relative >= gates[np.newaxis, :])
+        & off_center[:, np.newaxis]
+    )
+    support = scipy_ndimage.convolve(
+        candidates.astype(np.uint8),
+        np.ones(DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE, dtype=np.uint8),
+        mode="constant",
+        cval=0,
+    )
+    retained = candidates & (support >= DEFAULT_ROTOR_NOISE_MIN_SUPPORT)
+    return np.where(retained, relative, 0.0).astype(np.float32, copy=False)
+
+
+def estimate_rotor_rpm(
+    window_times_s: np.ndarray,
+    flash_scores_db: np.ndarray,
+    *,
+    blade_count: int,
+    rotor_count: int = 1,
+    rpm_min: float = 500.0,
+    rpm_max: float = 10_700.0,
+    velocity_alias_risk: bool = False,
+    minimum_duration_s: float = 0.5,
+) -> tuple[RotorEstimate, ...]:
+    """Estimate blade-passage rates from irregularly timed flash scores."""
+    times = np.asarray(window_times_s, dtype=np.float64)
+    scores = np.asarray(flash_scores_db, dtype=np.float64)
+    finite = np.isfinite(times) & np.isfinite(scores)
+    times = times[finite]
+    scores = scores[finite]
+    if (
+        blade_count <= 0
+        or rotor_count <= 0
+        or rpm_min <= 0.0
+        or rpm_max <= rpm_min
+        or times.size < 8
+        or float(np.ptp(times)) < minimum_duration_s
+    ):
+        return ()
+
+    order = np.argsort(times)
+    times = times[order]
+    scores = scores[order]
+    if times.size > 1024:
+        sample_indices = np.linspace(
+            0,
+            times.size - 1,
+            1024,
+            dtype=np.intp,
+        )
+        times = times[sample_indices]
+        scores = scores[sample_indices]
+    times = times - times[0]
+    scores = scores - np.mean(scores)
+    if not np.any(np.abs(scores) > 1e-9):
+        return ()
+
+    minimum_hz = float(rpm_min) * blade_count / 60.0
+    maximum_hz = float(rpm_max) * blade_count / 60.0
+    frequencies_hz = np.linspace(
+        minimum_hz,
+        maximum_hz,
+        2048,
+        dtype=np.float64,
+    )
+    angular_frequencies = 2.0 * np.pi * frequencies_hz
+    periodogram = scipy_signal.lombscargle(
+        times,
+        scores,
+        angular_frequencies,
+        precenter=False,
+        normalize=True,
+    )
+    peak_indices, _properties = scipy_signal.find_peaks(periodogram)
+    boundary_peaks: list[int] = []
+    if periodogram.size == 1:
+        boundary_peaks.append(0)
+    else:
+        if periodogram[0] >= periodogram[1]:
+            boundary_peaks.append(0)
+        if periodogram[-1] >= periodogram[-2]:
+            boundary_peaks.append(periodogram.size - 1)
+    candidate_indices = np.unique(
+        np.concatenate(
+            (
+                peak_indices,
+                np.asarray(boundary_peaks, dtype=np.intp),
+            )
+        )
+    )
+    if candidate_indices.size == 0:
+        candidate_indices = np.asarray(
+            (int(np.argmax(periodogram)),),
+            dtype=np.intp,
+        )
+    ranked_indices = candidate_indices[
+        np.argsort(periodogram[candidate_indices])[::-1]
+    ]
+    baseline = float(np.percentile(periodogram, 95.0))
+    estimates: list[RotorEstimate] = []
+    selected_frequencies: list[float] = []
+    minimum_separation_hz = max(1.0 / np.ptp(times), minimum_hz * 0.02)
+
+    for peak_index in ranked_indices:
+        frequency_hz = float(frequencies_hz[peak_index])
+        if any(
+            abs(frequency_hz - selected) < minimum_separation_hz
+            for selected in selected_frequencies
+        ):
+            continue
+        peak_power = float(periodogram[peak_index])
+        confidence = float(
+            np.clip(
+                (peak_power - baseline) / max(peak_power, 1e-12),
+                0.0,
+                1.0,
+            )
+        )
+        harmonic_rank = 1
+        for lower_index in candidate_indices:
+            lower_frequency_hz = float(frequencies_hz[lower_index])
+            if lower_frequency_hz >= frequency_hz:
+                continue
+            ratio = frequency_hz / lower_frequency_hz
+            nearest_harmonic = int(round(ratio))
+            if (
+                2 <= nearest_harmonic <= 6
+                and abs(ratio - nearest_harmonic) <= 0.03
+                and periodogram[lower_index] >= 0.35 * peak_power
+            ):
+                harmonic_rank = nearest_harmonic
+                break
+        estimates.append(
+            RotorEstimate(
+                blade_passage_hz=frequency_hz,
+                rpm=60.0 * frequency_hz / blade_count,
+                confidence=confidence,
+                harmonic_rank=harmonic_rank,
+                velocity_alias_risk=bool(velocity_alias_risk),
+            )
+        )
+        selected_frequencies.append(frequency_hz)
+        if len(estimates) >= rotor_count:
+            break
+    return tuple(estimates)
+
+
 @lru_cache(maxsize=16)
 def _hann_window_float32(length: int) -> np.ndarray:
     window = np.hanning(length).astype(np.float32)
     window.setflags(write=False)
     return window
+
+
+@lru_cache(maxsize=16)
+def _centered_hann_fft_complex64(
+    length: int,
+    fft_size: int,
+) -> np.ndarray:
+    spectrum = scipy_fft.fftshift(
+        scipy_fft.fft(
+            _hann_window_float32(length),
+            n=fft_size,
+        )
+    ).astype(np.complex64, copy=False)
+    spectrum.setflags(write=False)
+    return spectrum
 
 
 def cluster_point_cloud(

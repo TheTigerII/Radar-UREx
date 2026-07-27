@@ -12,8 +12,9 @@ vectorized ordered-window implementation with cached training indices and
 scale factors. Raw DCA1000 decoding and the
 IWR6843ISK-ODS-specific planar antenna mapping remain local because OpenRadar's
 generic XYZ implementation assumes a different virtual antenna layout.
-All live plots, including the 3D point cloud and combined point-cloud/
-micro-Doppler view, run with Matplotlib in the display child process.
+Range, range-Doppler, point-cloud, and combined displays run with Matplotlib in
+the display child process. Dedicated rotor mode uses PyQtGraph/PySide6 in that
+same isolated display process.
 
 ## Runtime Components
 
@@ -54,7 +55,8 @@ DCA1000 UDP packets (host 192.168.33.30, port 4098)
        range FFT and selected display DSP
        enqueue latest display result
   -> RadarLiveDisplay process (when enabled)
-       update an existing Matplotlib artist
+       update persistent Matplotlib artists for modes 1-5
+       or PyQtGraph image/curve items for dedicated rotor mode
 ```
 
 Capture, processing, and display use bounded queues. The UDP receiver thread
@@ -68,7 +70,8 @@ results in favor of the newest one.
 - UDP receiver thread: socket receive only.
 - Main process: packet dequeue and `FrameBuffer` assembly.
 - `RadarFrameProcessor`: frame conversion, DSP, logging, and optional raw write.
-- `RadarLiveDisplay`: Matplotlib UI for any display other than `none`.
+- `RadarLiveDisplay`: Matplotlib UI for modes 1-5 or PyQtGraph UI for rotor
+  mode.
 - Packet queue: `--packet-queue-size`, default 8,192 datagrams.
 - Processing queue: `--processing-queue-size`, default 32 frames.
 - Display payload queue: one result.
@@ -292,9 +295,70 @@ and the 3D collections for every consumed payload. The 3D collections disable
 depth shading to avoid redundant color processing and preserve the shared
 magnitude scale.
 
+### Dedicated rotor micro-Doppler
+
+The `micro-doppler` path bypasses Doppler-CFAR, angle estimation, clustering,
+and static-scene tracking. It uses a fixed physical range gate with the
+known-good `profile.cfg` LVDS waveform by default. Per-TX/RX/range-channel
+Hann-weighted complex mean removal nulls the stationary body component before
+a 16-loop, 2-loop-hop STFT. With the compatible three-TX profile this gives an
+approximately 1.87 ms window and 0.234 ms hop, short enough to separate the
+2.80 ms blade passages of a two-blade rotor at 10,700 RPM. Raw window power
+and the clutter-rejected result
+are both retained; the enhanced view subtracts a robust off-centre noise floor
+and uses a fixed 0-to-30 dB relative scale. Per-window noise spread is estimated
+as `1.4826 × MAD` from the lower half below the median, preventing positive
+blade ridges from biasing their own threshold. The gate is the greater of 3 dB
+or three robust standard deviations. A 3×3 Doppler/time support filter requires
+at least three candidate cells. Rejected cells become zero while retained
+relative-dB values are not attenuated. Flash scoring and RPM estimation consume
+this filtered spectrum.
+The default estimator model is two blades with a 500-to-10,700 RPM search band,
+matching the current drone.
+
+`rotor_profile.cfg` and `rotor_profile_80hz.cfg` retain the experimental
+single-TX high-PRF waveforms for firmware that can stream raw ADC data without
+running the SDK object-detection chain. They are not selected automatically:
+the IWR6843ISK-ODS out-of-box firmware used by this project does not have enough
+inter-frame processing time at 10 or 12.5 ms and can stop producing LVDS data.
+
+Window centres combine packet-derived frame time with configured within-frame
+chirp timing. RPM estimation retains two seconds of those physical timestamps.
+For display only, measured STFT centres are concatenated at their nominal hop,
+removing frame blind time, invalid frames, and processing drops. The newest
+0.20 seconds of active acquisition is max-pooled onto a bounded 512-column time
+grid. Processed output, capture-gap diagnostics, and gap-aware RPM estimation
+retain the true sampling intervals. Rotor mode
+updates a persistent PyQtGraph `ImageItem` with C-contiguous row-major
+`uint8` RGBA data and a fixed 256-entry Turbo lookup table. Quantization is
+display-only; processed output retains floating-point 0-to-30 dB values. A Qt
+timer polls at up to 60 Hz and drains the one-item queue to the newest payload.
+The velocity extent and status layout update only when they change. The clutter
+notch is a static overlay, so the uploaded image remains finite. Raw spectra
+and noise floors remain in processed output but are omitted from the
+cross-process GUI payload.
+
+On Linux/X11, startup requires `libxcb-cursor0`. A workspace-local copy in the
+virtual environment is preloaded when present. Dependency validation rejects a
+missing library before capture, and the child rejects Qt's `offscreen` or
+`minimal` platform fallback so invisible renders cannot inflate redraw
+coverage. The visible window is centered, raised, and activated at startup.
+The Qt application is created with a sanitized argument list because Qt/X11
+also defines `--display`; passing the radar CLI's
+`--display micro-doppler` through to `QApplication` would otherwise make Qt
+look for an X server named `micro-doppler`.
+The display child sends a bounded startup status message to the parent after
+the window has been shown and processed at least once. Capture starts only
+after this acknowledgement; import failures, non-visible Qt platforms, and
+startup timeouts become `CaptureStartupError` messages.
+Velocity bins use the configured start frequency and same-TX chirp interval. An
+irregular-time Lomb-Scargle periodogram runs at a limited cadence over the
+two-second blade-flash history. Search bounds come from the configured RPM
+range and blade count; separated peaks become per-rotor RPM estimates.
+
 ## Processed and Raw Recording
 
-`--processed-output` streams version-3 newline-delimited JSON. Its first record
+`--processed-output` streams version-4 newline-delimited JSON. Its first record
 describes the radar configuration, data axes, and static-reference settings.
 Each subsequent update contains the dynamic and static point clouds, their
 DBSCAN clusters, static-reference and validation state, suppressed
@@ -305,6 +369,20 @@ only. Existing dynamic `points` and `clusters` fields keep their version-1
 layouts. The writer does not duplicate the rolling display history. When it
 is enabled, combined point-cloud/micro-Doppler processing runs even with a
 different display mode or `--display none`.
+
+In dedicated rotor mode, `rotor_micro_doppler` contains per-frame raw/enhanced
+windows, physical axes, per-window noise floors and adaptive gates, flash
+scores, RPM estimates, and alias diagnostics.
+Spectra are rounded to 0.01 dB for JSON encoding. The legacy point-cloud and
+micro-Doppler fields remain present for readers that have not adopted the
+structured rotor result, but dedicated mode places only the newest raw window
+in `micro_doppler_windows_db`; its complete window set is already stored in
+the structured result. A 1 MiB output buffer amortizes filesystem writes.
+
+The clutter-rejected FFT is derived from the raw window FFT by subtracting the
+weighted complex mean multiplied by the cached Hann-window spectrum. By FFT
+linearity this is equivalent to a second transform of the mean-cancelled
+samples, while avoiding that duplicate batched FFT.
 
 `--raw-output` writes only complete valid frames, consecutively and without
 DCA1000 headers. At normal shutdown a JSON sidecar records dimensions, sample
@@ -320,7 +398,8 @@ space externally.
 
 - No packet reordering; only duplicate and overlap handling.
 - Only complex 16-bit, two-lane LVDS reshape is implemented.
-- No calibrated velocity axis, antenna calibration, or phase calibration.
+- The dedicated rotor mode derives an approximate velocity axis from profile
+  timing, but antenna, phase, and range-bias calibration are still absent.
 - Tracking supports one target only, uses uncalibrated XYZ positions, and has
   no Doppler-assisted association or externally validated track identity.
 - Range FFT includes the full complex FFT rather than selecting only a

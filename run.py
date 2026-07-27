@@ -13,6 +13,11 @@ from typing import NamedTuple, Optional
 ROOT = Path(__file__).resolve().parent
 RAW_DATA_DIR = ROOT / "rawdatacapture"
 DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile.cfg"
+# The SDK out-of-box firmware used by this project cannot reliably complete its
+# object-detection processing at the 10 ms period in rotor_profile.cfg.  Keep
+# option 6 on the waveform that is already verified to produce LVDS data; the
+# dedicated display still applies the rotor-specific clutter rejection/STFT.
+DEFAULT_ROTOR_CONFIG_PATH = DEFAULT_CONFIG_PATH
 DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
 DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
 DEFAULT_HOST_IP = "192.168.33.30"
@@ -25,6 +30,9 @@ DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
 DEFAULT_DURATION_MINUTES = 3.0
+DEFAULT_MICRO_DOPPLER_RANGE_M = 2.15
+DEFAULT_ROTOR_BLADES = 2
+DEFAULT_ROTOR_RPM_MAX = 10_700.0
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_CLUSTER_EPS_M = 0.4
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
@@ -42,6 +50,7 @@ DISPLAY_CHOICES = (
     "range",
     "range-doppler",
     "point-cloud",
+    "micro-doppler",
     "point-cloud-micro-doppler",
 )
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
@@ -92,6 +101,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dca-timeout", type=float, default=DEFAULT_DCA_TIMEOUT)
     parser.add_argument("--dca-retries", type=int, default=DEFAULT_DCA_RETRIES)
     parser.add_argument("--display", choices=DISPLAY_CHOICES)
+    parser.add_argument(
+        "--micro-doppler-range-m",
+        type=float,
+        help=(
+            "Fixed range gate for dedicated micro-doppler mode. "
+            f"When omitted, prompt with a default of "
+            f"{DEFAULT_MICRO_DOPPLER_RANGE_M:g} m."
+        ),
+    )
+    parser.add_argument(
+        "--micro-doppler-range-half-width-bins",
+        type=int,
+        default=1,
+        help="Range bins on each side of the dedicated rotor gate.",
+    )
+    parser.add_argument(
+        "--rotor-blades",
+        type=int,
+        default=DEFAULT_ROTOR_BLADES,
+    )
+    parser.add_argument("--rotor-count", type=int, default=1)
+    parser.add_argument("--rotor-radius-m", type=float)
+    parser.add_argument("--rotor-rpm-min", type=float, default=500.0)
+    parser.add_argument(
+        "--rotor-rpm-max",
+        type=float,
+        default=DEFAULT_ROTOR_RPM_MAX,
+    )
     parser.add_argument(
         "--max-range-m",
         type=float,
@@ -221,6 +258,7 @@ def choose_display(display_arg: Optional[str]) -> str:
     print("  3. range-doppler")
     print("  4. point-cloud")
     print("  5. point-cloud + micro-doppler")
+    print("  6. dedicated rotor micro-doppler")
     while True:
         choice = input("Select display type [5]: ").strip()
         if not choice:
@@ -239,9 +277,11 @@ def choose_display(display_arg: Optional[str]) -> str:
             "point_cloud_micro_doppler",
         }:
             return "point-cloud-micro-doppler"
+        if choice in {"6", "micro-doppler", "micro_doppler"}:
+            return "micro-doppler"
         print(
-            "Choose 1, 2, 3, 4, 5, none, range, range-doppler, point-cloud, "
-            "or point-cloud-micro-doppler."
+            "Choose 1, 2, 3, 4, 5, 6, none, range, range-doppler, "
+            "point-cloud, micro-doppler, or point-cloud-micro-doppler."
         )
 
 
@@ -266,6 +306,31 @@ def choose_duration_minutes(duration_arg: Optional[float]) -> float:
         if math.isfinite(duration_minutes) and duration_minutes >= 0:
             return duration_minutes
         print("Enter a non-negative number of minutes, or 0 for unlimited.")
+
+
+def choose_micro_doppler_range_m(range_arg: Optional[float]) -> float:
+    if range_arg is not None:
+        if not math.isfinite(range_arg) or range_arg <= 0.0:
+            raise ValueError(
+                "Micro-Doppler range must be a finite positive number."
+            )
+        return range_arg
+
+    while True:
+        choice = input(
+            "Rotor target range in meters "
+            f"[{DEFAULT_MICRO_DOPPLER_RANGE_M:g}]: "
+        ).strip()
+        if not choice:
+            return DEFAULT_MICRO_DOPPLER_RANGE_M
+        try:
+            target_range_m = float(choice)
+        except ValueError:
+            print("Enter a finite positive range in meters.")
+            continue
+        if math.isfinite(target_range_m) and target_range_m > 0.0:
+            return target_range_m
+        print("Enter a finite positive range in meters.")
 
 
 def resolve_radar_port(radar_port_arg: Optional[str]) -> str:
@@ -357,13 +422,35 @@ def default_processed_output(capture_dir: Path) -> Path:
 def start_process(label: str, command: list[str]) -> subprocess.Popen:
     print(f"Starting {label}:")
     print(" ".join(str(part) for part in command))
-    return subprocess.Popen(command, **subprocess_startup_options())
+    return subprocess.Popen(
+        command,
+        env=subprocess_environment(),
+        **subprocess_startup_options(),
+    )
 
 
 def subprocess_startup_options() -> dict:
     if os.name == "nt":
         return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
     return {"start_new_session": True}
+
+
+def subprocess_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    if os.name == "nt":
+        return environment
+
+    x11_socket = Path("/tmp/.X11-unix/X0")
+    if not environment.get("DISPLAY") and x11_socket.exists():
+        environment["DISPLAY"] = ":0"
+
+    if not environment.get("XAUTHORITY") and hasattr(os, "getuid"):
+        gdm_xauthority = Path(
+            f"/run/user/{os.getuid()}/gdm/Xauthority"
+        )
+        if gdm_xauthority.is_file():
+            environment["XAUTHORITY"] = str(gdm_xauthority)
+    return environment
 
 
 def stop_process(label: str, process: Optional[subprocess.Popen]) -> None:
@@ -458,7 +545,7 @@ def build_capture_command(
         str(max(args.clutter_map_min_snr_db, 0.0)),
         (
             "--static-detection"
-            if args.static_detection
+            if args.static_detection and display != "micro-doppler"
             else "--no-static-detection"
         ),
         "--static-warmup-frames",
@@ -474,6 +561,61 @@ def build_capture_command(
         "--processed-output",
         str(processed_output),
     ]
+    if display == "micro-doppler":
+        target_range_m = getattr(args, "micro_doppler_range_m", None)
+        if target_range_m is None:
+            raise ValueError(
+                "--micro-doppler-range-m is required for dedicated "
+                "micro-doppler mode"
+            )
+        command.extend(
+            (
+                "--micro-doppler-range-m",
+                str(target_range_m),
+                "--micro-doppler-range-half-width-bins",
+                str(
+                    max(
+                        getattr(
+                            args,
+                            "micro_doppler_range_half_width_bins",
+                            1,
+                        ),
+                        0,
+                    )
+                ),
+                "--rotor-blades",
+                str(
+                    max(
+                        getattr(
+                            args,
+                            "rotor_blades",
+                            DEFAULT_ROTOR_BLADES,
+                        ),
+                        1,
+                    )
+                ),
+                "--rotor-count",
+                str(max(getattr(args, "rotor_count", 1), 1)),
+                "--rotor-rpm-min",
+                str(max(getattr(args, "rotor_rpm_min", 500.0), 1.0)),
+                "--rotor-rpm-max",
+                str(
+                    max(
+                        getattr(
+                            args,
+                            "rotor_rpm_max",
+                            DEFAULT_ROTOR_RPM_MAX,
+                        ),
+                        1.0,
+                    )
+                ),
+            )
+        )
+        rotor_radius_m = getattr(args, "rotor_radius_m", None)
+        if rotor_radius_m is not None:
+            command.extend(
+                ("--rotor-radius-m", str(max(rotor_radius_m, 0.0)))
+            )
     if raw_output is not None:
         command.extend(("--raw-output", str(raw_output)))
     return command
@@ -514,6 +656,16 @@ def build_startup_command(args: argparse.Namespace, radar_port: str) -> list[str
 def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
+    if display == "micro-doppler":
+        if args.config == DEFAULT_CONFIG_PATH:
+            args.config = DEFAULT_ROTOR_CONFIG_PATH
+        try:
+            args.micro_doppler_range_m = choose_micro_doppler_range_m(
+                args.micro_doppler_range_m
+            )
+        except ValueError as exc:
+            print(f"Invalid micro-Doppler range: {exc}", file=sys.stderr)
+            return 2
     try:
         duration_minutes = choose_duration_minutes(args.duration_minutes)
     except ValueError as exc:

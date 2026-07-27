@@ -12,7 +12,11 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from rawdatacapture.dsp import _point_is_within_fov
+from rawdatacapture.dsp import (
+    MicroDopplerResult,
+    RotorEstimate,
+    _point_is_within_fov,
+)
 
 from rawdatacapture.livedatacapture import (
     CaptureStats,
@@ -24,11 +28,21 @@ from rawdatacapture.livedatacapture import (
     DEFAULT_CLUSTER_MIN_SAMPLES,
     DEFAULT_MAX_RANGE_M,
     DEFAULT_POINT_CLOUD_FOV_DEG,
+    DEFAULT_ROTOR_BLADES,
+    DEFAULT_ROTOR_RPM_MAX,
     MAGNITUDE_COLORMAP,
     MICRO_DOPPLER_HISTORY_UPDATES,
     MICRO_DOPPLER_HOP_LOOPS,
     MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
     MICRO_DOPPLER_WINDOW_LOOPS,
+    ROTOR_DISPLAY_MODE,
+    ROTOR_DISPLAY_HISTORY_SECONDS,
+    ROTOR_DISPLAY_MAX_RATE_HZ,
+    ROTOR_DISPLAY_TIME_BINS,
+    ROTOR_MICRO_DOPPLER_HOP_LOOPS,
+    ROTOR_MICRO_DOPPLER_HISTORY_SECONDS,
+    ROTOR_MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
+    ROTOR_MICRO_DOPPLER_WINDOW_LOOPS,
     POINT_CLOUD_MAGNITUDE_DB_MAX,
     POINT_CLOUD_MAGNITUDE_DB_MIN,
     MotionHandoffQualifier,
@@ -38,14 +52,21 @@ from rawdatacapture.livedatacapture import (
     ProcessedOutputWriter,
     PointCloudDisplayPayload,
     RadarCaptureConfig,
+    RotorDisplayPayload,
     SingleTargetTracker,
     StaticReferenceStatus,
     TargetTrack,
     UdpPacketReceiver,
     _capture_error_counts,
     _combined_point_cloud_update_due,
+    _colorize_rotor_spectrogram,
+    _concatenated_active_window_times,
     _draw_point_cloud,
     _draw_micro_doppler,
+    _draw_rotor_micro_doppler,
+    _display_dependency_error,
+    _fill_rotor_display_time_gaps,
+    _gap_aware_series,
     _point_cloud_track_candidates,
     _draw_range_doppler,
     _draw_range_profile,
@@ -53,10 +74,17 @@ from rawdatacapture.livedatacapture import (
     _format_capture_summary,
     _put_latest_queue_payload,
     _record_event_rate,
+    _report_display_startup,
+    _rotor_qt_application_arguments,
+    _prepare_rotor_display_frame,
     _report_new_error_stats,
     _request_processor_stop,
+    _rasterize_rotor_spectrogram,
+    _run_display_process,
+    _run_frame_processor,
     _set_rate_indicator,
     _set_point_cloud_axes,
+    _turbo_lookup_table,
     process_complete_frame,
 )
 
@@ -186,7 +214,11 @@ class FrameDiagnosticsTests(unittest.TestCase):
 
         emit_func.assert_not_called()
         range_profile.assert_not_called()
-        display.update.assert_called_once_with(range_fft, range_axis_m)
+        display.update.assert_called_once_with(
+            range_fft,
+            range_axis_m,
+            captured_at_s=1.0,
+        )
 
     def test_error_snapshot_ignores_success_counters(self) -> None:
         initial = CaptureStats(packets_received=100, frames_emitted=5)
@@ -260,6 +292,198 @@ class FrameDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload_queue.get_nowait(), "new")
 
 
+class RotorProfileConfigTests(unittest.TestCase):
+    def test_experimental_high_prf_profile_has_expected_timing(self) -> None:
+        profile_path = Path(__file__).with_name("rotor_profile.cfg")
+
+        config = RadarCaptureConfig.from_file(profile_path)
+
+        self.assertEqual(config.num_chirps_per_loop, 1)
+        self.assertEqual(config.num_loops, 128)
+        self.assertEqual(config.tx_channel_masks, (1,))
+        self.assertEqual(config.num_chirps_per_frame, 128)
+        self.assertEqual(config.bytes_per_frame, 131_072)
+        self.assertEqual(config.frame_periodicity_ms, 10.0)
+        self.assertAlmostEqual(float(config.slow_time_rate_hz), 25_641.026, places=2)
+        self.assertAlmostEqual(float(config.frame_duty_cycle), 0.4992, places=4)
+
+
+class RotorDisplayPayloadSinkTests(unittest.TestCase):
+    def test_dedicated_mode_accepts_proven_three_tx_profile_and_bypasses_point_cloud(
+        self,
+    ) -> None:
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).with_name("profile.cfg")
+        )
+        payload_queue = queue.Queue(maxsize=1)
+        sink = DisplayPayloadSink(
+            ROTOR_DISPLAY_MODE,
+            1,
+            payload_queue,
+            config,
+            clutter_map_update_rate=0.0,
+            static_detection=False,
+            micro_doppler_range_m=2.15,
+        )
+        frame_result = MicroDopplerResult(
+            raw_spectrogram_db=np.ones((128, 1), dtype=np.float32),
+            enhanced_spectrogram_db=np.ones((128, 1), dtype=np.float32),
+            window_times_s=np.asarray((0.001,)),
+            velocity_axis_m_s=np.linspace(-32.0, 31.5, 128, dtype=np.float32),
+            flash_scores_db=np.asarray((3.0,), dtype=np.float32),
+            noise_floor_db=np.asarray((60.0,), dtype=np.float32),
+            selected_range_m=2.15,
+            nominal_hop_s=0.000312,
+            unambiguous_velocity_m_s=32.0,
+        )
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture."
+                "compute_rotor_micro_doppler_frame",
+                return_value=frame_result,
+            ) as rotor_dsp,
+            patch.object(sink, "_compute_point_cloud_payload") as point_cloud,
+        ):
+            sink.update(
+                np.ones((384, 4, 64), dtype=np.complex64),
+                config.range_axis_m(),
+                captured_at_s=10.0,
+            )
+
+        rotor_dsp.assert_called_once()
+        point_cloud.assert_not_called()
+        self.assertIsInstance(payload_queue.get_nowait(), RotorDisplayPayload)
+
+    def test_rotor_frame_worker_initializes_with_three_tx_profile(self) -> None:
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).with_name("profile.cfg")
+        )
+        frame_queue = queue.Queue()
+        frame_queue.put(None)
+        log_queue = queue.Queue()
+
+        with patch("rawdatacapture.livedatacapture.signal.signal"):
+            _run_frame_processor(
+                config=config,
+                frame_queue=frame_queue,
+                log_queue=log_queue,
+                processed_frames_counter=Mock(),
+                display_payload_queue=None,
+                display_skipped_counter=None,
+                raw_output=None,
+                raw_metadata=None,
+                processed_output=None,
+                display_mode=ROTOR_DISPLAY_MODE,
+                display_update_every=1,
+                max_range_m=10.0,
+                point_cloud_fov_deg=60.0,
+                cluster_eps_m=0.4,
+                cluster_min_samples=2,
+                clutter_map_update_rate=0.02,
+                clutter_map_warmup_frames=30,
+                clutter_map_min_snr_db=6.0,
+                static_detection=False,
+                static_warmup_frames=30,
+                static_reference_frames=90,
+                static_min_change_db=6.0,
+                static_background_update_rate=0.01,
+                static_cluster_min_samples=1,
+                micro_doppler_range_m=2.15,
+                micro_doppler_range_half_width_bins=1,
+                rotor_blades=2,
+                rotor_count=1,
+                rotor_radius_m=None,
+                rotor_rpm_min=500.0,
+                rotor_rpm_max=20_000.0,
+            )
+
+        messages = []
+        while not log_queue.empty():
+            messages.append(log_queue.get_nowait())
+        self.assertTrue(
+            any(
+                "Dedicated rotor micro-Doppler enabled" in message
+                and "chirps_per_loop=3" in message
+                for message in messages
+            )
+        )
+        self.assertFalse(
+            any(
+                "Frame processor failed during startup" in message
+                for message in messages
+            )
+        )
+
+    def test_rotor_frame_worker_processes_three_tx_frame(self) -> None:
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).with_name("profile.cfg")
+        )
+        frame_queue = queue.Queue()
+        frame_queue.put(
+            CapturedFrame(
+                data=bytes(config.bytes_per_frame),
+                gap_bytes=0,
+                first_byte_at_s=1.0,
+            )
+        )
+        frame_queue.put(None)
+        log_queue = queue.Queue()
+        payload_queue = queue.Queue(maxsize=1)
+        counter = SimpleNamespace(
+            value=0,
+            get_lock=lambda: threading.Lock(),
+        )
+
+        with patch("rawdatacapture.livedatacapture.signal.signal"):
+            _run_frame_processor(
+                config=config,
+                frame_queue=frame_queue,
+                log_queue=log_queue,
+                processed_frames_counter=counter,
+                display_payload_queue=payload_queue,
+                display_skipped_counter=None,
+                raw_output=None,
+                raw_metadata=None,
+                processed_output=None,
+                display_mode=ROTOR_DISPLAY_MODE,
+                display_update_every=1,
+                max_range_m=10.0,
+                point_cloud_fov_deg=60.0,
+                cluster_eps_m=0.4,
+                cluster_min_samples=2,
+                clutter_map_update_rate=0.02,
+                clutter_map_warmup_frames=30,
+                clutter_map_min_snr_db=6.0,
+                static_detection=False,
+                static_warmup_frames=30,
+                static_reference_frames=90,
+                static_min_change_db=6.0,
+                static_background_update_rate=0.01,
+                static_cluster_min_samples=1,
+                micro_doppler_range_m=2.15,
+                micro_doppler_range_half_width_bins=1,
+                rotor_blades=2,
+                rotor_count=1,
+                rotor_radius_m=None,
+                rotor_rpm_min=500.0,
+                rotor_rpm_max=20_000.0,
+            )
+
+        self.assertEqual(counter.value, 1)
+        payload = payload_queue.get_nowait()
+        self.assertIsInstance(payload, RotorDisplayPayload)
+        self.assertEqual(payload.result.raw_spectrogram_db.shape, (0, 0))
+        self.assertEqual(payload.result.noise_floor_db.shape, (0,))
+        self.assertGreater(payload.result.enhanced_spectrogram_db.size, 0)
+        messages = []
+        while not log_queue.empty():
+            messages.append(log_queue.get_nowait())
+        self.assertFalse(
+            any("Frame processor stopped after error" in message for message in messages)
+        )
+
+
 class ProcessedOutputWriterTests(unittest.TestCase):
     def test_writes_metadata_point_cloud_and_micro_doppler_jsonl(self) -> None:
         config = RadarCaptureConfig.from_dimensions(
@@ -307,7 +531,7 @@ class ProcessedOutputWriterTests(unittest.TestCase):
             records = [json.loads(line) for line in output_path.read_text().splitlines()]
 
         self.assertEqual(records[0]["record_type"], "metadata")
-        self.assertEqual(records[0]["version"], 3)
+        self.assertEqual(records[0]["version"], 4)
         self.assertEqual(records[0]["static_detection"]["warmup_frames"], 30)
         self.assertEqual(records[0]["static_detection"]["reference_frames"], 90)
         self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
@@ -334,6 +558,59 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         self.assertEqual(records[1]["micro_doppler_db"], [10.0, 20.0])
         self.assertEqual(records[1]["micro_doppler_windows_db"], [[10.0, 20.0]])
         self.assertTrue(records[1]["target_track"]["confirmed"])
+
+    def test_writes_structured_rotor_micro_doppler_result(self) -> None:
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).with_name("rotor_profile.cfg")
+        )
+        result = MicroDopplerResult(
+            raw_spectrogram_db=np.ones((4, 2), dtype=np.float32) * 1.2345,
+            enhanced_spectrogram_db=np.ones((4, 2), dtype=np.float32) * 7.126,
+            window_times_s=np.asarray((0.001, 0.002)),
+            velocity_axis_m_s=np.asarray((-2.0, -1.0, 0.0, 1.0)),
+            flash_scores_db=np.asarray((3.0, 4.0), dtype=np.float32),
+            noise_floor_db=np.asarray((60.0, 61.0), dtype=np.float32),
+            selected_range_m=2.15,
+            nominal_hop_s=0.000312,
+            unambiguous_velocity_m_s=32.0,
+            noise_gate_db=np.asarray((3.0, 3.5), dtype=np.float32),
+            rotor_estimates=(RotorEstimate(200.0, 6000.0, 0.9),),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "rotor.jsonl"
+            writer = ProcessedOutputWriter(
+                output_path,
+                config,
+                1,
+                rotor_processing={"mode": "test"},
+            )
+            writer.write_update(
+                frame_index=1,
+                points=np.empty((0, 4), dtype=np.float32),
+                clusters=np.empty((0, 4), dtype=np.float32),
+                target_track=None,
+                micro_doppler_db=result.raw_spectrogram_db[:, -1],
+                micro_doppler_windows_db=result.raw_spectrogram_db,
+                selected_range_m=result.selected_range_m,
+                rotor_micro_doppler=result,
+            )
+            writer.close()
+            records = [
+                json.loads(line)
+                for line in output_path.read_text().splitlines()
+            ]
+
+        self.assertEqual(
+            records[0]["radar_config"]["slow_time_rate_hz"],
+            config.slow_time_rate_hz,
+        )
+        rotor = records[1]["rotor_micro_doppler"]
+        self.assertEqual(rotor["selected_range_m"], 2.15)
+        self.assertEqual(rotor["rotor_estimates"][0]["rpm"], 6000.0)
+        self.assertEqual(len(rotor["enhanced_spectrogram_db"]), 2)
+        self.assertEqual(rotor["raw_spectrogram_db"][0][0], 1.23)
+        self.assertEqual(rotor["enhanced_spectrogram_db"][0][0], 7.13)
+        self.assertEqual(rotor["noise_gate_db"], [3.0, 3.5])
 
 
 class PointCloudBoundsTests(unittest.TestCase):
@@ -1538,6 +1815,312 @@ class MicroDopplerDisplayTests(unittest.TestCase):
         _set_rate_indicator(artist, None)
 
         artist.set_text.assert_called_once_with("Refresh rate: measuring...")
+
+    def test_dedicated_rotor_defaults_prioritize_flash_timing(self) -> None:
+        self.assertEqual(ROTOR_DISPLAY_MODE, "micro-doppler")
+        self.assertEqual(DEFAULT_ROTOR_BLADES, 2)
+        self.assertEqual(DEFAULT_ROTOR_RPM_MAX, 10_700.0)
+        self.assertEqual(ROTOR_DISPLAY_MAX_RATE_HZ, 60.0)
+        self.assertEqual(ROTOR_MICRO_DOPPLER_WINDOW_LOOPS, 16)
+        self.assertEqual(ROTOR_MICRO_DOPPLER_HOP_LOOPS, 2)
+        self.assertEqual(ROTOR_DISPLAY_HISTORY_SECONDS, 0.2)
+        self.assertEqual(ROTOR_MICRO_DOPPLER_HISTORY_SECONDS, 2.0)
+        self.assertEqual(
+            2 * ROTOR_MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS + 1,
+            3,
+        )
+
+    def test_rotor_time_resolution_separates_max_rpm_blade_passages(
+        self,
+    ) -> None:
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).with_name("profile.cfg")
+        )
+        slow_time_interval_s = float(config.slow_time_interval_s)
+        window_span_s = (
+            ROTOR_MICRO_DOPPLER_WINDOW_LOOPS * slow_time_interval_s
+        )
+        hop_s = ROTOR_MICRO_DOPPLER_HOP_LOOPS * slow_time_interval_s
+        blade_passage_interval_s = 60.0 / (
+            DEFAULT_ROTOR_BLADES * DEFAULT_ROTOR_RPM_MAX
+        )
+
+        self.assertLess(window_span_s, blade_passage_interval_s)
+        self.assertLess(hop_s, blade_passage_interval_s / 4.0)
+        self.assertLess(
+            ROTOR_DISPLAY_HISTORY_SECONDS / ROTOR_DISPLAY_TIME_BINS,
+            blade_passage_interval_s / 2.0,
+        )
+
+    def test_rotor_draw_uses_relative_scale_velocity_and_rpm_status(self) -> None:
+        axis = Mock()
+        image = Mock()
+        flash_axis = Mock()
+        flash_line = Mock()
+        status_text = Mock()
+        result = MicroDopplerResult(
+            raw_spectrogram_db=np.ones((8, 3), dtype=np.float32),
+            enhanced_spectrogram_db=np.ones((8, 3), dtype=np.float32) * 9.0,
+            window_times_s=np.asarray((0.001, 0.002, 0.011)),
+            velocity_axis_m_s=np.linspace(-4.0, 3.0, 8, dtype=np.float32),
+            flash_scores_db=np.asarray((2.0, 5.0, 3.0), dtype=np.float32),
+            noise_floor_db=np.ones(3, dtype=np.float32),
+            selected_range_m=2.15,
+            nominal_hop_s=0.001,
+            unambiguous_velocity_m_s=4.0,
+            rotor_estimates=(
+                RotorEstimate(
+                    blade_passage_hz=200.0,
+                    rpm=6000.0,
+                    confidence=0.9,
+                ),
+            ),
+        )
+
+        _draw_rotor_micro_doppler(
+            axis,
+            image,
+            flash_axis,
+            flash_line,
+            status_text,
+            result,
+        )
+
+        axis.set_ylim.assert_called_once_with(-4.0, 3.0)
+        displayed = image.set_data.call_args.args[0]
+        self.assertEqual(displayed.shape, (8, ROTOR_DISPLAY_TIME_BINS))
+        self.assertTrue(np.isfinite(displayed[0]).all())
+        self.assertIn("6000 RPM", status_text.set_text.call_args.args[0])
+        self.assertIn("Gate: 2.15 m", status_text.set_text.call_args.args[0])
+
+    def test_rotor_display_frame_includes_notch_overlay_bounds(self) -> None:
+        result = MicroDopplerResult(
+            raw_spectrogram_db=np.empty((0, 0), dtype=np.float32),
+            enhanced_spectrogram_db=np.ones((8, 3), dtype=np.float32) * 9.0,
+            window_times_s=np.asarray((0.001, 0.002, 0.011)),
+            velocity_axis_m_s=np.linspace(-4.0, 3.0, 8, dtype=np.float32),
+            flash_scores_db=np.asarray((2.0, 5.0, 3.0), dtype=np.float32),
+            noise_floor_db=np.empty(0, dtype=np.float32),
+            selected_range_m=2.15,
+            nominal_hop_s=0.001,
+            unambiguous_velocity_m_s=4.0,
+        )
+
+        display_frame = _prepare_rotor_display_frame(result)
+
+        self.assertIsNotNone(display_frame)
+        assert display_frame is not None
+        self.assertEqual(
+            display_frame.spectrogram_db.shape,
+            (8, ROTOR_DISPLAY_TIME_BINS),
+        )
+        self.assertTrue(np.isnan(display_frame.spectrogram_db[2:7]).all())
+        self.assertEqual(display_frame.dc_notch_velocity_bounds, (-2.5, 2.5))
+
+    def test_turbo_lookup_table_is_compact_uint8_rgb(self) -> None:
+        lookup_table = _turbo_lookup_table()
+
+        self.assertEqual(lookup_table.shape, (256, 3))
+        self.assertEqual(lookup_table.dtype, np.uint8)
+        self.assertGreater(int(lookup_table[-1, 0]), int(lookup_table[-1, 2]))
+
+    def test_rotor_colorization_produces_finite_direct_rgba_image(self) -> None:
+        lookup_table = _turbo_lookup_table()
+
+        colored = _colorize_rotor_spectrogram(
+            np.asarray(((np.nan, 0.0, 15.0, 30.0, np.inf),)),
+            lookup_table,
+        )
+
+        self.assertEqual(colored.shape, (1, 5, 4))
+        self.assertEqual(colored.dtype, np.uint8)
+        self.assertTrue(colored.flags.c_contiguous)
+        np.testing.assert_array_equal(colored[0, 0, :3], lookup_table[0])
+        np.testing.assert_array_equal(colored[0, 2, :3], lookup_table[128])
+        np.testing.assert_array_equal(colored[0, 4, :3], lookup_table[-1])
+        np.testing.assert_array_equal(colored[:, :, 3], 255)
+
+    @patch("rawdatacapture.livedatacapture._run_rotor_pyqtgraph_display")
+    def test_rotor_display_process_dispatches_to_pyqtgraph(
+        self,
+        rotor_renderer: Mock,
+    ) -> None:
+        payload_queue = Mock()
+        stop_event = Mock()
+        rendered_updates = Mock()
+        skipped_updates = Mock()
+        startup_status_queue = Mock()
+
+        _run_display_process(
+            ROTOR_DISPLAY_MODE,
+            0.03,
+            10.0,
+            10.0,
+            60.0,
+            payload_queue,
+            stop_event,
+            rendered_updates,
+            skipped_updates,
+            startup_status_queue,
+        )
+
+        rotor_renderer.assert_called_once_with(
+            0.03,
+            payload_queue,
+            stop_event,
+            rendered_updates,
+            skipped_updates,
+            startup_status_queue,
+        )
+
+    def test_display_startup_status_reports_ready_backend(self) -> None:
+        startup_status_queue = queue.Queue(maxsize=1)
+
+        _report_display_startup(
+            startup_status_queue,
+            "ready",
+            "Live rotor display ready: backend=PyQtGraph/xcb.",
+        )
+
+        self.assertEqual(
+            startup_status_queue.get_nowait(),
+            {
+                "state": "ready",
+                "message": (
+                    "Live rotor display ready: backend=PyQtGraph/xcb."
+                ),
+            },
+        )
+
+    def test_rotor_qt_arguments_exclude_radar_display_option(self) -> None:
+        with patch(
+            "sys.argv",
+            (
+                "livedatacapture.py",
+                "--display",
+                "micro-doppler",
+            ),
+        ):
+            qt_arguments = _rotor_qt_application_arguments()
+
+        self.assertEqual(qt_arguments, ["radar-rotor-display"])
+        self.assertNotIn("--display", qt_arguments)
+        self.assertNotIn("micro-doppler", qt_arguments)
+
+    def test_rotor_dependency_error_explains_missing_pyqtgraph(self) -> None:
+        with patch(
+            "rawdatacapture.livedatacapture.importlib.util.find_spec",
+            return_value=None,
+        ):
+            message = _display_dependency_error(ROTOR_DISPLAY_MODE)
+
+        self.assertIsNotNone(message)
+        self.assertIn("PyQtGraph", str(message))
+
+    def test_rotor_dependency_error_explains_missing_xcb_cursor(self) -> None:
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.importlib.util.find_spec",
+                return_value=object(),
+            ),
+            patch(
+                "rawdatacapture.livedatacapture."
+                "_bundled_xcb_cursor_library",
+                return_value=None,
+            ),
+            patch("ctypes.util.find_library", return_value=None),
+            patch.dict("os.environ", {"XDG_SESSION_TYPE": "x11"}),
+        ):
+            message = _display_dependency_error(ROTOR_DISPLAY_MODE)
+
+        self.assertIsNotNone(message)
+        self.assertIn("libxcb-cursor0", str(message))
+
+    def test_rotor_raster_is_bounded_and_max_pooling_preserves_flashes(
+        self,
+    ) -> None:
+        enhanced = np.asarray(
+            (
+                (3.0, 9.0, 4.0, 7.0),
+                (1.0, 2.0, 8.0, 6.0),
+            ),
+            dtype=np.float32,
+        )
+
+        raster, extent = _rasterize_rotor_spectrogram(
+            enhanced,
+            np.asarray((0.0, 0.1, 1.9, 2.0)),
+            np.asarray((-1.0, 1.0)),
+            history_seconds=2.0,
+            time_bins=4,
+        )
+
+        self.assertEqual(raster.shape, (2, 4))
+        self.assertEqual(extent, (-2.0, 0.0, -1.0, 1.0))
+        self.assertEqual(float(raster[0, 0]), 9.0)
+        self.assertEqual(float(raster[1, 3]), 8.0)
+        self.assertTrue(np.isnan(raster[:, 1:3]).all())
+
+    def test_rotor_raster_defaults_to_active_acquisition_span(self) -> None:
+        raster, extent = _rasterize_rotor_spectrogram(
+            np.ones((2, 2), dtype=np.float32),
+            np.asarray((0.0, ROTOR_DISPLAY_HISTORY_SECONDS)),
+            np.asarray((-1.0, 1.0)),
+        )
+
+        self.assertEqual(raster.shape, (2, ROTOR_DISPLAY_TIME_BINS))
+        self.assertEqual(
+            extent,
+            (-ROTOR_DISPLAY_HISTORY_SECONDS, 0.0, -1.0, 1.0),
+        )
+
+    def test_rotor_display_concatenates_only_active_window_intervals(
+        self,
+    ) -> None:
+        physical_times = np.asarray(
+            (0.001, 0.001234, 0.034207, 0.034441),
+            dtype=np.float64,
+        )
+
+        active_times = _concatenated_active_window_times(
+            physical_times.size,
+            0.000234,
+        )
+
+        np.testing.assert_allclose(
+            active_times,
+            (-0.000702, -0.000468, -0.000234, 0.0),
+        )
+        np.testing.assert_allclose(np.diff(active_times), 0.000234)
+        self.assertGreater(float(np.max(np.diff(physical_times))), 0.03)
+
+    def test_rotor_display_fills_time_gaps_from_nearest_spectrum(self) -> None:
+        raster = np.asarray(
+            (
+                (3.0, np.nan, np.nan, 7.0),
+                (1.0, np.nan, np.nan, 6.0),
+            ),
+            dtype=np.float32,
+        )
+
+        filled = _fill_rotor_display_time_gaps(raster)
+
+        np.testing.assert_array_equal(filled[:, 0], raster[:, 0])
+        np.testing.assert_array_equal(filled[:, 1], raster[:, 0])
+        np.testing.assert_array_equal(filled[:, 2], raster[:, 3])
+        np.testing.assert_array_equal(filled[:, 3], raster[:, 3])
+        self.assertTrue(np.isfinite(filled).all())
+        self.assertTrue(np.isnan(raster[:, 1:3]).all())
+
+    def test_gap_aware_series_inserts_nan_at_frame_gap(self) -> None:
+        times, values = _gap_aware_series(
+            np.asarray((0.0, 0.001, 0.010)),
+            np.asarray((1.0, 2.0, 3.0)),
+            maximum_gap_s=0.0025,
+        )
+
+        self.assertEqual(times.shape, (4,))
+        self.assertTrue(np.isnan(values[2]))
 
 if __name__ == "__main__":
     unittest.main()

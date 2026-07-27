@@ -23,9 +23,11 @@ Create a project virtual environment and install the pinned capture dependencies
 before the first run. On Linux:
 
 ```bash
+sudo apt-get install libxcb-cursor0
 python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install \
-  "numpy<2" scipy matplotlib pyserial "scikit-learn>=1.4,<2"
+  "numpy<2" scipy matplotlib pyserial "scikit-learn>=1.4,<2" \
+  "pyqtgraph>=0.13.7,<0.15" "PySide6>=6.7,<7"
 .venv/bin/python -m pip install \
   "openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94"
 ```
@@ -35,7 +37,8 @@ On Windows PowerShell:
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install `
-  'numpy<2' scipy matplotlib pyserial 'scikit-learn>=1.4,<2'
+  'numpy<2' scipy matplotlib pyserial 'scikit-learn>=1.4,<2' `
+  'pyqtgraph>=0.13.7,<0.15' 'PySide6>=6.7,<7'
 .venv\Scripts\python -m pip install `
   'openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94'
 ```
@@ -43,6 +46,16 @@ python -m venv .venv
 The version bounds and OpenRadar commit are intentional. Use the same commands
 when recreating an environment so range/Doppler behavior and saved model
 metadata remain reproducible.
+
+`libxcb-cursor0` is required for the PySide6 rotor window on an X11 desktop.
+Rotor mode checks this before capture and reports an installation command
+instead of silently running Qt's invisible offscreen backend.
+The launcher also isolates the radar `--display micro-doppler` option from
+Qt's own X11 command-line parser.
+Before starting UDP capture, the display child now reports its backend,
+resolved `DISPLAY`, screen name, and geometry to the parent. A missing or
+non-visible GUI aborts startup with a direct error instead of continuing with
+an empty desktop.
 
 ### Optional classification notebook and CNN dependencies
 
@@ -71,7 +84,8 @@ local implementation for real-time performance. The IWR6843ISK-ODS planar-array
 coordinate mapping remains in the local DSP adapter because
 OpenRadar's supplied XYZ helper targets the AWR1843 virtual antenna layout.
 Range, range-Doppler, and 3D point-cloud displays use Matplotlib. The combined
-point-cloud/micro-Doppler mode shows both plots in one window.
+point-cloud/micro-Doppler mode shows both plots in one window. Dedicated rotor
+mode uses PyQtGraph with the PySide6 Qt binding.
 
 ## Recommended: Integrated Run
 
@@ -316,12 +330,97 @@ Both the micro-Doppler and 3D panels render every available display payload.
 The 3D collections disable depth shading so the fixed magnitude colors remain
 unchanged while reducing GUI rendering work.
 
+### Dedicated rotor micro-Doppler
+
+Use the dedicated single-TX mode when blade-flash visibility or RPM is more
+important than simultaneous 3D tracking:
+
+```powershell
+python run.py --display micro-doppler --micro-doppler-range-m 2.15 `
+  --rotor-blades 2 --rotor-count 1 --rotor-radius-m 0.05 `
+  --rotor-rpm-min 1000 --rotor-rpm-max 10700 `
+  --raw-output .\rawdatacapture\captures\rotor.bin
+```
+
+The default rotor model is two blades with a maximum search speed of
+10,700 RPM. These match the current drone and can still be overridden with
+`--rotor-blades` and `--rotor-rpm-max`.
+
+Option 6 uses the known-good `profile.cfg` LVDS waveform by default. This is
+intentional: the IWR6843ISK-ODS SDK out-of-box firmware also runs its on-device
+object-detection chain, and the experimental 10 ms single-TX profile does not
+leave enough processing time. That failure produces no LVDS packets, lights
+the DCA1000 `LVDS_PATH_ERR` LED red, and leaves the display empty.
+
+The compatible profile samples each TX every 117 microseconds, giving an
+approximately 8.55 kHz per-TX slow-time rate and ±10.7 m/s unambiguous radial
+velocity at 60 GHz. The dedicated mode still applies the three-bin gate,
+stationary-return cancellation, relative spectrum, flash score, and RPM
+estimator. `rotor_profile.cfg` (100 Hz) and `rotor_profile_80hz.cfg` (80 Hz)
+remain available only for an alternate raw-capture firmware that does not run
+the SDK object-detection processing chain; they are no longer selected
+automatically.
+
+The fixed range gate is required because this mode intentionally skips point
+cloud detection and tracking. When option 6 is selected interactively,
+`run.py` prompts for the gate and defaults to 2.15 m. Its default half width is
+one bin, giving a three-bin gate. Each 16-loop Hann window has its weighted
+complex mean removed before the FFT, suppressing the stationary body return.
+The live plot displays power relative to a robust per-window floor over 0 to
+30 dB and masks the central ±2 bins in the enhanced view only. Raw power
+remains in processed output. A dedicated adaptive gate estimates noise spread
+from `1.4826 × MAD` of the lower half below each window's median; using the
+lower tail prevents positive blade ridges from raising their own threshold.
+The gate is the greater of 3 dB or three robust standard deviations above the
+floor. A cell must also have support from at least three cells in its 3×3
+Doppler/time neighborhood. Rejected cells are blanked; retained blade energy
+keeps its original relative-dB magnitude.
+
+For responsive plotting, the enhanced view concatenates only measured STFT
+windows onto a 0.20-second active-acquisition axis and max-pools them onto 512
+time columns. Frame blind time, invalid frames, and processing drops therefore
+do not stretch a displayed spectrum. The 16-loop window is about 1.87 ms and
+the two-loop hop is about 0.234 ms with the compatible three-TX profile. This
+is shorter than the
+approximately 2.80 ms blade-passage interval of a two-blade rotor at 10,700
+RPM. The RPM estimator separately retains two seconds of physical-time
+history. Before 0.20 seconds of active history has accumulated, unused raster
+columns are filled from the nearest measured spectrum; normal frame gaps are
+removed by concatenation. PyQtGraph updates
+a persistent row-major `uint8` RGBA image and flash-score curve with a fixed
+Turbo color lookup table; unused raw/noise arrays are not copied to the GUI
+process. Display color quantization does not reduce the resolution of the
+processed JSONL output.
+
+The horizontal display axis is concatenated active acquisition time. It removes
+inactive intervals and missing frames so every adjacent column represents the
+same nominal STFT hop. Physical timestamps, gap diagnostics, saved data, and
+RPM estimation still use the true irregular sampling. The horizontal gray band
+around zero velocity remains because the enhanced view intentionally
+masks the central ±2 clutter bins. The vertical axis is radial velocity derived
+from the configured start frequency and chirp period. The lower panel shows the
+broadband blade-flash score. RPM is estimated from its irregularly sampled
+blade-passage periodicity and converted using `--rotor-blades`; multiple
+separated peaks can be requested with `--rotor-count`.
+
+`--rotor-radius-m` and the maximum configured RPM are used to compare expected
+tip speed with the unambiguous velocity. An alias warning does not disable the
+temporal RPM estimate, but velocity values in the spectrogram may be folded.
+For the strongest radial modulation, mount the radar rigidly and view roughly
+along the rotor plane, not along the rotor axis.
+
 ### Display performance
 
 Display rendering is a separate process and receives only the latest result.
-The combined display preserves full 30 Hz DSP by default. Final logs include
-per-stage p50, p95, and maximum timings so sustained processing load can be
-distinguished from short initialization spikes.
+The dedicated rotor renderer can consume display updates at up to 60 Hz; its Qt
+timer always drains to the newest queued result. The combined display preserves
+full 30 Hz DSP by default. Final logs include per-stage p50, p95, and maximum
+timings so sustained processing load can be distinguished from short
+initialization spikes.
+
+`radar_frame_redraw_coverage` measures GUI cadence, not data retention. Judge
+capture integrity using `invalid_frames`, `lost_packets`, and
+`processing_drops`.
 
 Use `--display none` for packet-loss testing or headless operation.
 
@@ -333,7 +432,7 @@ The integrated launcher saves processed data by default. Override its path with:
 python run.py --processed-output .\rawdatacapture\captures\processed.jsonl
 ```
 
-The first JSONL record declares format version 3 and contains the radar
+The first JSONL record declares format version 4 and contains the radar
 configuration, column definitions, calibration settings, adaptive-reference
 rate, and static-validation policy. Each following record contains one
 processed update with:
@@ -349,13 +448,26 @@ processed update with:
 - static-reference warm-up, calibration, readiness, and adaptation state;
 - the current target-track state;
 - the newest complete centered-bin micro-Doppler spectrum in dB;
-- all short-time micro-Doppler windows generated from that frame, laid out as
+- conventional-mode short-time micro-Doppler windows, laid out as
   `[window][centered_doppler_bin]`;
 - the selected micro-Doppler range gate.
 
+Dedicated rotor records additionally populate `rotor_micro_doppler` with raw
+and enhanced per-frame spectra, physical window times, the velocity axis,
+noise floor, adaptive `noise_gate_db` for each window, blade-flash score, RPM
+estimates, confidence/harmonic fields, and velocity-alias diagnostics. Rotor
+spectra are saved to 0.01 dB precision.
+To avoid serializing the same high-resolution raw spectra twice, dedicated
+mode keeps only the newest window in the legacy
+`micro_doppler_windows_db` field; the complete frame is in
+`rotor_micro_doppler.raw_spectrogram_db`. Other modes write the structured
+field as `null` and retain their existing legacy layouts.
+
 Updates are written incrementally, so a clean shutdown is not required to read
-the records already saved. Processed output is generated even when
-`--display none` is used.
+the records already saved. A 1 MiB userspace write buffer reduces per-frame
+disk overhead, so an abnormal termination may leave the newest buffered
+records unwritten. Processed output is generated even when `--display none`
+is used.
 
 ## Optional Raw Frames
 

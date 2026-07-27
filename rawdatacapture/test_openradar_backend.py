@@ -7,7 +7,10 @@ import numpy as np
 
 from rawdatacapture.dsp import (
     AdaptiveClutterMap,
+    DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
     StaticSceneMap,
+    _apply_rotor_noise_support_filter,
+    _rotor_noise_floor_and_gate,
     _local_maxima_3d,
     _local_maximum_candidate_indices,
     build_virtual_antenna_grid,
@@ -16,12 +19,16 @@ from rawdatacapture.dsp import (
     cluster_point_cloud_with_labels,
     compute_micro_doppler_spectrum,
     compute_per_tx_micro_doppler_spectrogram,
+    compute_rotor_micro_doppler_frame,
     compute_point_cloud,
     compute_static_angle_power,
     compute_static_point_cloud,
     doppler_peak_mask,
     estimate_xyz_from_virtual_array,
     estimate_xyz_from_virtual_arrays,
+    estimate_rotor_rpm,
+    micro_doppler_velocity_axis_m_s,
+    rotor_velocity_alias_diagnostic,
     static_target_protection_mask,
 )
 from rawdatacapture.openradar_backend import (
@@ -34,6 +41,7 @@ from rawdatacapture.openradar_backend import (
 
 
 OPENRADAR_AVAILABLE = importlib.util.find_spec("mmwave") is not None
+SKLEARN_AVAILABLE = importlib.util.find_spec("sklearn") is not None
 
 
 class AdaptiveClutterMapTests(unittest.TestCase):
@@ -702,6 +710,236 @@ class MicroDopplerSpectrumTests(unittest.TestCase):
             np.full(3, (fft_size // 2) + tone_bin),
         )
 
+
+class RotorMicroDopplerTests(unittest.TestCase):
+    @staticmethod
+    def config() -> SimpleNamespace:
+        return SimpleNamespace(
+            num_chirps_per_loop=1,
+            idle_time_us=7.0,
+            ramp_end_time_us=32.0,
+            start_frequency_ghz=60.0,
+        )
+
+    def test_single_tx_profile_has_expected_velocity_span(self) -> None:
+        velocity = micro_doppler_velocity_axis_m_s(self.config(), 128)
+
+        self.assertEqual(velocity.shape, (128,))
+        self.assertAlmostEqual(float(velocity[0]), -32.03, places=1)
+        self.assertAlmostEqual(float(velocity[-1]), 31.53, places=1)
+
+    def test_three_tx_profile_processes_each_tx_at_its_physical_slow_time_rate(
+        self,
+    ) -> None:
+        config = SimpleNamespace(
+            num_chirps_per_loop=3,
+            idle_time_us=7.0,
+            ramp_end_time_us=32.0,
+            start_frequency_ghz=60.0,
+        )
+        range_fft_cube = np.ones((384, 4, 8), dtype=np.complex64)
+
+        result = compute_rotor_micro_doppler_frame(
+            range_fft_cube,
+            np.arange(8, dtype=np.float32),
+            config,
+            target_range_m=2.0,
+            frame_time_s=0.0,
+            range_half_width_bins=0,
+        )
+
+        self.assertEqual(result.raw_spectrogram_db.shape, (128, 57))
+        self.assertAlmostEqual(
+            float(result.unambiguous_velocity_m_s),
+            10.68,
+            places=1,
+        )
+        self.assertAlmostEqual(
+            float(result.window_times_s[0]),
+            7.5 * 117e-6,
+            places=9,
+        )
+
+    def test_weighted_mean_rejects_static_body_and_preserves_tone(self) -> None:
+        loop_count = 128
+        tone_bin = 12
+        loops = np.arange(loop_count)
+        rng = np.random.default_rng(22)
+        receiver_noise = 0.1 * (
+            rng.normal(size=loop_count)
+            + 1j * rng.normal(size=loop_count)
+        )
+        target = (
+            100.0
+            + 10.0 * np.exp(2j * np.pi * tone_bin * loops / 128)
+            + receiver_noise
+        )
+        range_fft_cube = np.zeros((loop_count, 1, 5), dtype=np.complex64)
+        range_fft_cube[:, 0, 2] = target
+        range_fft_cube[:, 0, 4] = 10_000.0
+
+        result = compute_rotor_micro_doppler_frame(
+            range_fft_cube,
+            np.arange(5, dtype=np.float32),
+            self.config(),
+            target_range_m=2.0,
+            frame_time_s=1.0,
+            range_half_width_bins=0,
+        )
+
+        self.assertEqual(result.raw_spectrogram_db.shape, (128, 57))
+        self.assertLessEqual(
+            abs(
+                int(np.argmax(result.enhanced_spectrogram_db[:, 0]))
+                - (64 + tone_bin)
+            ),
+            1,
+        )
+        self.assertEqual(float(result.enhanced_spectrogram_db[64, 0]), 0.0)
+        self.assertGreater(
+            float(result.enhanced_spectrogram_db[64 + tone_bin, 0]),
+            30.0,
+        )
+        self.assertAlmostEqual(
+            float(result.window_times_s[0]),
+            1.0 + 7.5 * 39e-6,
+            places=9,
+        )
+        self.assertIsNotNone(result.noise_gate_db)
+        assert result.noise_gate_db is not None
+        self.assertEqual(result.noise_gate_db.shape, (57,))
+        self.assertTrue(
+            np.all(result.noise_gate_db >= DEFAULT_ROTOR_NOISE_GATE_MIN_DB)
+        )
+
+    def test_adaptive_gate_blanks_complex_noise(self) -> None:
+        rng = np.random.default_rng(91)
+        range_fft_cube = (
+            rng.normal(size=(128, 4, 5))
+            + 1j * rng.normal(size=(128, 4, 5))
+        ).astype(np.complex64)
+
+        result = compute_rotor_micro_doppler_frame(
+            range_fft_cube,
+            np.arange(5, dtype=np.float32),
+            self.config(),
+            target_range_m=2.0,
+            frame_time_s=0.0,
+            range_half_width_bins=1,
+        )
+
+        occupancy = np.count_nonzero(
+            result.enhanced_spectrogram_db
+        ) / result.enhanced_spectrogram_db.size
+        self.assertLess(occupancy, 0.01)
+
+    def test_lower_tail_noise_gate_ignores_positive_blade_ridge(self) -> None:
+        off_center = np.ones(128, dtype=bool)
+        off_center[62:67] = False
+        baseline = np.zeros((128, 4), dtype=np.float32)
+        baseline[off_center] = np.linspace(
+            -2.0,
+            2.0,
+            int(np.count_nonzero(off_center)),
+            dtype=np.float32,
+        )[:, np.newaxis]
+        contaminated = baseline.copy()
+        contaminated[np.flatnonzero(off_center)[-15:]] += 20.0
+
+        baseline_floor, baseline_gate = _rotor_noise_floor_and_gate(
+            baseline,
+            off_center,
+        )
+        contaminated_floor, contaminated_gate = _rotor_noise_floor_and_gate(
+            contaminated,
+            off_center,
+        )
+
+        np.testing.assert_allclose(contaminated_floor, baseline_floor)
+        np.testing.assert_allclose(contaminated_gate, baseline_gate)
+
+    def test_support_filter_preserves_ridge_peak_and_blanks_isolated_cell(
+        self,
+    ) -> None:
+        relative = np.zeros((128, 5), dtype=np.float32)
+        relative[74:79, 1:4] = 8.0
+        relative[76, 2] = 12.0
+        relative[100, 0] = 15.0
+        gates = np.full(5, 3.0, dtype=np.float32)
+        off_center = np.ones(128, dtype=bool)
+        off_center[62:67] = False
+
+        filtered = _apply_rotor_noise_support_filter(
+            relative,
+            gates,
+            off_center,
+        )
+
+        self.assertEqual(float(filtered[76, 2]), 12.0)
+        self.assertEqual(float(filtered[100, 0]), 0.0)
+        self.assertEqual(float(np.max(filtered[74:79, 1:4])), 12.0)
+
+    def test_gap_aware_rpm_estimate_is_within_five_percent(self) -> None:
+        times = []
+        for frame_index in range(100):
+            times.extend(
+                frame_index * 0.010 + np.arange(13, dtype=float) * 0.000312
+            )
+        times = np.asarray(times)
+        blade_passage_hz = 200.0
+        scores = 4.0 + 3.0 * np.cos(
+            2.0 * np.pi * blade_passage_hz * times
+        )
+
+        estimates = estimate_rotor_rpm(
+            times,
+            scores,
+            blade_count=2,
+            rpm_min=4_000.0,
+            rpm_max=8_000.0,
+        )
+
+        self.assertTrue(estimates)
+        self.assertLess(abs(estimates[0].rpm - 6_000.0) / 6_000.0, 0.05)
+        self.assertGreater(estimates[0].confidence, 0.8)
+
+    def test_gap_aware_rpm_estimate_includes_upper_search_boundary(self) -> None:
+        times = np.concatenate(
+            [
+                frame_index * 0.03333
+                + (7.5 + 2.0 * np.arange(57)) * 117e-6
+                for frame_index in range(61)
+            ]
+        )
+        rpm = 10_700.0
+        blade_passage_hz = rpm * 2.0 / 60.0
+        scores = 4.0 + 3.0 * np.cos(
+            2.0 * np.pi * blade_passage_hz * times
+        )
+
+        estimates = estimate_rotor_rpm(
+            times,
+            scores,
+            blade_count=2,
+            rpm_min=500.0,
+            rpm_max=rpm,
+        )
+
+        self.assertTrue(estimates)
+        self.assertLess(abs(estimates[0].rpm - rpm) / rpm, 0.01)
+
+    def test_tip_speed_alias_warning_uses_eighty_percent_margin(self) -> None:
+        unambiguous, alias_risk, warning = rotor_velocity_alias_diagnostic(
+            self.config(),
+            rotor_radius_m=0.05,
+            rotor_rpm_max=10_000.0,
+        )
+
+        self.assertAlmostEqual(float(unambiguous), 32.03, places=1)
+        self.assertTrue(alias_risk)
+        self.assertIn("Expected tip speed", warning)
+
+
 class PointCloudClusteringTests(unittest.TestCase):
     def test_dbscan_returns_cluster_centers_and_ignores_noise(self) -> None:
         points = np.asarray(
@@ -726,6 +964,7 @@ class PointCloudClusteringTests(unittest.TestCase):
 
         self.assertEqual(clusters.shape, (0, 4))
 
+    @unittest.skipUnless(SKLEARN_AVAILABLE, "scikit-learn is not installed")
     def test_small_cloud_dbscan_matches_sklearn(self) -> None:
         from sklearn.cluster import DBSCAN
 
