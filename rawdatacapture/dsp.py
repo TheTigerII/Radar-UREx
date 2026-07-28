@@ -35,6 +35,7 @@ DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
 DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE = 20.0
 DEFAULT_STATIC_MINIMUM_NOISE_DB = 1.0
 DEFAULT_ROTOR_NOISE_GATE_MIN_DB = 3.0
+DEFAULT_ROTOR_NOISE_GATE_MAX_DB = 15.0
 DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER = 3.0
 DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE = (3, 3)
 DEFAULT_ROTOR_NOISE_MIN_SUPPORT = 3
@@ -1427,6 +1428,13 @@ def _rotor_noise_floor_and_gate(
     noise_gate_db = np.maximum(
         DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
         DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER * robust_noise_sigma_db,
+    ).astype(np.float32, copy=False)
+    # Deep deterministic FFT/cancellation nulls can make the lower-tail MAD
+    # enormous even when visible rotor ridges are present. Keep the adaptive
+    # gate useful without allowing those nulls to blank the whole display.
+    noise_gate_db = np.minimum(
+        noise_gate_db,
+        DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
     ).astype(np.float32, copy=False)
     return noise_floor_db, noise_gate_db
 

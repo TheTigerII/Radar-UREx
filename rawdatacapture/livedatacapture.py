@@ -23,6 +23,7 @@ if __package__ in {None, ""}:
         sys.path.insert(0, repository_root)
     from rawdatacapture.dsp import (
         AdaptiveClutterMap,
+        DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
         DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
         DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
         DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
@@ -51,6 +52,7 @@ if __package__ in {None, ""}:
 else:
     from .dsp import (
         AdaptiveClutterMap,
+        DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
         DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
         DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
         DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
@@ -4158,6 +4160,7 @@ def _run_frame_processor_impl(
                 "weighted_complex_mean_cancellation": True,
                 "adaptive_noise_filter": {
                     "minimum_gate_db": DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
+                    "maximum_gate_db": DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
                     "robust_sigma_multiplier": (
                         DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER
                     ),

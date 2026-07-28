@@ -7,6 +7,7 @@ import numpy as np
 
 from rawdatacapture.dsp import (
     AdaptiveClutterMap,
+    DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
     DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
     StaticSceneMap,
     _apply_rotor_noise_support_filter,
@@ -810,6 +811,30 @@ class RotorMicroDopplerTests(unittest.TestCase):
         self.assertEqual(result.noise_gate_db.shape, (57,))
         self.assertTrue(
             np.all(result.noise_gate_db >= DEFAULT_ROTOR_NOISE_GATE_MIN_DB)
+        )
+        self.assertTrue(
+            np.all(result.noise_gate_db <= DEFAULT_ROTOR_NOISE_GATE_MAX_DB)
+        )
+
+    def test_deep_cancellation_nulls_cannot_blank_visible_ridges(self) -> None:
+        spectrum_db = np.full((128, 7), -120.0, dtype=np.float32)
+        off_center = np.ones(128, dtype=bool)
+        off_center[62:67] = False
+        spectrum_db[off_center, :] = np.linspace(
+            -120.0,
+            0.0,
+            int(np.count_nonzero(off_center)),
+            dtype=np.float32,
+        )[:, np.newaxis]
+
+        _, noise_gate_db = _rotor_noise_floor_and_gate(
+            spectrum_db,
+            off_center,
+        )
+
+        np.testing.assert_allclose(
+            noise_gate_db,
+            DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
         )
 
     def test_adaptive_gate_blanks_complex_noise(self) -> None:
