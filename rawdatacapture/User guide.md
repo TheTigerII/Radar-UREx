@@ -80,6 +80,25 @@ training starts only when the training cell is run manually.
 Run `run.py --no-classification` when capture is needed in an environment
 without PyTorch.
 
+On Jetson, `--classification-device auto` resolves to the required CUDA
+backend. Install the Jetson-native TensorRT packages and ONNX export support
+once:
+
+```bash
+./scripts/setup_jetson_tensorrt.sh
+```
+
+The launcher builds and caches a fixed-shape TensorRT engine on first use,
+then checks its checkpoint, calibration, profile, precision policy,
+TensorRT/CUDA, and GPU fingerprints on later runs. Residual convolutions use
+FP16; the input stem and arithmetic stay FP32 to meet the calibrated
+probability parity limit on Orin. The first build can take several minutes and
+validates all cached feature windows against CPU PyTorch; a label mismatch or
+calibrated-probability error above `1e-3` aborts startup. The launcher allows
+five minutes for this one-time GPU startup. CUDA/TensorRT failure on Jetson
+never silently falls back to CPU. Use `--classification-device cpu` only as an
+explicit diagnostic override.
+
 Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
 local implementation for real-time performance. The IWR6843ISK-ODS planar-array
 coordinate mapping remains in the local DSP adapter because
@@ -512,6 +531,8 @@ Important counters are:
 - `invalid_frames`: frames touched by an ordinary byte gap.
 - `processing_drops`: valid frames discarded because the bounded processing
   queue was full.
+- `postprocessing_drops`: DSP-complete dedicated-rotor frames that did not
+  complete ordered inference/output processing.
 
 Healthy capture normally keeps all of these at zero. Frames containing gap
 padding are neither processed nor saved.
@@ -522,10 +543,12 @@ processing error counters change. Clean shutdown always prints:
 
 - a capture summary with total, valid, invalid, and queued frames;
 - a processing summary with queued and completed frames;
+- a post-processing summary with completed frames and queue high-water mark;
 - a display summary with physically rendered updates, latest-update
   replacements, and frames not rendered over total assembled frames;
 - a static summary with raw candidate, handoff-pending, and validated counts;
-- a processing-timing summary with p50, p95, and maximum stage latency.
+- DSP and post-processing timing summaries with p50, p95, and maximum stage
+  latency.
 
 The display deliberately keeps only the latest result. A skipped display
 update is therefore distinct from packet loss, an invalid frame, or a

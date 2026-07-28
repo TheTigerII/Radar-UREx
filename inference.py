@@ -289,6 +289,8 @@ class DroneBirdInference:
         return {
             "enabled": True,
             "model": "drone_bird_cnn",
+            "backend": "pytorch",
+            "device": "cpu",
             "feature_version": FEATURE_VERSION,
             "input_shape_chw": list(INPUT_SHAPE_CHW),
             "threshold": self.threshold,
@@ -338,35 +340,21 @@ class DroneBirdInference:
         except (TypeError, ValueError) as exc:
             return self.reset(f"invalid_feature_step:{exc}")
 
+        return self.update_feature_step(step)
+
+    def update_feature_step(self, step: np.ndarray) -> InferenceResult:
+        """Append one precomputed [2, 64] feature step and classify its window."""
+        step = np.asarray(step, dtype=np.float32)
+        if step.shape != (2, DOPPLER_BINS) or not np.isfinite(step).all():
+            return self.reset(f"invalid_feature_step:{step.shape}")
+
         self._history.append(step)
         if len(self._history) < WINDOW_STEPS:
             return self.unknown("insufficient_history")
 
         try:
             window = np.stack(tuple(self._history), axis=1)
-            normalized = (
-                np.clip(
-                    window,
-                    self.clip_low[:, None, None],
-                    self.clip_high[:, None, None],
-                )
-                - self.channel_mean[:, None, None]
-            ) / self.channel_std[:, None, None]
-            normalized = normalized.astype(np.float32, copy=False)
-            if (
-                normalized.shape != INPUT_SHAPE_CHW
-                or not np.isfinite(normalized).all()
-            ):
-                return self.reset("invalid_normalized_window")
-
-            with self._torch.inference_mode():
-                tensor = self._torch.from_numpy(normalized[None])
-                logit = float(self.model(tensor).cpu().numpy()[0])
-            probability = float(
-                self.calibrator.predict_proba(
-                    np.asarray([[logit]], dtype=np.float64)
-                )[0, 1]
-            )
+            probability = self.predict_feature_window(window)
         except Exception as exc:
             return self.reset(f"inference_error:{type(exc).__name__}")
         if not np.isfinite(probability) or not 0.0 <= probability <= 1.0:
@@ -379,6 +367,40 @@ class DroneBirdInference:
             reason=None,
             valid_steps=len(self._history),
         )
+
+    def normalize_feature_window(self, window: np.ndarray) -> np.ndarray:
+        """Normalize one raw [2, 48, 64] feature window for model inference."""
+        window = np.asarray(window, dtype=np.float32)
+        if window.shape != INPUT_SHAPE_CHW or not np.isfinite(window).all():
+            raise ValueError(f"Invalid feature window: {window.shape}")
+        normalized = (
+            np.clip(
+                window,
+                self.clip_low[:, None, None],
+                self.clip_high[:, None, None],
+            )
+            - self.channel_mean[:, None, None]
+        ) / self.channel_std[:, None, None]
+        normalized = normalized.astype(np.float32, copy=False)
+        if not np.isfinite(normalized).all():
+            raise ValueError("Normalized feature window contains non-finite values")
+        return np.ascontiguousarray(normalized)
+
+    def calibrate_logit(self, logit: float) -> float:
+        """Apply the deployed probability calibrator to one model logit."""
+        return float(
+            self.calibrator.predict_proba(
+                np.asarray([[float(logit)]], dtype=np.float64)
+            )[0, 1]
+        )
+
+    def predict_feature_window(self, window: np.ndarray) -> float:
+        """Classify one complete raw feature window without changing history."""
+        normalized = self.normalize_feature_window(window)
+        with self._torch.inference_mode():
+            tensor = self._torch.from_numpy(normalized[None])
+            logit = float(self.model(tensor).cpu().numpy()[0])
+        return self.calibrate_logit(logit)
 
     def _validate_artifacts(
         self,

@@ -79,7 +79,15 @@ else:
         validate_openradar_backend,
     )
 
-from inference import DroneBirdInference, InferenceResult
+from inference import (
+    DroneBirdInference,
+    InferenceResult,
+    doppler_cube_to_feature_step,
+)
+from tensorrt_inference import (
+    create_inference_engine,
+    resolve_classification_device,
+)
 
 
 # Default DCA1000 network parameters.
@@ -160,6 +168,16 @@ EmitFunc = Callable[[str], None]
 
 class CaptureStartupError(RuntimeError):
     """Raised for expected startup failures that should not print a traceback."""
+
+
+@dataclass(frozen=True)
+class RotorPostprocessItem:
+    """Ordered compact handoff from radar DSP to inference/output processing."""
+
+    frame_index: int
+    save_update: bool
+    feature_step: np.ndarray
+    rotor_result: MicroDopplerResult
 
 
 @dataclass(frozen=True)
@@ -359,6 +377,8 @@ class ProcessingTimingStats:
         "static_detection",
         "clustering",
         "micro_doppler",
+        "classification_feature",
+        "classification",
         "serialization",
         "total",
     )
@@ -924,7 +944,9 @@ class LiveDisplay:
         max_range_m: float,
         point_cloud_range_m: Optional[float] = None,
         point_cloud_fov_deg: float = DEFAULT_POINT_CLOUD_FOV_DEG,
+        process_context: Optional[Any] = None,
     ) -> None:
+        context = process_context or mp
         self.mode = mode
         self.pause_seconds = max(pause_seconds, 0.001)
         self.max_range_m = max(max_range_m, 0.0)
@@ -948,12 +970,12 @@ class LiveDisplay:
         if dependency_error is not None:
             raise CaptureStartupError(dependency_error)
 
-        self.stop_event = mp.Event()
-        self.payload_queue = mp.Queue(maxsize=1)
-        self.rendered_updates = mp.Value("Q", 0)
-        self.skipped_updates = mp.Value("Q", 0)
-        self.startup_status_queue = mp.Queue(maxsize=1)
-        self.process = mp.Process(
+        self.stop_event = context.Event()
+        self.payload_queue = context.Queue(maxsize=1)
+        self.rendered_updates = context.Value("Q", 0)
+        self.skipped_updates = context.Value("Q", 0)
+        self.startup_status_queue = context.Queue(maxsize=1)
+        self.process = context.Process(
             target=_run_display_process,
             args=(
                 self.mode,
@@ -1398,6 +1420,9 @@ class DisplayPayloadSink:
         rotor_rpm_max: float = DEFAULT_ROTOR_RPM_MAX,
         inference_engine: Optional[DroneBirdInference] = None,
         classification_emit_func: Optional[EmitFunc] = None,
+        rotor_post_queue: Optional[mp.Queue] = None,
+        rotor_post_failure_event: Optional[Any] = None,
+        rotor_post_queue_high_water: Optional[Any] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -1409,6 +1434,9 @@ class DisplayPayloadSink:
         self.cluster_min_samples = max(int(cluster_min_samples), 1)
         self.processed_writer = processed_writer
         self.display_skipped_counter = display_skipped_counter
+        self.rotor_post_queue = rotor_post_queue
+        self.rotor_post_failure_event = rotor_post_failure_event
+        self.rotor_post_queue_high_water = rotor_post_queue_high_water
         self.clutter_map = (
             AdaptiveClutterMap(
                 update_rate=clutter_map_update_rate,
@@ -1501,18 +1529,24 @@ class DisplayPayloadSink:
             self.mode == "none"
             and not save_processed
             and self.inference_engine is None
+            and self.rotor_post_queue is None
         ):
             return
         if (
             self.payload_queue is None
             and not save_processed
             and self.inference_engine is None
+            and self.rotor_post_queue is None
         ):
             return
 
         self.frame_count += 1
         publish_update = self.frame_count % self.update_every == 0
-        if not publish_update and self.inference_engine is None:
+        if (
+            not publish_update
+            and self.inference_engine is None
+            and self.rotor_post_queue is None
+        ):
             return
 
         if self.mode == ROTOR_DISPLAY_MODE:
@@ -1543,7 +1577,35 @@ class DisplayPayloadSink:
                 captured_at_s=captured_at_s,
                 build_display_payload=publish_rotor_display,
             )
-            if self.inference_engine is not None:
+            if self.rotor_post_queue is not None:
+                doppler_started = time.perf_counter()
+                doppler_cube = compute_range_doppler_fft(
+                    range_fft,
+                    self.config,
+                )
+                self.timings.add(
+                    "doppler",
+                    time.perf_counter() - doppler_started,
+                )
+                feature_started = time.perf_counter()
+                feature_step = self._fixed_range_feature_step(
+                    doppler_cube,
+                    range_axis_m,
+                    self.micro_doppler_range_m,
+                )
+                self.timings.add(
+                    "classification_feature",
+                    time.perf_counter() - feature_started,
+                )
+                self._enqueue_rotor_postprocess(
+                    RotorPostprocessItem(
+                        frame_index=self.frame_count,
+                        save_update=publish_update,
+                        feature_step=feature_step,
+                        rotor_result=frame_result,
+                    )
+                )
+            elif self.inference_engine is not None:
                 doppler_started = time.perf_counter()
                 doppler_cube = compute_range_doppler_fft(
                     range_fft,
@@ -1669,6 +1731,55 @@ class DisplayPayloadSink:
             _increment_shared_counter(
                 self.display_skipped_counter,
                 skipped_updates,
+            )
+
+    def _fixed_range_feature_step(
+        self,
+        doppler_cube: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+        target_range_m: Optional[float],
+    ) -> np.ndarray:
+        range_axis = (
+            np.asarray(range_axis_m, dtype=np.float64)
+            if range_axis_m is not None
+            else np.empty((0,), dtype=np.float64)
+        )
+        if (
+            target_range_m is None
+            or not np.isfinite(target_range_m)
+            or range_axis.size != doppler_cube.shape[-1]
+            or not np.isfinite(range_axis).all()
+        ):
+            raise ValueError("Dedicated classification target range is invalid")
+        target_range_bin = int(
+            np.argmin(np.abs(range_axis - float(target_range_m)))
+        )
+        return doppler_cube_to_feature_step(doppler_cube, target_range_bin)
+
+    def _enqueue_rotor_postprocess(self, item: RotorPostprocessItem) -> None:
+        if self.rotor_post_queue is None:
+            return
+        while True:
+            if (
+                self.rotor_post_failure_event is not None
+                and self.rotor_post_failure_event.is_set()
+            ):
+                raise RuntimeError("Rotor post-processing worker failed")
+            try:
+                self.rotor_post_queue.put(item, timeout=0.1)
+                break
+            except queue.Full:
+                continue
+        if self.rotor_post_queue_high_water is None:
+            return
+        try:
+            depth = max(int(self.rotor_post_queue.qsize()), 0)
+        except (AttributeError, NotImplementedError):
+            return
+        with self.rotor_post_queue_high_water.get_lock():
+            self.rotor_post_queue_high_water.value = max(
+                int(self.rotor_post_queue_high_water.value),
+                depth,
             )
 
     def _compute_rotor_payload(
@@ -4052,6 +4163,229 @@ def _request_processor_stop(
         return False
 
 
+def _rotor_processing_metadata(
+    *,
+    micro_doppler_range_half_width_bins: int,
+    micro_doppler_range_m: Optional[float],
+    rotor_blades: int,
+    rotor_count: int,
+    rotor_radius_m: Optional[float],
+    rotor_rpm_min: float,
+    rotor_rpm_max: float,
+) -> dict[str, Any]:
+    return {
+        "mode": "per-TX clutter-rejected STFT",
+        "window": "Hann",
+        "window_loops": ROTOR_MICRO_DOPPLER_WINDOW_LOOPS,
+        "hop_loops": ROTOR_MICRO_DOPPLER_HOP_LOOPS,
+        "fft_size": ROTOR_MICRO_DOPPLER_FFT_SIZE,
+        "range_half_width_bins": micro_doppler_range_half_width_bins,
+        "dc_notch_bins": ROTOR_MICRO_DOPPLER_DC_NOTCH_BINS,
+        "relative_display_db": [
+            0.0,
+            ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
+        ],
+        "estimator_history_seconds": ROTOR_MICRO_DOPPLER_HISTORY_SECONDS,
+        "display_history_seconds": ROTOR_DISPLAY_HISTORY_SECONDS,
+        "display_time_basis": "concatenated active acquisition intervals",
+        "estimator_time_basis": "physical capture timestamps",
+        "display_time_bins": ROTOR_DISPLAY_TIME_BINS,
+        "processed_spectrum_db_decimals": ROTOR_SPECTRUM_OUTPUT_DECIMALS,
+        "legacy_windows_policy": (
+            "latest window only; full windows are in rotor_micro_doppler"
+        ),
+        "weighted_complex_mean_cancellation": True,
+        "adaptive_noise_filter": {
+            "minimum_gate_db": DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
+            "maximum_gate_db": DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
+            "robust_sigma_multiplier": DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
+            "mad_scale": 1.4826,
+            "mad_policy": "lower half below median to avoid positive blade bias",
+            "support_shape": list(DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE),
+            "minimum_support_cells": DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
+            "amplitude_policy": (
+                "preserve retained relative dB; blank rejected cells"
+            ),
+        },
+        "target_range_m": micro_doppler_range_m,
+        "rotor_blades": rotor_blades,
+        "rotor_count": rotor_count,
+        "rotor_radius_m": rotor_radius_m,
+        "rotor_rpm_min": rotor_rpm_min,
+        "rotor_rpm_max": rotor_rpm_max,
+    }
+
+
+def _run_rotor_postprocessor(
+    config: RadarCaptureConfig,
+    post_queue: mp.Queue,
+    log_queue: mp.Queue,
+    startup_status_queue: mp.Queue,
+    failure_event: Any,
+    postprocessed_frames_counter: Any,
+    processed_output: Optional[Path],
+    display_update_every: int,
+    classification_artifact_dir: Path,
+    classification_profile_path: Path,
+    classification_device: str,
+    micro_doppler_range_m: Optional[float],
+    micro_doppler_range_half_width_bins: int,
+    rotor_blades: int,
+    rotor_count: int,
+    rotor_radius_m: Optional[float],
+    rotor_rpm_min: float,
+    rotor_rpm_max: float,
+) -> None:
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    def worker_emit(message: str) -> None:
+        _queue_emit(log_queue, message)
+
+    ready_reported = False
+    inference_engine: Optional[Any] = None
+    processed_writer: Optional[ProcessedOutputWriter] = None
+    timings = ProcessingTimingStats()
+    last_classification_emit_s = 0.0
+    last_classification_signature: Optional[tuple[str, Optional[str]]] = None
+    try:
+        inference_engine = create_inference_engine(
+            classification_artifact_dir,
+            config,
+            classification_profile_path,
+            device=classification_device,
+        )
+        processed_writer = ProcessedOutputWriter(
+            processed_output,
+            config,
+            display_update_every,
+            worker_emit,
+            static_detection=False,
+            rotor_processing=_rotor_processing_metadata(
+                micro_doppler_range_half_width_bins=(
+                    micro_doppler_range_half_width_bins
+                ),
+                micro_doppler_range_m=micro_doppler_range_m,
+                rotor_blades=rotor_blades,
+                rotor_count=rotor_count,
+                rotor_radius_m=rotor_radius_m,
+                rotor_rpm_min=rotor_rpm_min,
+                rotor_rpm_max=rotor_rpm_max,
+            ),
+            classification_metadata=inference_engine.metadata,
+        )
+        metadata = inference_engine.metadata
+        backend = metadata.get("backend", "pytorch")
+        device = metadata.get("device", "cpu")
+        startup_message = (
+            "Rotor post-processor ready: "
+            f"classification_backend={backend}, device={device}"
+        )
+        if backend == "tensorrt":
+            gpu = metadata.get("gpu", {})
+            benchmark = metadata.get("benchmark", {})
+            startup_message += (
+                f", gpu={gpu.get('name', 'unknown')}, "
+                f"precision={metadata.get('precision')}, "
+                f"device_buffers={metadata.get('device_allocation_bytes', 0)}B, "
+                f"inference_p50={float(benchmark.get('p50_ms', 0.0)):.3f}ms, "
+                f"p95={float(benchmark.get('p95_ms', 0.0)):.3f}ms"
+            )
+        startup_status_queue.put(
+            {"state": "ready", "message": startup_message},
+            timeout=1.0,
+        )
+        ready_reported = True
+
+        while True:
+            item = post_queue.get()
+            if item is None:
+                break
+            if not isinstance(item, RotorPostprocessItem):
+                raise TypeError(
+                    f"Unexpected rotor post-processing item: {type(item).__name__}"
+                )
+            total_started = time.perf_counter()
+            inference_started = time.perf_counter()
+            classification = inference_engine.update_feature_step(
+                item.feature_step
+            )
+            timings.add(
+                "classification",
+                time.perf_counter() - inference_started,
+            )
+            signature = (classification.label, classification.reason)
+            now = time.monotonic()
+            if (
+                signature != last_classification_signature
+                or now - last_classification_emit_s >= 1.0
+            ):
+                worker_emit(
+                    CLASSIFICATION_RESULT_PREFIX
+                    + json.dumps(
+                        classification.to_dict(),
+                        separators=(",", ":"),
+                    )
+                )
+                last_classification_signature = signature
+                last_classification_emit_s = now
+
+            if item.save_update and processed_writer.enabled:
+                result = item.rotor_result
+                serialization_started = time.perf_counter()
+                processed_writer.write_update(
+                    frame_index=item.frame_index,
+                    points=np.empty((0, 4), dtype=np.float32),
+                    clusters=np.empty((0, 4), dtype=np.float32),
+                    target_track=None,
+                    micro_doppler_db=(
+                        result.raw_spectrogram_db[:, -1]
+                        if result.raw_spectrogram_db.size
+                        else np.empty((0,), dtype=np.float32)
+                    ),
+                    micro_doppler_windows_db=(
+                        result.raw_spectrogram_db[:, -1:]
+                        if result.raw_spectrogram_db.size
+                        else np.empty((0, 0), dtype=np.float32)
+                    ),
+                    selected_range_m=result.selected_range_m,
+                    rotor_micro_doppler=result,
+                    classification=classification,
+                )
+                timings.add(
+                    "serialization",
+                    time.perf_counter() - serialization_started,
+                )
+            timings.add("total", time.perf_counter() - total_started)
+            _increment_shared_counter(postprocessed_frames_counter)
+    except Exception as exc:
+        failure_event.set()
+        message = (
+            "Rotor post-processor failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        worker_emit(message)
+        if not ready_reported:
+            try:
+                startup_status_queue.put(
+                    {"state": "failed", "message": message},
+                    timeout=1.0,
+                )
+            except queue.Full:
+                pass
+    finally:
+        if processed_writer is not None:
+            processed_writer.close()
+        if inference_engine is not None and hasattr(inference_engine, "close"):
+            inference_engine.close()
+        worker_emit(
+            timings.format_summary().replace(
+                "Processing timing summary:",
+                "Post-processing timing summary:",
+                1,
+            )
+        )
+
+
 def _run_frame_processor_impl(
     config: RadarCaptureConfig,
     frame_queue: mp.Queue,
@@ -4087,14 +4421,24 @@ def _run_frame_processor_impl(
     classification_enabled: bool = False,
     classification_artifact_dir: Optional[Path] = None,
     classification_profile_path: Optional[Path] = None,
+    classification_device: str = "auto",
+    rotor_post_queue: Optional[mp.Queue] = None,
+    rotor_post_failure_event: Optional[Any] = None,
+    rotor_post_queue_high_water: Optional[Any] = None,
+    startup_status_queue: Optional[mp.Queue] = None,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
 
+    use_rotor_postprocess = bool(
+        classification_enabled
+        and display_mode == ROTOR_DISPLAY_MODE
+        and rotor_post_queue is not None
+    )
     inference_engine = None
-    if classification_enabled:
+    if classification_enabled and not use_rotor_postprocess:
         if (
             classification_artifact_dir is None
             or classification_profile_path is None
@@ -4102,21 +4446,23 @@ def _run_frame_processor_impl(
             raise ValueError(
                 "Classification requires artifact and radar profile paths"
             )
-        inference_engine = DroneBirdInference(
+        inference_engine = create_inference_engine(
             classification_artifact_dir,
             config,
             classification_profile_path,
+            device=classification_device,
         )
         worker_emit(
             "CNN classification enabled: "
             f"artifacts={classification_artifact_dir}, "
+            f"device={resolve_classification_device(classification_device)}, "
             f"threshold={inference_engine.threshold:.6f}, "
             "negative_training_class=bionic_bird"
         )
 
     raw_writer = RawFrameWriter(raw_output, raw_metadata, config, worker_emit)
     processed_writer = ProcessedOutputWriter(
-        processed_output,
+        None if use_rotor_postprocess else processed_output,
         config,
         display_update_every,
         worker_emit,
@@ -4127,64 +4473,17 @@ def _run_frame_processor_impl(
         static_background_update_rate=static_background_update_rate,
         static_cluster_min_samples=static_cluster_min_samples,
         rotor_processing=(
-            {
-                "mode": "per-TX clutter-rejected STFT",
-                "window": "Hann",
-                "window_loops": ROTOR_MICRO_DOPPLER_WINDOW_LOOPS,
-                "hop_loops": ROTOR_MICRO_DOPPLER_HOP_LOOPS,
-                "fft_size": ROTOR_MICRO_DOPPLER_FFT_SIZE,
-                "range_half_width_bins": (
+            _rotor_processing_metadata(
+                micro_doppler_range_half_width_bins=(
                     micro_doppler_range_half_width_bins
                 ),
-                "dc_notch_bins": ROTOR_MICRO_DOPPLER_DC_NOTCH_BINS,
-                "relative_display_db": [
-                    0.0,
-                    ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
-                ],
-                "estimator_history_seconds": (
-                    ROTOR_MICRO_DOPPLER_HISTORY_SECONDS
-                ),
-                "display_history_seconds": ROTOR_DISPLAY_HISTORY_SECONDS,
-                "display_time_basis": (
-                    "concatenated active acquisition intervals"
-                ),
-                "estimator_time_basis": "physical capture timestamps",
-                "display_time_bins": ROTOR_DISPLAY_TIME_BINS,
-                "processed_spectrum_db_decimals": (
-                    ROTOR_SPECTRUM_OUTPUT_DECIMALS
-                ),
-                "legacy_windows_policy": (
-                    "latest window only; full windows are in "
-                    "rotor_micro_doppler"
-                ),
-                "weighted_complex_mean_cancellation": True,
-                "adaptive_noise_filter": {
-                    "minimum_gate_db": DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
-                    "maximum_gate_db": DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
-                    "robust_sigma_multiplier": (
-                        DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER
-                    ),
-                    "mad_scale": 1.4826,
-                    "mad_policy": (
-                        "lower half below median to avoid positive blade bias"
-                    ),
-                    "support_shape": list(
-                        DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE
-                    ),
-                    "minimum_support_cells": (
-                        DEFAULT_ROTOR_NOISE_MIN_SUPPORT
-                    ),
-                    "amplitude_policy": (
-                        "preserve retained relative dB; blank rejected cells"
-                    ),
-                },
-                "target_range_m": micro_doppler_range_m,
-                "rotor_blades": rotor_blades,
-                "rotor_count": rotor_count,
-                "rotor_radius_m": rotor_radius_m,
-                "rotor_rpm_min": rotor_rpm_min,
-                "rotor_rpm_max": rotor_rpm_max,
-            }
+                micro_doppler_range_m=micro_doppler_range_m,
+                rotor_blades=rotor_blades,
+                rotor_count=rotor_count,
+                rotor_radius_m=rotor_radius_m,
+                rotor_rpm_min=rotor_rpm_min,
+                rotor_rpm_max=rotor_rpm_max,
+            )
             if display_mode == ROTOR_DISPLAY_MODE
             else None
         ),
@@ -4225,6 +4524,13 @@ def _run_frame_processor_impl(
         rotor_rpm_max=rotor_rpm_max,
         inference_engine=inference_engine,
         classification_emit_func=worker_emit,
+        rotor_post_queue=(rotor_post_queue if use_rotor_postprocess else None),
+        rotor_post_failure_event=(
+            rotor_post_failure_event if use_rotor_postprocess else None
+        ),
+        rotor_post_queue_high_water=(
+            rotor_post_queue_high_water if use_rotor_postprocess else None
+        ),
     )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -4278,6 +4584,15 @@ def _run_frame_processor_impl(
             f"RPM band={rotor_rpm_min:g}-{rotor_rpm_max:g}."
         )
 
+    if startup_status_queue is not None:
+        startup_status_queue.put(
+            {
+                "state": "ready",
+                "message": "Radar frame processor ready.",
+            },
+            timeout=1.0,
+        )
+
     try:
         while True:
             frame = frame_queue.get()
@@ -4289,8 +4604,20 @@ def _run_frame_processor_impl(
     except KeyboardInterrupt:
         pass
     except Exception as exc:
+        if rotor_post_failure_event is not None:
+            rotor_post_failure_event.set()
         worker_emit(f"Frame processor stopped after error: {exc!r}")
     finally:
+        if use_rotor_postprocess and rotor_post_queue is not None:
+            while not (
+                rotor_post_failure_event is not None
+                and rotor_post_failure_event.is_set()
+            ):
+                try:
+                    rotor_post_queue.put(None, timeout=0.1)
+                    break
+                except queue.Full:
+                    continue
         raw_writer.close()
         processed_writer.close()
         worker_emit(display.format_static_summary())
@@ -4302,6 +4629,9 @@ def _run_frame_processor(*args: Any, **kwargs: Any) -> None:
     log_queue = kwargs.get("log_queue")
     if log_queue is None and len(args) >= 3:
         log_queue = args[2]
+    startup_status_queue = kwargs.get("startup_status_queue")
+    if startup_status_queue is None and len(args) >= 39:
+        startup_status_queue = args[38]
     try:
         _run_frame_processor_impl(*args, **kwargs)
     except KeyboardInterrupt:
@@ -4311,6 +4641,14 @@ def _run_frame_processor(*args: Any, **kwargs: Any) -> None:
         if log_queue is None:
             raise
         _queue_emit(log_queue, message)
+        if startup_status_queue is not None:
+            try:
+                startup_status_queue.put(
+                    {"state": "failed", "message": message},
+                    timeout=1.0,
+                )
+            except queue.Full:
+                pass
 
 
 def listen_for_frames(
@@ -4326,6 +4664,8 @@ def listen_for_frames(
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
     display: LiveDisplay,
+    pipeline_failure_event: Optional[Any] = None,
+    pipeline_process: Optional[Any] = None,
 ) -> CaptureStats:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
@@ -4406,6 +4746,20 @@ def listen_for_frames(
     receiver.start()
     try:
         while True:
+            if pipeline_process is not None and not pipeline_process.is_alive():
+                if pipeline_failure_event is not None:
+                    pipeline_failure_event.set()
+                emit(
+                    "Processing pipeline worker exited unexpectedly; "
+                    "stopping capture."
+                )
+                break
+            if (
+                pipeline_failure_event is not None
+                and pipeline_failure_event.is_set()
+            ):
+                emit("Processing pipeline failed; stopping capture.")
+                break
             try:
                 packet, packet_received_at_s = packet_queue.get(
                     timeout=socket_timeout_seconds
@@ -4579,6 +4933,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Directory containing the trained CNN state, calibration bundle, "
             "and model card."
+        ),
+    )
+    parser.add_argument(
+        "--classification-device",
+        choices=("auto", "cuda", "cpu"),
+        default="auto",
+        help=(
+            "Inference device. On Jetson, auto requires the TensorRT CUDA "
+            "backend and never silently falls back to CPU."
         ),
     )
     parser.add_argument(
@@ -5336,9 +5699,17 @@ def _timestamp() -> str:
 def main() -> None:
     args = parse_args()
     setup_terminal_log(args.log_file)
+    process_context = mp.get_context("spawn")
     frame_queue: Optional[mp.Queue] = None
     log_queue: Optional[mp.Queue] = None
+    processor_status_queue: Optional[mp.Queue] = None
     processor: Optional[mp.Process] = None
+    rotor_post_queue: Optional[mp.Queue] = None
+    rotor_post_status_queue: Optional[mp.Queue] = None
+    rotor_post_failure_event: Optional[Any] = None
+    rotor_postprocessor: Optional[mp.Process] = None
+    postprocessed_frames_counter: Optional[Any] = None
+    rotor_post_queue_high_water: Optional[Any] = None
     display: Optional[LiveDisplay] = None
     capture_stats: Optional[CaptureStats] = None
     processed_frames_counter: Optional[Any] = None
@@ -5377,23 +5748,21 @@ def main() -> None:
         classification_artifact_dir = _resolve_output_path(
             args.classification_artifacts
         )
+        resolved_classification_device = "disabled"
         if args.classification:
             try:
-                preflight_inference = DroneBirdInference(
-                    classification_artifact_dir,
-                    config,
-                    resolved_config_path,
+                resolved_classification_device = resolve_classification_device(
+                    args.classification_device
                 )
-            except Exception as exc:
+            except ValueError as exc:
                 raise CaptureStartupError(
-                    f"CNN classification startup failed: {exc}"
+                    f"Invalid classification device: {exc}"
                 ) from exc
             emit(
-                "Validated CNN classification artifacts: "
-                f"threshold={preflight_inference.threshold:.6f}, "
-                f"path={classification_artifact_dir}"
+                "Classification requested: "
+                f"device={resolved_classification_device}, "
+                f"artifacts={classification_artifact_dir}"
             )
-            del preflight_inference
         if args.display == ROTOR_DISPLAY_MODE and (
             config.start_frequency_ghz is None
             or config.slow_time_interval_s is None
@@ -5442,6 +5811,65 @@ def main() -> None:
         emit(f"DSP backend: {dsp_backend}")
         setup_config = CaptureSetupConfig.from_file(args.setup)
         emit(f"Loaded capture setup: {setup_config}")
+
+        log_queue = process_context.Queue(maxsize=1000)
+        use_rotor_postprocess = bool(
+            args.classification and args.display == ROTOR_DISPLAY_MODE
+        )
+        if use_rotor_postprocess:
+            rotor_post_queue = process_context.Queue(
+                maxsize=max(args.processing_queue_size, 1)
+            )
+            rotor_post_status_queue = process_context.Queue(maxsize=1)
+            rotor_post_failure_event = process_context.Event()
+            postprocessed_frames_counter = process_context.Value("Q", 0)
+            rotor_post_queue_high_water = process_context.Value("Q", 0)
+            rotor_postprocessor = process_context.Process(
+                target=_run_rotor_postprocessor,
+                args=(
+                    config,
+                    rotor_post_queue,
+                    log_queue,
+                    rotor_post_status_queue,
+                    rotor_post_failure_event,
+                    postprocessed_frames_counter,
+                    args.processed_output,
+                    args.display_update_every,
+                    classification_artifact_dir,
+                    resolved_config_path,
+                    args.classification_device,
+                    args.micro_doppler_range_m,
+                    max(args.micro_doppler_range_half_width_bins, 0),
+                    max(args.rotor_blades, 1),
+                    max(args.rotor_count, 1),
+                    (
+                        max(args.rotor_radius_m, 0.0)
+                        if args.rotor_radius_m is not None
+                        else None
+                    ),
+                    max(args.rotor_rpm_min, 1.0),
+                    max(args.rotor_rpm_max, args.rotor_rpm_min + 1.0),
+                ),
+                name="RotorPostProcessor",
+            )
+            rotor_postprocessor.start()
+            try:
+                rotor_post_status = rotor_post_status_queue.get(timeout=180.0)
+            except queue.Empty as exc:
+                raise CaptureStartupError(
+                    "Rotor GPU post-processor did not report readiness within "
+                    "180 seconds"
+                ) from exc
+            _drain_log_queue(log_queue)
+            if rotor_post_status.get("state") != "ready":
+                raise CaptureStartupError(
+                    rotor_post_status.get(
+                        "message",
+                        "Rotor GPU post-processor failed during startup",
+                    )
+                )
+            emit(rotor_post_status["message"])
+
         display = LiveDisplay(
             args.display,
             args.display_pause,
@@ -5452,11 +5880,14 @@ def main() -> None:
                 else _point_cloud_range_limit_m(config)
             ),
             point_cloud_fov_deg=args.point_cloud_fov_deg,
+            process_context=process_context,
         )
-        frame_queue = mp.Queue(maxsize=max(args.processing_queue_size, 1))
-        log_queue = mp.Queue(maxsize=1000)
-        processed_frames_counter = mp.Value("Q", 0)
-        processor = mp.Process(
+        frame_queue = process_context.Queue(
+            maxsize=max(args.processing_queue_size, 1)
+        )
+        processed_frames_counter = process_context.Value("Q", 0)
+        processor_status_queue = process_context.Queue(maxsize=1)
+        processor = process_context.Process(
             target=_run_frame_processor,
             args=(
                 config,
@@ -5497,10 +5928,36 @@ def main() -> None:
                 args.classification,
                 classification_artifact_dir,
                 resolved_config_path,
+                args.classification_device,
+                rotor_post_queue,
+                rotor_post_failure_event,
+                rotor_post_queue_high_water,
+                processor_status_queue,
             ),
             name="RadarFrameProcessor",
         )
         processor.start()
+        processor_startup_timeout_s = (
+            180.0 if resolved_classification_device == "cuda" else 30.0
+        )
+        try:
+            processor_status = processor_status_queue.get(
+                timeout=processor_startup_timeout_s
+            )
+        except queue.Empty as exc:
+            raise CaptureStartupError(
+                "Radar frame processor did not report readiness within "
+                f"{processor_startup_timeout_s:g} seconds"
+            ) from exc
+        _drain_log_queue(log_queue)
+        if processor_status.get("state") != "ready":
+            raise CaptureStartupError(
+                processor_status.get(
+                    "message",
+                    "Radar frame processor failed during startup",
+                )
+            )
+        emit(processor_status["message"])
         capture_stats = listen_for_frames(
             host_ip=args.host_ip,
             data_port=args.data_port,
@@ -5513,6 +5970,8 @@ def main() -> None:
             frame_queue=frame_queue,
             log_queue=log_queue,
             display=display,
+            pipeline_failure_event=rotor_post_failure_event,
+            pipeline_process=rotor_postprocessor,
         )
     except CaptureStartupError as exc:
         emit(f"Capture startup failed: {exc}")
@@ -5531,6 +5990,18 @@ def main() -> None:
                 emit("Frame processor did not stop in time; terminating.")
                 processor.terminate()
                 processor.join(timeout=1.0)
+
+        if rotor_postprocessor is not None:
+            if rotor_postprocessor.is_alive() and rotor_post_queue is not None:
+                try:
+                    rotor_post_queue.put(None, timeout=1.0)
+                except queue.Full:
+                    pass
+            rotor_postprocessor.join(timeout=30.0)
+            if rotor_postprocessor.is_alive():
+                emit("Rotor post-processor did not stop in time; terminating.")
+                rotor_postprocessor.terminate()
+                rotor_postprocessor.join(timeout=1.0)
 
         if log_queue is not None:
             _drain_log_queue(log_queue)
@@ -5552,6 +6023,22 @@ def main() -> None:
                 f"processed_frames={processed_frames}, "
                 f"processing_drops={capture_stats.processing_frames_dropped}"
             )
+            if postprocessed_frames_counter is not None:
+                postprocessed_frames = _shared_counter_value(
+                    postprocessed_frames_counter
+                )
+                postprocessing_drops = max(
+                    processed_frames - postprocessed_frames,
+                    0,
+                )
+                emit(
+                    "Post-processing summary: "
+                    f"processed_frames={processed_frames}, "
+                    f"postprocessed_frames={postprocessed_frames}, "
+                    f"queue_high_water="
+                    f"{_shared_counter_value(rotor_post_queue_high_water)}, "
+                    f"postprocessing_drops={postprocessing_drops}"
+                )
 
         if display is not None:
             display.close()
@@ -5582,6 +6069,15 @@ def main() -> None:
         if frame_queue is not None:
             frame_queue.close()
             frame_queue.join_thread()
+        if rotor_post_queue is not None:
+            rotor_post_queue.close()
+            rotor_post_queue.join_thread()
+        if rotor_post_status_queue is not None:
+            rotor_post_status_queue.close()
+            rotor_post_status_queue.join_thread()
+        if processor_status_queue is not None:
+            processor_status_queue.close()
+            processor_status_queue.join_thread()
         if log_queue is not None:
             log_queue.close()
             log_queue.join_thread()

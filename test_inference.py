@@ -153,6 +153,19 @@ class StatefulInferenceTests(unittest.TestCase):
 
         self.assertEqual(result.label, "not_drone")
 
+    def test_precomputed_feature_steps_match_cube_update_history(self) -> None:
+        cube_engine = _inference_without_artifacts(0.75)
+        feature_engine = _inference_without_artifacts(0.75)
+        cube = np.ones((128, 3, 4, 64), dtype=np.complex64)
+        step = doppler_cube_to_feature_step(cube, 16)
+
+        for _ in range(WINDOW_STEPS):
+            cube_result = cube_engine.update(cube, 16)
+            feature_result = feature_engine.update_feature_step(step)
+
+        self.assertEqual(feature_result, cube_result)
+        self.assertEqual(feature_engine.valid_steps, WINDOW_STEPS)
+
     def test_invalid_shape_resets_accumulated_history(self) -> None:
         engine = _inference_without_artifacts(0.9)
         cube = np.ones((128, 3, 4, 64), dtype=np.complex64)
