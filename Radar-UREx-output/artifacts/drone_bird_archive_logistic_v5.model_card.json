@@ -1,0 +1,194 @@
+{
+  "artifact": "drone_bird_archive_logistic_v5.joblib",
+  "created_utc": "2026-07-28T12:52:38Z",
+  "objective": "drone versus bionic bird micro-Doppler archive baseline",
+  "deployment_status": "archive_only_processed_image_domain_no_live_adapter",
+  "dataset": {
+    "data_source_at_training": "/content/drive/MyDrive/Data",
+    "source_kind": "google_drive_api",
+    "manifest_sha256": "7f3ddb0078b9b91547cd5dd805559f77c26da89e6e47a41ab88949bb8993244e",
+    "recording_counts": {
+      "bionic_bird": 38,
+      "dji_mavic": 43,
+      "phantom_3_pro": 18,
+      "pole": 1
+    },
+    "excluded_nonpaper_3khz_recordings": [
+      "mavik_hover_3ft_3khz.pkl",
+      "mavik_hover_3ft_3khz_towards_radar.pkl"
+    ],
+    "session_group_source": "inferred from filenames; authoritative session metadata unavailable"
+  },
+  "feature_contract": {
+    "version": "paper-phase-micro-doppler-v5",
+    "shape": [
+      2,
+      48,
+      64
+    ],
+    "paper_classifier_reproduction": false,
+    "axis_order": [
+      "channel",
+      "stft_time",
+      "temporal_frequency"
+    ],
+    "channels": [
+      "amplitude_weighted_complex_stft_log1p_power",
+      "phase_angle_stft_log1p_power"
+    ],
+    "spatial_roi_shape": [
+      20,
+      30
+    ],
+    "sample_rate_hz": 1000.0,
+    "stft_window_samples": 64,
+    "stft_hop_samples": 8,
+    "feature_span_s": 0.44,
+    "normalization": "training-only channel clipping and standardization"
+  },
+  "archive_radar_contract": {
+    "source": "Kang et al., VTC2024-Fall, DOI 10.1109/VTC2024-Fall63153.2024.10757735",
+    "dataset_doi": "10.21227/c8r5-6h79",
+    "radar": "VTT custom frequency-division-multiplexed FMCW MIMO",
+    "center_frequency_ghz": 60.0,
+    "bandwidth_ghz": 6.0,
+    "nominal_range_resolution_m": 0.024982704833333334,
+    "transmitters": 8,
+    "receivers": 8,
+    "pulse_repetition_frequency_hz": 1000.0,
+    "measurement_duration_s": 1.0,
+    "target_distance_m": 2.5,
+    "environment": "VTT anechoic chamber",
+    "measurement_states": [
+      "stationary",
+      "rotating propellers or flapping wings"
+    ],
+    "objects": [
+      "DJI Mavic",
+      "DJI Phantom 3 Professional",
+      "bionic bird"
+    ],
+    "flat_surface_azimuth_deg": [
+      0.0,
+      22.5,
+      45.0,
+      67.5,
+      90.0,
+      112.5,
+      135.0,
+      167.5,
+      180.0
+    ],
+    "flat_surface_elevation_deg": [
+      0.0
+    ],
+    "tripod_azimuth_deg": [
+      0.0,
+      45.0,
+      90.0
+    ],
+    "tripod_elevation_deg": [
+      -45.0,
+      0.0,
+      45.0
+    ],
+    "released_data_product": "processed complex 2D horizontal-angle/distance image sequence",
+    "released_tensor_axis_order": [
+      "time",
+      "spatial_axis_0_bin",
+      "spatial_axis_1_bin"
+    ],
+    "paper_spatial_axes": [
+      "horizontal_angle",
+      "distance"
+    ],
+    "serialized_spatial_axis_mapping": null,
+    "spatial_bin_calibration": null,
+    "paper_sha256": "c148a779ab28a219737a2c8d28f6e37766ac6257e3a84d4c9343974b04284ba3"
+  },
+  "live_radar_contract": {
+    "num_adc_samples": 64,
+    "num_rx_channels": 4,
+    "num_chirps_per_frame": 384,
+    "num_loops_doppler_bins": 128,
+    "num_tdm_transmitters": 3,
+    "tx_channel_masks": [
+      1,
+      4,
+      2
+    ],
+    "frame_period_ms": 33.33,
+    "range_bin_spacing_m": 0.19517738151041666,
+    "bytes_per_frame": 393216,
+    "profile_sha256": "1996a2fa008bdd81d63b9fd5806a191fe0945cbc7be002689ef14c90dec4a982"
+  },
+  "archive_live_compatibility": {
+    "compatible": false,
+    "archive_input": "processed complex 2D horizontal-angle/distance image sequence",
+    "archive_rate_hz": 1000.0,
+    "live_input": "raw [chirp, RX, ADC] IWR6843 cube",
+    "live_frame_rate_hz": 30.003000300030006,
+    "compatible_profile_sha256": null,
+    "reason": "sensor multiplexing, antenna layout, processing stage, spatial grid, and temporal sampling differ"
+  },
+  "selected_C": 0.01,
+  "threshold": 0.2177636115119384,
+  "window_test_metrics": {
+    "samples": 63,
+    "threshold": 0.2177636115119384,
+    "drone_recall": 0.9696969696969697,
+    "bird_false_positive_rate": 0.13333333333333333,
+    "precision": 0.8888888888888888,
+    "f1": 0.927536231884058,
+    "pr_auc_average_precision": 0.9727236787752476,
+    "roc_auc": 0.9686868686868687,
+    "brier_score": 0.12226214208637778,
+    "ece_10_bins": 0.1817301645797896,
+    "confusion_matrix_tn_fp_fn_tp": [
+      26,
+      4,
+      1,
+      32
+    ]
+  },
+  "recording_test_metrics": {
+    "samples": 21,
+    "threshold": 0.2177636115119384,
+    "drone_recall": 1.0,
+    "bird_false_positive_rate": 0.1,
+    "precision": 0.9166666666666666,
+    "f1": 0.9565217391304348,
+    "pr_auc_average_precision": 0.9750688705234161,
+    "roc_auc": 0.9727272727272728,
+    "brier_score": 0.1218182644300545,
+    "ece_10_bins": 0.19757726919781388,
+    "confusion_matrix_tn_fp_fn_tp": [
+      9,
+      1,
+      0,
+      11
+    ]
+  },
+  "unknown_pole_probe": {
+    "windows": 3,
+    "mean_p_drone": 0.05847864186271287,
+    "max_p_drone": 0.06099269098201162,
+    "fraction_above_threshold": 0.0
+  },
+  "limitations": [
+    "No held-out IWR6843ISK-ODS labelled data were available.",
+    "The negative class is bionic bird; it does not cover general non-drone clutter.",
+    "The paper specifies 1 kHz timing but not released spatial-bin calibration, serialized axis order, or STFT settings.",
+    "The notebook's two-channel STFT classifiers are adaptations, not reproductions of the paper's amplitude CNN and phase ConvLSTM.",
+    "The 20x30 target crop is reproduced by size but re-centered from released data because published crop coordinates are unavailable.",
+    "The archive is processed 8x8 FDM-MIMO image data and has no direct live-IWR6843 feature adapter.",
+    "Two filename-marked 3 kHz supplementary recordings are excluded from the paper-grounded 1 kHz contract.",
+    "One pole recording is only an unknown probe and cannot estimate false alarms per hour."
+  ],
+  "software": {
+    "python": "3.12.13",
+    "numpy": "2.0.2",
+    "scipy": "1.16.3",
+    "scikit_learn": "1.6.1"
+  }
+}
