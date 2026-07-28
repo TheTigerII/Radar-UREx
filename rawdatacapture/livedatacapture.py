@@ -74,6 +74,13 @@ except ImportError:
         validate_openradar_backend,
     )
 
+if __package__ in {None, ""}:
+    repository_root = str(Path(__file__).resolve().parent.parent)
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
+
+from inference import DroneBirdInference, InferenceResult
+
 
 # Default DCA1000 network parameters.
 UDP_IP = "192.168.33.30"  # Host/laptop static Ethernet IP
@@ -88,6 +95,11 @@ DEFAULT_PROCESSING_QUEUE_SIZE = 32
 DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
 DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
+DEFAULT_CLASSIFICATION_ARTIFACT_DIR = (
+    Path(__file__).resolve().parent.parent
+    / "Radar-UREx-output"
+    / "artifacts"
+)
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
 DEFAULT_CLUSTER_EPS_M = 0.4
@@ -112,6 +124,7 @@ DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
 ROTOR_DISPLAY_MODE = "micro-doppler"
+CLASSIFICATION_RESULT_PREFIX = "CLASSIFICATION_RESULT "
 COMBINED_POINT_CLOUD_UPDATE_EVERY = 1
 MICRO_DOPPLER_HISTORY_UPDATES = 150
 MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 2
@@ -1061,6 +1074,7 @@ class ProcessedOutputWriter:
         ),
         static_cluster_min_samples: int = DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
         rotor_processing: Optional[dict[str, Any]] = None,
+        classification_metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         self.emit = emit_func or emit
         self.output_path = _resolve_output_path(output_path) if output_path else None
@@ -1079,7 +1093,7 @@ class ProcessedOutputWriter:
         metadata = {
             "record_type": "metadata",
             "format": "radar-processed-jsonl",
-            "version": 4,
+            "version": 5,
             "created_at": _timestamp(),
             "display_update_every": max(int(update_every), 1),
             "point_columns": ["x_m", "y_m", "z_m", "magnitude_db"],
@@ -1137,6 +1151,11 @@ class ProcessedOutputWriter:
                 "tx_rx_combination": "incoherent power sum",
             },
             "rotor_micro_doppler_processing": rotor_processing,
+            "classification": (
+                classification_metadata
+                if classification_metadata is not None
+                else {"enabled": False}
+            ),
             "radar_config": {
                 "num_adc_samples": config.num_adc_samples,
                 "num_rx_channels": config.num_rx_channels,
@@ -1179,6 +1198,7 @@ class ProcessedOutputWriter:
         static_candidate_count: int = 0,
         static_validation: str = "disabled",
         rotor_micro_doppler: Optional[MicroDopplerResult] = None,
+        classification: Optional[InferenceResult] = None,
     ) -> None:
         if self.file is None:
             return
@@ -1323,6 +1343,11 @@ class ProcessedOutputWriter:
                 if rotor_micro_doppler is not None
                 else None
             ),
+            "classification": (
+                classification.to_dict()
+                if classification is not None
+                else None
+            ),
         }
         self.file.write(json.dumps(record, separators=(",", ":")) + "\n")
         self.updates_saved += 1
@@ -1371,6 +1396,8 @@ class DisplayPayloadSink:
         rotor_radius_m: Optional[float] = None,
         rotor_rpm_min: float = 500.0,
         rotor_rpm_max: float = DEFAULT_ROTOR_RPM_MAX,
+        inference_engine: Optional[DroneBirdInference] = None,
+        classification_emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -1447,6 +1474,18 @@ class DisplayPayloadSink:
         self.capture_time_origin_s: Optional[float] = None
         self.latest_rotor_estimates: tuple[RotorEstimate, ...] = ()
         self.last_rotor_estimate_time_s: Optional[float] = None
+        self.inference_engine = inference_engine
+        self.classification_emit = classification_emit_func
+        self.latest_classification: Optional[InferenceResult] = (
+            inference_engine.unknown("no_target")
+            if inference_engine is not None
+            else None
+        )
+        self._last_classification_emit_s = 0.0
+        self._last_classification_signature: Optional[
+            tuple[str, Optional[str]]
+        ] = None
+        self._classification_owner_position_m: Optional[np.ndarray] = None
 
     def update(
         self,
@@ -1458,13 +1497,22 @@ class DisplayPayloadSink:
         save_processed = bool(
             self.processed_writer is not None and self.processed_writer.enabled
         )
-        if self.mode == "none" and not save_processed:
+        if (
+            self.mode == "none"
+            and not save_processed
+            and self.inference_engine is None
+        ):
             return
-        if self.payload_queue is None and not save_processed:
+        if (
+            self.payload_queue is None
+            and not save_processed
+            and self.inference_engine is None
+        ):
             return
 
         self.frame_count += 1
-        if self.frame_count % self.update_every != 0:
+        publish_update = self.frame_count % self.update_every == 0
+        if not publish_update and self.inference_engine is None:
             return
 
         if self.mode == ROTOR_DISPLAY_MODE:
@@ -1482,7 +1530,8 @@ class DisplayPayloadSink:
                 else 1
             )
             publish_rotor_display = (
-                self.payload_queue is not None
+                publish_update
+                and self.payload_queue is not None
                 and (
                     self.frame_count == 1
                     or self.frame_count % rotor_display_every == 0
@@ -1494,6 +1543,23 @@ class DisplayPayloadSink:
                 captured_at_s=captured_at_s,
                 build_display_payload=publish_rotor_display,
             )
+            if self.inference_engine is not None:
+                doppler_started = time.perf_counter()
+                doppler_cube = compute_range_doppler_fft(
+                    range_fft,
+                    self.config,
+                )
+                self.timings.add(
+                    "doppler",
+                    time.perf_counter() - doppler_started,
+                )
+                self._classify_fixed_range(
+                    doppler_cube,
+                    range_axis_m,
+                    self.micro_doppler_range_m,
+                )
+            if not publish_update:
+                return
             if save_processed:
                 assert self.processed_writer is not None
                 serialization_started = time.perf_counter()
@@ -1514,6 +1580,7 @@ class DisplayPayloadSink:
                     ),
                     selected_range_m=frame_result.selected_range_m,
                     rotor_micro_doppler=frame_result,
+                    classification=self.latest_classification,
                 )
                 self.timings.add(
                     "serialization",
@@ -1531,11 +1598,18 @@ class DisplayPayloadSink:
             return
 
         combined_payload = None
-        if save_processed or self.mode == COMBINED_DISPLAY_MODE:
+        if (
+            save_processed
+            or self.mode == COMBINED_DISPLAY_MODE
+            or self.inference_engine is not None
+        ):
             combined_payload = self._compute_combined_payload(
                 range_fft,
                 range_axis_m,
+                build_micro_doppler=publish_update,
             )
+            if not publish_update:
+                return
             if save_processed:
                 assert self.processed_writer is not None
                 point_cloud = combined_payload.point_cloud
@@ -1554,6 +1628,7 @@ class DisplayPayloadSink:
                     micro_doppler_db=self.latest_micro_doppler_db,
                     micro_doppler_windows_db=self.latest_micro_doppler_windows_db,
                     selected_range_m=combined_payload.selected_range_m,
+                    classification=self.latest_classification,
                 )
                 self.timings.add(
                     "serialization",
@@ -1772,13 +1847,31 @@ class DisplayPayloadSink:
         self,
         range_fft: np.ndarray,
         range_axis_m: Optional[np.ndarray],
+        *,
+        build_micro_doppler: bool = True,
     ) -> CombinedDisplayPayload:
         point_cloud, doppler_cube = self._compute_point_cloud_payload(
             range_fft,
             range_axis_m,
         )
         target_track = point_cloud.target_track
-        self._update_micro_doppler_history_owner(target_track)
+        target_changed = self._update_micro_doppler_history_owner(target_track)
+        self._classify_tracked_target(
+            doppler_cube,
+            range_axis_m,
+            target_track,
+            target_changed=target_changed,
+        )
+        if not build_micro_doppler:
+            return CombinedDisplayPayload(
+                point_cloud=point_cloud,
+                spectrogram_db=np.empty((0, 0), dtype=np.float32),
+                selected_range_m=(
+                    target_track.range_m
+                    if target_track is not None
+                    else None
+                ),
+            )
 
         micro_doppler_started = time.perf_counter()
         selected_range_m = None
@@ -1832,6 +1925,106 @@ class DisplayPayloadSink:
             spectrogram_db=spectrogram_db,
             selected_range_m=selected_range_m,
         )
+
+    def _classify_tracked_target(
+        self,
+        doppler_cube: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+        target_track: Optional[TargetTrack],
+        *,
+        target_changed: bool,
+    ) -> None:
+        if self.inference_engine is None:
+            return
+        if target_track is None:
+            self._classification_owner_position_m = None
+            self._set_classification(
+                self.inference_engine.reset("no_confirmed_target")
+            )
+            return
+        if target_track.is_predicted:
+            self._classification_owner_position_m = None
+            self._set_classification(
+                self.inference_engine.reset("predicted_target")
+            )
+            return
+        target_position_m = np.asarray(
+            target_track.position_m,
+            dtype=np.float64,
+        )
+        if self._classification_owner_position_m is not None:
+            target_changed = target_changed or (
+                float(
+                    np.linalg.norm(
+                        target_position_m
+                        - self._classification_owner_position_m
+                    )
+                )
+                > MICRO_DOPPLER_HISTORY_ASSOCIATION_DISTANCE_M
+            )
+        if target_changed:
+            self._classification_owner_position_m = target_position_m.copy()
+            self._set_classification(
+                self.inference_engine.reset("target_changed")
+            )
+            return
+        self._classification_owner_position_m = target_position_m.copy()
+        self._classify_fixed_range(
+            doppler_cube,
+            range_axis_m,
+            target_track.range_m,
+        )
+
+    def _classify_fixed_range(
+        self,
+        doppler_cube: np.ndarray,
+        range_axis_m: Optional[np.ndarray],
+        target_range_m: Optional[float],
+    ) -> None:
+        if self.inference_engine is None:
+            return
+        range_axis = (
+            np.asarray(range_axis_m, dtype=np.float64)
+            if range_axis_m is not None
+            else np.empty((0,), dtype=np.float64)
+        )
+        if (
+            target_range_m is None
+            or not np.isfinite(target_range_m)
+            or range_axis.size != doppler_cube.shape[-1]
+            or not np.isfinite(range_axis).all()
+        ):
+            self._set_classification(
+                self.inference_engine.reset("invalid_target_range")
+            )
+            return
+        target_range_bin = int(
+            np.argmin(np.abs(range_axis - float(target_range_m)))
+        )
+        self._set_classification(
+            self.inference_engine.update(
+                doppler_cube,
+                target_range_bin,
+            )
+        )
+
+    def _set_classification(self, result: InferenceResult) -> None:
+        self.latest_classification = result
+        if self.classification_emit is None:
+            return
+        signature = (result.label, result.reason)
+        now = time.monotonic()
+        if (
+            signature == self._last_classification_signature
+            and now - self._last_classification_emit_s < 1.0
+        ):
+            return
+        self.classification_emit(
+            CLASSIFICATION_RESULT_PREFIX
+            + json.dumps(result.to_dict(), separators=(",", ":"))
+        )
+        self._last_classification_signature = signature
+        self._last_classification_emit_s = now
 
     def _update_micro_doppler_history_owner(
         self,
@@ -3891,11 +4084,35 @@ def _run_frame_processor_impl(
     rotor_radius_m: Optional[float],
     rotor_rpm_min: float,
     rotor_rpm_max: float,
+    classification_enabled: bool = False,
+    classification_artifact_dir: Optional[Path] = None,
+    classification_profile_path: Optional[Path] = None,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     def worker_emit(message: str) -> None:
         _queue_emit(log_queue, message)
+
+    inference_engine = None
+    if classification_enabled:
+        if (
+            classification_artifact_dir is None
+            or classification_profile_path is None
+        ):
+            raise ValueError(
+                "Classification requires artifact and radar profile paths"
+            )
+        inference_engine = DroneBirdInference(
+            classification_artifact_dir,
+            config,
+            classification_profile_path,
+        )
+        worker_emit(
+            "CNN classification enabled: "
+            f"artifacts={classification_artifact_dir}, "
+            f"threshold={inference_engine.threshold:.6f}, "
+            "negative_training_class=bionic_bird"
+        )
 
     raw_writer = RawFrameWriter(raw_output, raw_metadata, config, worker_emit)
     processed_writer = ProcessedOutputWriter(
@@ -3970,6 +4187,11 @@ def _run_frame_processor_impl(
             if display_mode == ROTOR_DISPLAY_MODE
             else None
         ),
+        classification_metadata=(
+            inference_engine.metadata
+            if inference_engine is not None
+            else {"enabled": False}
+        ),
     )
     display = DisplayPayloadSink(
         display_mode,
@@ -4000,6 +4222,8 @@ def _run_frame_processor_impl(
         rotor_radius_m=rotor_radius_m,
         rotor_rpm_min=rotor_rpm_min,
         rotor_rpm_max=rotor_rpm_max,
+        inference_engine=inference_engine,
+        classification_emit_func=worker_emit,
     )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -4336,6 +4560,24 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Stream processed 3D point clouds and micro-Doppler spectra to "
             "this JSONL file."
+        ),
+    )
+    parser.add_argument(
+        "--classification",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Run the trained drone/not-drone CNN. Enabled by default; use "
+            "--no-classification to run without PyTorch."
+        ),
+    )
+    parser.add_argument(
+        "--classification-artifacts",
+        type=Path,
+        default=DEFAULT_CLASSIFICATION_ARTIFACT_DIR,
+        help=(
+            "Directory containing the trained CNN state, calibration bundle, "
+            "and model card."
         ),
     )
     parser.add_argument(
@@ -5100,6 +5342,11 @@ def main() -> None:
     capture_stats: Optional[CaptureStats] = None
     processed_frames_counter: Optional[Any] = None
     try:
+        if args.classification and importlib.util.find_spec("torch") is None:
+            raise CaptureStartupError(
+                "CNN classification requires PyTorch 2.6 or newer; install "
+                "'torch>=2.6,<3' or run with --no-classification"
+            )
         if args.display == ROTOR_DISPLAY_MODE:
             if (
                 args.micro_doppler_range_m is None
@@ -5124,7 +5371,28 @@ def main() -> None:
                     "Rotor RPM bounds must be finite, positive, and increasing"
                 )
             args.static_detection = False
-        config = RadarCaptureConfig.from_file(args.config)
+        resolved_config_path = _resolve_config_path(args.config)
+        config = RadarCaptureConfig.from_file(resolved_config_path)
+        classification_artifact_dir = _resolve_output_path(
+            args.classification_artifacts
+        )
+        if args.classification:
+            try:
+                preflight_inference = DroneBirdInference(
+                    classification_artifact_dir,
+                    config,
+                    resolved_config_path,
+                )
+            except Exception as exc:
+                raise CaptureStartupError(
+                    f"CNN classification startup failed: {exc}"
+                ) from exc
+            emit(
+                "Validated CNN classification artifacts: "
+                f"threshold={preflight_inference.threshold:.6f}, "
+                f"path={classification_artifact_dir}"
+            )
+            del preflight_inference
         if args.display == ROTOR_DISPLAY_MODE and (
             config.start_frequency_ghz is None
             or config.slow_time_interval_s is None
@@ -5150,7 +5418,8 @@ def main() -> None:
             and config.frame_duty_cycle > 0.505
         ):
             raise CaptureStartupError(
-                "Dedicated rotor profile exceeds the 50% frame-duty target"
+                "Radar profile exceeds the dedicated rotor mode's "
+                "50% frame-duty target"
             )
         if args.display == ROTOR_DISPLAY_MODE:
             configured_range_axis = config.range_axis_m()
@@ -5224,6 +5493,9 @@ def main() -> None:
                 ),
                 max(args.rotor_rpm_min, 1.0),
                 max(args.rotor_rpm_max, args.rotor_rpm_min + 1.0),
+                args.classification,
+                classification_artifact_dir,
+                resolved_config_path,
             ),
             name="RadarFrameProcessor",
         )

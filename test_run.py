@@ -1,3 +1,5 @@
+import io
+import queue
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -76,9 +78,6 @@ class ChooseDisplayTests(unittest.TestCase):
         with patch("builtins.input", return_value="6"):
             self.assertEqual(run.choose_display(None), "micro-doppler")
 
-    def test_dedicated_rotor_defaults_to_proven_lvds_profile(self) -> None:
-        self.assertEqual(run.DEFAULT_ROTOR_CONFIG_PATH, run.DEFAULT_CONFIG_PATH)
-
     def test_dedicated_rotor_defaults_match_current_drone(self) -> None:
         with patch("sys.argv", ("run.py",)):
             args = run.parse_args()
@@ -129,6 +128,8 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--static-min-change-db", command)
         self.assertIn("--static-background-update-rate", command)
         self.assertIn("--static-cluster-min-samples", command)
+        self.assertIn("--classification", command)
+        self.assertIn("--classification-artifacts", command)
         self.assertNotIn("--raw-output", command)
 
         args.static_detection = False
@@ -140,10 +141,18 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--no-static-detection", disabled_command)
         self.assertNotIn("--static-detection", disabled_command)
 
+        args.classification = False
+        classification_disabled = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--no-classification", classification_disabled)
+
     def test_rotor_command_forwards_gate_and_estimator_settings(self) -> None:
         args = SimpleNamespace(
             display_update_every=1,
-            config=Path("rotor_profile.cfg"),
+            config=Path("profile.cfg"),
             setup=Path("setup.json"),
             host_ip="192.168.33.30",
             data_port=4098,
@@ -192,7 +201,7 @@ class SubprocessEnvironmentTests(unittest.TestCase):
                 clear=True,
             ),
             patch("run.os.name", "posix"),
-            patch("run.os.getuid", return_value=1000),
+            patch("run.os.getuid", return_value=1000, create=True),
             patch("run.Path.exists", return_value=True),
             patch("run.Path.is_file", return_value=True),
         ):
@@ -222,6 +231,45 @@ class SubprocessEnvironmentTests(unittest.TestCase):
         self.assertEqual(
             environment["XAUTHORITY"],
             "/tmp/custom-xauthority",
+        )
+
+
+class ClassificationResultChannelTests(unittest.TestCase):
+    def test_relay_extracts_structured_result_and_forwards_other_logs(self) -> None:
+        result_queue = queue.SimpleQueue()
+        process = SimpleNamespace(
+            stdout=io.StringIO(
+                "ordinary capture log\n"
+                'CLASSIFICATION_RESULT {"label":"drone","p_drone":0.99,'
+                '"status":"ready","reason":null,"valid_steps":48}\n'
+            )
+        )
+
+        with patch("builtins.print") as output:
+            run.relay_capture_output(process, result_queue)
+
+        output.assert_called_once_with("ordinary capture log", flush=True)
+        self.assertEqual(result_queue.get_nowait()["label"], "drone")
+
+    def test_report_formats_ready_classification(self) -> None:
+        result_queue = queue.SimpleQueue()
+        result_queue.put(
+            {
+                "label": "not_drone",
+                "p_drone": 0.125,
+                "status": "ready",
+                "reason": None,
+                "valid_steps": 48,
+            }
+        )
+
+        with patch("builtins.print") as output:
+            latest = run.report_pending_classifications(result_queue)
+
+        self.assertEqual(latest["label"], "not_drone")
+        output.assert_called_once_with(
+            "Classification: NOT_DRONE, p_drone=0.125",
+            flush=True,
         )
 
 

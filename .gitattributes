@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+# Generated model, feature-cache, capture, and media files are binary.
+*.bin -text
+*.joblib -text
+*.npz -text
+*.pt -text
+*.pdf -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+

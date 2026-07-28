@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
+from inference import InferenceResult
 from rawdatacapture.dsp import (
     MicroDopplerResult,
     RotorEstimate,
@@ -292,22 +293,6 @@ class FrameDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload_queue.get_nowait(), "new")
 
 
-class RotorProfileConfigTests(unittest.TestCase):
-    def test_experimental_high_prf_profile_has_expected_timing(self) -> None:
-        profile_path = Path(__file__).with_name("rotor_profile.cfg")
-
-        config = RadarCaptureConfig.from_file(profile_path)
-
-        self.assertEqual(config.num_chirps_per_loop, 1)
-        self.assertEqual(config.num_loops, 128)
-        self.assertEqual(config.tx_channel_masks, (1,))
-        self.assertEqual(config.num_chirps_per_frame, 128)
-        self.assertEqual(config.bytes_per_frame, 131_072)
-        self.assertEqual(config.frame_periodicity_ms, 10.0)
-        self.assertAlmostEqual(float(config.slow_time_rate_hz), 25_641.026, places=2)
-        self.assertAlmostEqual(float(config.frame_duty_cycle), 0.4992, places=4)
-
-
 class RotorDisplayPayloadSinkTests(unittest.TestCase):
     def test_dedicated_mode_accepts_proven_three_tx_profile_and_bypasses_point_cloud(
         self,
@@ -505,7 +490,15 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "processed.jsonl"
-            writer = ProcessedOutputWriter(output_path, config, 1)
+            writer = ProcessedOutputWriter(
+                output_path,
+                config,
+                1,
+                classification_metadata={
+                    "enabled": True,
+                    "model": "drone_bird_cnn",
+                },
+            )
             writer.write_update(
                 frame_index=7,
                 points=np.asarray(((1.0, 2.0, 3.0, 50.0),), dtype=np.float32),
@@ -525,13 +518,22 @@ class ProcessedOutputWriterTests(unittest.TestCase):
                 static_validation="validated",
                 micro_doppler_db=np.asarray((10.0, 20.0), dtype=np.float32),
                 selected_range_m=2.0,
+                classification=InferenceResult(
+                    label="drone",
+                    p_drone=0.99,
+                    threshold=0.98,
+                    status="ready",
+                    reason=None,
+                    valid_steps=48,
+                ),
             )
             writer.close()
 
             records = [json.loads(line) for line in output_path.read_text().splitlines()]
 
         self.assertEqual(records[0]["record_type"], "metadata")
-        self.assertEqual(records[0]["version"], 4)
+        self.assertEqual(records[0]["version"], 5)
+        self.assertTrue(records[0]["classification"]["enabled"])
         self.assertEqual(records[0]["static_detection"]["warmup_frames"], 30)
         self.assertEqual(records[0]["static_detection"]["reference_frames"], 90)
         self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
@@ -558,10 +560,12 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         self.assertEqual(records[1]["micro_doppler_db"], [10.0, 20.0])
         self.assertEqual(records[1]["micro_doppler_windows_db"], [[10.0, 20.0]])
         self.assertTrue(records[1]["target_track"]["confirmed"])
+        self.assertEqual(records[1]["classification"]["label"], "drone")
+        self.assertEqual(records[1]["classification"]["valid_steps"], 48)
 
     def test_writes_structured_rotor_micro_doppler_result(self) -> None:
         config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("rotor_profile.cfg")
+            Path(__file__).with_name("profile.cfg")
         )
         result = MicroDopplerResult(
             raw_spectrogram_db=np.ones((4, 2), dtype=np.float32) * 1.2345,
@@ -1686,6 +1690,68 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         self.assertEqual(len(sink.micro_doppler_history), 1)
 
 
+class ClassificationIntegrationTests(unittest.TestCase):
+    @staticmethod
+    def _result(label: str = "unknown") -> InferenceResult:
+        return InferenceResult(
+            label=label,
+            p_drone=0.99 if label == "drone" else None,
+            threshold=0.98,
+            status="ready" if label != "unknown" else "waiting",
+            reason=None if label != "unknown" else "insufficient_history",
+            valid_steps=48 if label != "unknown" else 1,
+        )
+
+    def test_fixed_range_is_converted_to_nearest_range_bin(self) -> None:
+        engine = Mock()
+        engine.unknown.return_value = self._result()
+        engine.update.return_value = self._result("drone")
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            inference_engine=engine,
+        )
+        doppler_cube = np.zeros((128, 3, 4, 64), dtype=np.complex64)
+        range_axis = np.arange(64, dtype=np.float32) * 0.2
+
+        sink._classify_fixed_range(doppler_cube, range_axis, 2.05)
+
+        engine.update.assert_called_once_with(doppler_cube, 10)
+        self.assertEqual(sink.latest_classification.label, "drone")
+
+    def test_predicted_track_resets_classification_history(self) -> None:
+        engine = Mock()
+        engine.unknown.return_value = self._result()
+        engine.reset.return_value = self._result()
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            inference_engine=engine,
+        )
+        predicted = TargetTrack(
+            position_m=(0.0, 2.0, 0.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=10,
+            hits=9,
+            missed_updates=1,
+            confirmed=True,
+        )
+
+        sink._classify_tracked_target(
+            np.zeros((128, 3, 4, 64), dtype=np.complex64),
+            np.arange(64, dtype=np.float32),
+            predicted,
+            target_changed=False,
+        )
+
+        engine.reset.assert_called_once_with("predicted_target")
+        engine.update.assert_not_called()
+
+
 class RangeDisplayBoundsTests(unittest.TestCase):
     def test_range_profile_uses_ten_meter_default_limit(self) -> None:
         axis = Mock()
@@ -2027,6 +2093,10 @@ class MicroDopplerDisplayTests(unittest.TestCase):
                 "rawdatacapture.livedatacapture."
                 "_bundled_xcb_cursor_library",
                 return_value=None,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.sys.platform",
+                "linux",
             ),
             patch("ctypes.util.find_library", return_value=None),
             patch.dict("os.environ", {"XDG_SESSION_TYPE": "x11"}),

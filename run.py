@@ -1,9 +1,12 @@
 import argparse
+import json
 import math
 import os
+import queue
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -13,13 +16,9 @@ from typing import NamedTuple, Optional
 ROOT = Path(__file__).resolve().parent
 RAW_DATA_DIR = ROOT / "rawdatacapture"
 DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile.cfg"
-# The SDK out-of-box firmware used by this project cannot reliably complete its
-# object-detection processing at the 10 ms period in rotor_profile.cfg.  Keep
-# option 6 on the waveform that is already verified to produce LVDS data; the
-# dedicated display still applies the rotor-specific clutter rejection/STFT.
-DEFAULT_ROTOR_CONFIG_PATH = DEFAULT_CONFIG_PATH
 DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
 DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
+DEFAULT_CLASSIFICATION_ARTIFACT_DIR = ROOT / "Radar-UREx-output" / "artifacts"
 DEFAULT_HOST_IP = "192.168.33.30"
 DEFAULT_DATA_PORT = 4098
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -55,6 +54,7 @@ DISPLAY_CHOICES = (
 )
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
+CLASSIFICATION_RESULT_PREFIX = "CLASSIFICATION_RESULT "
 
 
 class SerialPortInfo(NamedTuple):
@@ -241,6 +241,21 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--classification",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Run the trained drone/not-drone CNN. Enabled by default; use "
+            "--no-classification to run without PyTorch."
+        ),
+    )
+    parser.add_argument(
+        "--classification-artifacts",
+        type=Path,
+        default=DEFAULT_CLASSIFICATION_ARTIFACT_DIR,
+        help="Directory containing the trained CNN deployment artifacts.",
+    )
+    parser.add_argument(
         "--raw-output",
         type=Path,
         help="Optional raw ADC output. Raw recording is disabled by default.",
@@ -419,14 +434,83 @@ def default_processed_output(capture_dir: Path) -> Path:
     return capture_dir / f"processed_capture_{timestamp}.jsonl"
 
 
-def start_process(label: str, command: list[str]) -> subprocess.Popen:
+def start_process(
+    label: str,
+    command: list[str],
+    *,
+    capture_output: bool = False,
+) -> subprocess.Popen:
     print(f"Starting {label}:")
     print(" ".join(str(part) for part in command))
+    output_options = (
+        {
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.STDOUT,
+            "text": True,
+            "bufsize": 1,
+        }
+        if capture_output
+        else {}
+    )
     return subprocess.Popen(
         command,
         env=subprocess_environment(),
+        **output_options,
         **subprocess_startup_options(),
     )
+
+
+def relay_capture_output(
+    process: subprocess.Popen,
+    classification_queue: queue.SimpleQueue,
+) -> None:
+    if process.stdout is None:
+        return
+    for raw_line in process.stdout:
+        line = raw_line.rstrip("\r\n")
+        marker_index = line.find(CLASSIFICATION_RESULT_PREFIX)
+        if marker_index < 0:
+            print(line, flush=True)
+            continue
+        payload = line[marker_index + len(CLASSIFICATION_RESULT_PREFIX) :]
+        try:
+            result = json.loads(payload)
+        except (TypeError, ValueError):
+            print(line, flush=True)
+            continue
+        if isinstance(result, dict):
+            classification_queue.put(result)
+
+
+def report_pending_classifications(
+    classification_queue: queue.SimpleQueue,
+    latest: Optional[dict] = None,
+) -> Optional[dict]:
+    while True:
+        try:
+            latest = classification_queue.get_nowait()
+        except queue.Empty:
+            break
+        label = latest.get("label", "unknown")
+        if label in {"drone", "not_drone"}:
+            probability = latest.get("p_drone")
+            probability_text = (
+                f", p_drone={float(probability):.3f}"
+                if probability is not None
+                else ""
+            )
+            print(
+                f"Classification: {label.upper()}{probability_text}",
+                flush=True,
+            )
+        else:
+            print(
+                "Classification: UNKNOWN "
+                f"({latest.get('reason') or latest.get('status', 'waiting')}, "
+                f"valid_steps={int(latest.get('valid_steps', 0))}/48)",
+                flush=True,
+            )
+    return latest
 
 
 def subprocess_startup_options() -> dict:
@@ -561,6 +645,21 @@ def build_capture_command(
         "--processed-output",
         str(processed_output),
     ]
+    if getattr(args, "classification", True):
+        classification_artifacts = getattr(
+            args,
+            "classification_artifacts",
+            DEFAULT_CLASSIFICATION_ARTIFACT_DIR,
+        )
+        command.extend(
+            (
+                "--classification",
+                "--classification-artifacts",
+                str(classification_artifacts),
+            )
+        )
+    else:
+        command.append("--no-classification")
     if display == "micro-doppler":
         target_range_m = getattr(args, "micro_doppler_range_m", None)
         if target_range_m is None:
@@ -657,8 +756,6 @@ def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
     if display == "micro-doppler":
-        if args.config == DEFAULT_CONFIG_PATH:
-            args.config = DEFAULT_ROTOR_CONFIG_PATH
         try:
             args.micro_doppler_range_m = choose_micro_doppler_range_m(
                 args.micro_doppler_range_m
@@ -687,6 +784,8 @@ def main() -> int:
     if raw_output is not None:
         raw_output = raw_output if raw_output.is_absolute() else ROOT / raw_output
         raw_output.parent.mkdir(parents=True, exist_ok=True)
+    if not args.classification_artifacts.is_absolute():
+        args.classification_artifacts = ROOT / args.classification_artifacts
 
     print(f"Display mode: {display}")
     duration_text = (
@@ -696,14 +795,33 @@ def main() -> int:
     print(f"Radar command UART: {radar_port}")
     print(f"Processed output: {processed_output}")
     print(f"Raw output: {raw_output if raw_output is not None else 'disabled'}")
+    print(
+        "CNN classification: "
+        + (
+            f"enabled ({args.classification_artifacts})"
+            if args.classification
+            else "disabled"
+        )
+    )
 
     capture_process: Optional[subprocess.Popen] = None
     startup_process: Optional[subprocess.Popen] = None
+    capture_output_thread: Optional[threading.Thread] = None
+    classification_queue: queue.SimpleQueue = queue.SimpleQueue()
+    latest_classification: Optional[dict] = None
     try:
         capture_process = start_process(
             "live capture",
             build_capture_command(args, display, processed_output, raw_output),
+            capture_output=True,
         )
+        capture_output_thread = threading.Thread(
+            target=relay_capture_output,
+            args=(capture_process, classification_queue),
+            name="LiveCaptureOutputRelay",
+            daemon=True,
+        )
+        capture_output_thread.start()
         time.sleep(1.0)
         if capture_process.poll() is not None:
             print(
@@ -723,6 +841,10 @@ def main() -> int:
         )
 
         while True:
+            latest_classification = report_pending_classifications(
+                classification_queue,
+                latest_classification,
+            )
             if startup_process.poll() is not None:
                 print(f"startup exited with code {startup_process.returncode}")
                 return startup_process.returncode or 0
@@ -746,6 +868,12 @@ def main() -> int:
     finally:
         stop_process("startup", startup_process)
         stop_process("live capture", capture_process)
+        if capture_output_thread is not None:
+            capture_output_thread.join(timeout=2.0)
+        report_pending_classifications(
+            classification_queue,
+            latest_classification,
+        )
         print(f"Processed data file: {processed_output}")
         if raw_output is not None:
             print(f"Raw data file: {raw_output}")

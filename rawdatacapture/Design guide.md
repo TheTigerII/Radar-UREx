@@ -314,13 +314,8 @@ at least three candidate cells. Rejected cells become zero while retained
 relative-dB values are not attenuated. Flash scoring and RPM estimation consume
 this filtered spectrum.
 The default estimator model is two blades with a 500-to-10,700 RPM search band,
-matching the current drone.
-
-`rotor_profile.cfg` and `rotor_profile_80hz.cfg` retain the experimental
-single-TX high-PRF waveforms for firmware that can stream raw ADC data without
-running the SDK object-detection chain. They are not selected automatically:
-the IWR6843ISK-ODS out-of-box firmware used by this project does not have enough
-inter-frame processing time at 10 or 12.5 ms and can stop producing LVDS data.
+matching the current drone. Dedicated rotor processing uses the same verified
+`profile.cfg` acquisition waveform as the other live modes.
 
 Window centres combine packet-derived frame time with configured within-frame
 chirp timing. RPM estimation retains two seconds of those physical timestamps.

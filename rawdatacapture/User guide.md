@@ -57,12 +57,11 @@ resolved `DISPLAY`, screen name, and geometry to the parent. A missing or
 non-visible GUI aborts startup with a direct error instead of continuing with
 an empty desktop.
 
-### Optional classification notebook and CNN dependencies
+### Classification notebook and CNN dependencies
 
-The live capture programs do not require PyTorch. To use
-`classification.ipynb`, install Jupyter in a separate ML environment. The
-implemented depthwise-separable CNN additionally requires PyTorch 2.6 or newer
-and below version 3:
+Live drone/not-drone classification is enabled by default and requires
+PyTorch 2.6 or newer and below version 3. Install Jupyter as well when using
+`classification.ipynb`:
 
 ```bash
 .venv/bin/python -m pip install jupyter "torch>=2.6,<3"
@@ -78,6 +77,8 @@ or CUDA acceleration is required. Check the official
 use its platform-specific command when it differs from the generic command
 above. The CNN cells in `classification.ipynb` are unexecuted by default and
 training starts only when the training cell is run manually.
+Run `run.py --no-classification` when capture is needed in an environment
+without PyTorch.
 
 Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
 local implementation for real-time performance. The IWR6843ISK-ODS planar-array
@@ -103,9 +104,11 @@ mode uses PyQtGraph with the PySide6 Qt binding.
 5. Streams processed 3D point clouds and micro-Doppler spectra to a timestamped
    `.jsonl` file under `rawdatacapture\captures`. Raw ADC recording is disabled
    unless `--raw-output` is explicitly given.
-6. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
+6. Runs the trained CNN after 48 consecutive valid tracked frames, reports
+   `DRONE`, `NOT_DRONE`, or `UNKNOWN`, and saves the calibrated probability.
+7. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
    control.
-7. Stops hardware control before capture when the duration expires or Ctrl+C
+8. Stops hardware control before capture when the duration expires or Ctrl+C
    is pressed.
 
 Choose a display without prompting:
@@ -346,20 +349,13 @@ The default rotor model is two blades with a maximum search speed of
 10,700 RPM. These match the current drone and can still be overridden with
 `--rotor-blades` and `--rotor-rpm-max`.
 
-Option 6 uses the known-good `profile.cfg` LVDS waveform by default. This is
-intentional: the IWR6843ISK-ODS SDK out-of-box firmware also runs its on-device
-object-detection chain, and the experimental 10 ms single-TX profile does not
-leave enough processing time. That failure produces no LVDS packets, lights
-the DCA1000 `LVDS_PATH_ERR` LED red, and leaves the display empty.
+Option 6 uses the same `profile.cfg` LVDS waveform as every other live mode.
 
 The compatible profile samples each TX every 117 microseconds, giving an
 approximately 8.55 kHz per-TX slow-time rate and ±10.7 m/s unambiguous radial
 velocity at 60 GHz. The dedicated mode still applies the three-bin gate,
 stationary-return cancellation, relative spectrum, flash score, and RPM
-estimator. `rotor_profile.cfg` (100 Hz) and `rotor_profile_80hz.cfg` (80 Hz)
-remain available only for an alternate raw-capture firmware that does not run
-the SDK object-detection processing chain; they are no longer selected
-automatically.
+estimator.
 
 The fixed range gate is required because this mode intentionally skips point
 cloud detection and tracking. When option 6 is selected interactively,
@@ -432,9 +428,10 @@ The integrated launcher saves processed data by default. Override its path with:
 python run.py --processed-output .\rawdatacapture\captures\processed.jsonl
 ```
 
-The first JSONL record declares format version 4 and contains the radar
+The first JSONL record declares format version 5 and contains the radar
 configuration, column definitions, calibration settings, adaptive-reference
-rate, and static-validation policy. Each following record contains one
+rate, static-validation policy, and classification model contract. Each
+following record contains one
 processed update with:
 
 - `points`: `[x_m, y_m, z_m, magnitude_db]` rows;
@@ -451,6 +448,14 @@ processed update with:
 - conventional-mode short-time micro-Doppler windows, laid out as
   `[window][centered_doppler_bin]`;
 - the selected micro-Doppler range gate.
+- `classification`: `label`, calibrated `p_drone`, threshold, status/reason,
+  and valid history length.
+
+`not_drone` represents the model's bionic-bird training class, not a validated
+general non-drone detector. The deployed artifact remains archive-pretrained
+and unvalidated on labelled IWR6843 sessions. Classification stays `unknown`
+until 48 consecutive valid target frames are available and resets when target
+quality or identity is lost.
 
 Dedicated rotor records additionally populate `rotor_micro_doppler` with raw
 and enhanced per-frame spectra, physical window times, the velocity axis,
