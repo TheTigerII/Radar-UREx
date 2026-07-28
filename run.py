@@ -37,11 +37,11 @@ DEFAULT_CLUSTER_EPS_M = 0.4
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
 DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
-DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
+DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 3.0
 DEFAULT_STATIC_DETECTION = True
 DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_REFERENCE_FRAMES = 90
-DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
+DEFAULT_STATIC_MIN_CHANGE_DB = 3.0
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
 DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 DISPLAY_CHOICES = (
@@ -173,7 +173,7 @@ def parse_args() -> argparse.Namespace:
         "--clutter-map-min-snr-db",
         type=float,
         default=DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
-        help="Minimum target-to-background power ratio. Defaults to 6 dB.",
+        help="Minimum target-to-background power ratio. Defaults to 3 dB.",
     )
     parser.add_argument(
         "--static-detection",
@@ -201,7 +201,7 @@ def parse_args() -> argparse.Namespace:
         "--static-min-change-db",
         type=float,
         default=DEFAULT_STATIC_MIN_CHANGE_DB,
-        help="Minimum static target-to-reference change. Defaults to 6 dB.",
+        help="Minimum static target-to-reference change. Defaults to 3 dB.",
     )
     parser.add_argument(
         "--static-background-update-rate",

@@ -85,6 +85,8 @@ class ChooseDisplayTests(unittest.TestCase):
 
         self.assertEqual(args.rotor_blades, 2)
         self.assertEqual(args.rotor_rpm_max, 10_700.0)
+        self.assertEqual(args.clutter_map_min_snr_db, 3.0)
+        self.assertEqual(args.static_min_change_db, 3.0)
 
 
 class CaptureCommandTests(unittest.TestCase):

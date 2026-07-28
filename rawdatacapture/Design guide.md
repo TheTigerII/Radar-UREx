@@ -199,7 +199,7 @@ The point-cloud path:
 2. Applies an adaptive power-domain clutter map. During the initial warm-up it
    learns every cell using an exponential moving average and emits no point
    detections. It then divides every cell by its learned background power before
-   CFAR and applies a default 6 dB minimum target-to-background ratio. This
+   CFAR and applies a default 3 dB minimum target-to-background ratio. This
    keeps the normalized background near one instead of producing large regions
    of zero-valued CFAR training cells. Range and Doppler guard neighborhoods
    around current detections are frozen during map updates so targets are not
@@ -235,7 +235,7 @@ The first 30 processed detection updates are discarded as warm-up. The next
 a robust per-cell noise estimate from the median absolute deviation in log
 power. Each live change map is corrected by its per-range median to remove
 common receiver-gain drift and updated with a 0.35-rate temporal EMA. A
-detection must exceed both the default 6 dB absolute threshold and four times
+detection must exceed both the default 3 dB absolute threshold and four times
 the learned cell variation. Unprotected reference and noise cells then adapt
 at 0.01 per processed frame. Range/FOV gating occurs before local-maximum
 testing; when the threshold produces no candidates, the full 3D maximum scan

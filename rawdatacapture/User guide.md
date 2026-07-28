@@ -247,7 +247,7 @@ scene fixed and leave the target absent for startup calibration. The first
 the warm-up and calibration progress, then `Static reference ready (adaptive)`.
 The detector learns normal per-angle-cell variation, applies a per-range power
 floor, removes common receiver-gain drift, and temporally smooths the change
-map. A cell must exceed both the configured 6 dB minimum and four times its
+map. A cell must exceed both the configured 3 dB minimum and four times its
 learned noise variation. Unprotected background and noise estimates adapt at
 0.01 per processed frame, suppressing slow thermal, gain, and stationary-room
 drift.
@@ -291,9 +291,10 @@ Use `--cluster-eps-m` and `--cluster-min-samples` to tune DBSCAN. Set
 python run.py --display point-cloud --cluster-eps-m 0.4 --cluster-min-samples 3
 ```
 
-The clutter-map update rate defaults to `0.02`. A smaller value adapts more
+The clutter-map update rate defaults to `0.02`, and its minimum normalized
+target-to-background ratio defaults to 3 dB. A smaller update rate adapts more
 slowly to environmental changes. Change the initial learning period and
-minimum target-to-background ratio with `--clutter-map-warmup-frames` and
+minimum ratio with `--clutter-map-warmup-frames` and
 `--clutter-map-min-snr-db`. Use `--clutter-map-update-rate 0` to disable the
 software clutter map. These options affect point detection only; point-cloud
 magnitude, the range-Doppler display, and micro-Doppler retain raw power.
@@ -302,7 +303,7 @@ Use `--static-warmup-frames`, `--static-reference-frames`,
 `--static-background-update-rate`, `--static-cluster-min-samples`, and
 `--static-min-change-db` to tune calibration, adaptation, validation, and the
 absolute sensitivity floor. Defaults are 30 warm-up frames, 90 reference
-frames, a 0.01 adaptation rate, one same-frame cluster member, and 6 dB. Set
+frames, a 0.01 adaptation rate, one same-frame cluster member, and 3 dB. Set
 `--static-cluster-min-samples 3` to require three spatially adjacent candidates
 in every update in addition to temporal confirmation. The learned
 noise threshold can make the effective threshold higher in unstable cells.

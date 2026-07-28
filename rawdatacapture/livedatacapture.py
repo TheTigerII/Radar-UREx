@@ -114,11 +114,11 @@ DEFAULT_CLUSTER_EPS_M = 0.4
 DEFAULT_CLUSTER_MIN_SAMPLES = 2
 DEFAULT_CLUTTER_MAP_UPDATE_RATE = 0.02
 DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
-DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 6.0
+DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 3.0
 DEFAULT_STATIC_DETECTION = True
 DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_REFERENCE_FRAMES = 90
-DEFAULT_STATIC_MIN_CHANGE_DB = 6.0
+DEFAULT_STATIC_MIN_CHANGE_DB = 3.0
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
 DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 STATIC_MOTION_HISTORY_UPDATES = 30
@@ -5075,7 +5075,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CLUTTER_MAP_MIN_SNR_DB,
         help=(
             "Minimum target-to-background power ratio in dB after clutter "
-            "normalization. Defaults to 6 dB."
+            "normalization. Defaults to 3 dB."
         ),
     )
     parser.add_argument(

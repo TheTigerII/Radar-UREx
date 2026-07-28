@@ -56,7 +56,7 @@ class AdaptiveClutterMap:
         *,
         update_rate: float = 0.02,
         warmup_frames: int = 30,
-        minimum_snr_db: float = 6.0,
+        minimum_snr_db: float = 3.0,
         range_protection_cells: int = 2,
         doppler_protection_cells: int = 1,
     ) -> None:
@@ -185,7 +185,7 @@ class StaticSceneMap:
         *,
         warmup_frames: int = DEFAULT_STATIC_WARMUP_FRAMES,
         reference_frames: int = 90,
-        minimum_change_db: float = 6.0,
+        minimum_change_db: float = 3.0,
         noise_sigma_multiplier: float = DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER,
         smoothing_rate: float = DEFAULT_STATIC_SMOOTHING_RATE,
         background_update_rate: float = DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,

@@ -46,6 +46,12 @@ SKLEARN_AVAILABLE = importlib.util.find_spec("sklearn") is not None
 
 
 class AdaptiveClutterMapTests(unittest.TestCase):
+    def test_default_minimum_snr_is_three_db(self) -> None:
+        clutter = AdaptiveClutterMap()
+
+        self.assertEqual(clutter.minimum_snr_db, 3.0)
+        self.assertAlmostEqual(clutter.minimum_snr_linear, 10.0 ** 0.3)
+
     def test_normalizes_background_after_warmup_and_preserves_new_target(self) -> None:
         clutter = AdaptiveClutterMap(update_rate=0.5, warmup_frames=2)
         background = np.full((5, 8), 10.0)
@@ -89,6 +95,11 @@ class AdaptiveClutterMapTests(unittest.TestCase):
 
 
 class StaticSceneMapTests(unittest.TestCase):
+    def test_default_minimum_change_is_three_db(self) -> None:
+        scene = StaticSceneMap()
+
+        self.assertEqual(scene.minimum_change_db, 3.0)
+
     def test_frozen_reference_preserves_new_static_change(self) -> None:
         scene = StaticSceneMap(
             warmup_frames=0,
