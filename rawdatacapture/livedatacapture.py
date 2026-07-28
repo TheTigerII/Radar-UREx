@@ -17,7 +17,38 @@ from typing import Any, BinaryIO, Callable, Iterable, Optional, TextIO
 
 import numpy as np
 
-try:
+if __package__ in {None, ""}:
+    repository_root = str(Path(__file__).resolve().parent.parent)
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
+    from rawdatacapture.dsp import (
+        AdaptiveClutterMap,
+        DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
+        DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
+        DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
+        DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE,
+        StaticSceneMap,
+        MicroDopplerResult,
+        RotorEstimate,
+        cluster_point_cloud,
+        cluster_point_cloud_with_labels,
+        compute_micro_doppler_spectrum,
+        compute_per_tx_micro_doppler_spectrogram,
+        compute_range_doppler_heatmap,
+        compute_range_doppler_fft,
+        compute_point_cloud,
+        compute_range_fft,
+        compute_range_profile,
+        compute_rotor_micro_doppler_frame,
+        compute_static_point_cloud,
+        estimate_rotor_rpm,
+        frame_bytes_to_radar_cube,
+        range_axis_m,
+        range_resolution_m,
+        static_target_protection_mask,
+        validate_openradar_backend,
+    )
+else:
     from .dsp import (
         AdaptiveClutterMap,
         DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
@@ -45,39 +76,6 @@ try:
         static_target_protection_mask,
         validate_openradar_backend,
     )
-except ImportError:
-    from dsp import (
-        AdaptiveClutterMap,
-        DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
-        DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
-        DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
-        DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE,
-        StaticSceneMap,
-        MicroDopplerResult,
-        RotorEstimate,
-        cluster_point_cloud,
-        cluster_point_cloud_with_labels,
-        compute_micro_doppler_spectrum,
-        compute_per_tx_micro_doppler_spectrogram,
-        compute_range_doppler_heatmap,
-        compute_range_doppler_fft,
-        compute_point_cloud,
-        compute_range_fft,
-        compute_range_profile,
-        compute_rotor_micro_doppler_frame,
-        compute_static_point_cloud,
-        estimate_rotor_rpm,
-        frame_bytes_to_radar_cube,
-        range_axis_m,
-        range_resolution_m,
-        static_target_protection_mask,
-        validate_openradar_backend,
-    )
-
-if __package__ in {None, ""}:
-    repository_root = str(Path(__file__).resolve().parent.parent)
-    if repository_root not in sys.path:
-        sys.path.insert(0, repository_root)
 
 from inference import DroneBirdInference, InferenceResult
 

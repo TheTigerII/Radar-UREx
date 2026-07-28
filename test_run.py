@@ -1,5 +1,6 @@
 import io
 import queue
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -131,6 +132,7 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--classification", command)
         self.assertIn("--classification-artifacts", command)
         self.assertNotIn("--raw-output", command)
+        self.assertEqual(command[1], "-u")
 
         args.static_detection = False
         disabled_command = run.build_capture_command(
@@ -250,6 +252,49 @@ class ClassificationResultChannelTests(unittest.TestCase):
 
         output.assert_called_once_with("ordinary capture log", flush=True)
         self.assertEqual(result_queue.get_nowait()["label"], "drone")
+
+    def test_relay_reports_capture_readiness(self) -> None:
+        result_queue = queue.SimpleQueue()
+        capture_ready = threading.Event()
+        process = SimpleNamespace(
+            stdout=io.StringIO(
+                "Loaded radar config\n"
+                "Listening for live radar stream on 192.168.33.30:4098\n"
+            )
+        )
+
+        with patch("builtins.print"):
+            run.relay_capture_output(
+                process,
+                result_queue,
+                capture_ready,
+            )
+
+        self.assertTrue(capture_ready.is_set())
+
+    def test_wait_for_capture_ready_stops_when_capture_exits(self) -> None:
+        process = SimpleNamespace(poll=lambda: 2)
+
+        self.assertFalse(
+            run.wait_for_capture_ready(
+                process,
+                threading.Event(),
+                timeout_seconds=1.0,
+            )
+        )
+
+    def test_wait_for_capture_ready_accepts_ready_capture(self) -> None:
+        capture_ready = threading.Event()
+        capture_ready.set()
+        process = SimpleNamespace(poll=lambda: None)
+
+        self.assertTrue(
+            run.wait_for_capture_ready(
+                process,
+                capture_ready,
+                timeout_seconds=0.0,
+            )
+        )
 
     def test_report_formats_ready_classification(self) -> None:
         result_queue = queue.SimpleQueue()

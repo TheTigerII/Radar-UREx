@@ -55,6 +55,8 @@ DISPLAY_CHOICES = (
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
 CLASSIFICATION_RESULT_PREFIX = "CLASSIFICATION_RESULT "
+CAPTURE_READY_PREFIX = "Listening for live radar stream "
+CAPTURE_STARTUP_TIMEOUT_SECONDS = 30.0
 
 
 class SerialPortInfo(NamedTuple):
@@ -463,11 +465,14 @@ def start_process(
 def relay_capture_output(
     process: subprocess.Popen,
     classification_queue: queue.SimpleQueue,
+    capture_ready: Optional[threading.Event] = None,
 ) -> None:
     if process.stdout is None:
         return
     for raw_line in process.stdout:
         line = raw_line.rstrip("\r\n")
+        if capture_ready is not None and line.startswith(CAPTURE_READY_PREFIX):
+            capture_ready.set()
         marker_index = line.find(CLASSIFICATION_RESULT_PREFIX)
         if marker_index < 0:
             print(line, flush=True)
@@ -480,6 +485,22 @@ def relay_capture_output(
             continue
         if isinstance(result, dict):
             classification_queue.put(result)
+
+
+def wait_for_capture_ready(
+    process: subprocess.Popen,
+    capture_ready: threading.Event,
+    timeout_seconds: float = CAPTURE_STARTUP_TIMEOUT_SECONDS,
+) -> bool:
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    while not capture_ready.is_set():
+        if process.poll() is not None:
+            return False
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0.0:
+            return False
+        capture_ready.wait(min(0.1, remaining_seconds))
+    return process.poll() is None
 
 
 def report_pending_classifications(
@@ -596,6 +617,7 @@ def build_capture_command(
 
     command = [
         sys.executable,
+        "-u",
         str(RAW_DATA_DIR / "livedatacapture.py"),
         "--config",
         str(args.config),
@@ -808,6 +830,7 @@ def main() -> int:
     startup_process: Optional[subprocess.Popen] = None
     capture_output_thread: Optional[threading.Thread] = None
     classification_queue: queue.SimpleQueue = queue.SimpleQueue()
+    capture_ready = threading.Event()
     latest_classification: Optional[dict] = None
     try:
         capture_process = start_process(
@@ -817,18 +840,27 @@ def main() -> int:
         )
         capture_output_thread = threading.Thread(
             target=relay_capture_output,
-            args=(capture_process, classification_queue),
+            args=(capture_process, classification_queue, capture_ready),
             name="LiveCaptureOutputRelay",
             daemon=True,
         )
         capture_output_thread.start()
-        time.sleep(1.0)
-        if capture_process.poll() is not None:
+        if not wait_for_capture_ready(capture_process, capture_ready):
+            capture_returncode = capture_process.poll()
+            if capture_returncode is None:
+                print(
+                    "live capture did not become ready within "
+                    f"{CAPTURE_STARTUP_TIMEOUT_SECONDS:g} seconds",
+                    file=sys.stderr,
+                )
+                return 1
+            capture_output_thread.join(timeout=2.0)
             print(
-                f"live capture exited early with code {capture_process.returncode}",
+                f"live capture exited before becoming ready with code "
+                f"{capture_returncode}",
                 file=sys.stderr,
             )
-            return capture_process.returncode or 1
+            return capture_returncode or 1
 
         startup_process = start_process(
             "startup",

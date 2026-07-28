@@ -8,8 +8,11 @@ from enum import Enum, IntEnum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Protocol
 
-try:
-    from .livedatacapture import (
+if __package__ in {None, ""}:
+    repository_root = str(Path(__file__).resolve().parent.parent)
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
+    from rawdatacapture.livedatacapture import (
         DEFAULT_CONFIG_PATH,
         DEFAULT_SETUP_PATH,
         UDP_IP,
@@ -17,8 +20,8 @@ try:
         CaptureSetupConfig,
         RadarCaptureConfig,
     )
-except ImportError:
-    from livedatacapture import (
+else:
+    from .livedatacapture import (
         DEFAULT_CONFIG_PATH,
         DEFAULT_SETUP_PATH,
         UDP_IP,
