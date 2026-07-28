@@ -54,6 +54,7 @@ from rawdatacapture.livedatacapture import (
     PointCloudDisplayPayload,
     RadarCaptureConfig,
     RotorDisplayPayload,
+    RotorPostprocessItem,
     SingleTargetTracker,
     StaticReferenceStatus,
     TargetTrack,
@@ -83,6 +84,7 @@ from rawdatacapture.livedatacapture import (
     _rasterize_rotor_spectrogram,
     _run_display_process,
     _run_frame_processor,
+    _run_rotor_postprocessor,
     _set_rate_indicator,
     _set_point_cloud_axes,
     _turbo_lookup_table,
@@ -467,6 +469,125 @@ class RotorDisplayPayloadSinkTests(unittest.TestCase):
         self.assertFalse(
             any("Frame processor stopped after error" in message for message in messages)
         )
+
+
+class RotorPostprocessorTests(unittest.TestCase):
+    def test_postprocessor_preserves_frame_order_and_classification_alignment(
+        self,
+    ) -> None:
+        class SharedCounter:
+            def __init__(self):
+                self.value = 0
+                self.lock = threading.Lock()
+
+            def get_lock(self):
+                return self.lock
+
+        class FakeInference:
+            threshold = 0.75
+            metadata = {
+                "enabled": True,
+                "backend": "tensorrt",
+                "device": "cuda",
+                "precision": "fp16",
+                "gpu": {"name": "Orin"},
+                "benchmark": {"p50_ms": 1.0, "p95_ms": 1.5},
+                "device_allocation_bytes": 24_580,
+            }
+
+            def __init__(self):
+                self.steps = 0
+
+            def update_feature_step(self, _step):
+                self.steps += 1
+                return InferenceResult(
+                    label="drone" if self.steps == 2 else "not_drone",
+                    p_drone=0.9 if self.steps == 2 else 0.1,
+                    threshold=self.threshold,
+                    status="ready",
+                    reason=None,
+                    valid_steps=self.steps,
+                )
+
+            def close(self):
+                pass
+
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).with_name("profile.cfg")
+        )
+        result = MicroDopplerResult(
+            raw_spectrogram_db=np.ones((128, 1), dtype=np.float32),
+            enhanced_spectrogram_db=np.ones((128, 1), dtype=np.float32),
+            window_times_s=np.asarray((0.001,)),
+            velocity_axis_m_s=np.arange(128, dtype=np.float32),
+            flash_scores_db=np.asarray((3.0,), dtype=np.float32),
+            noise_floor_db=np.asarray((60.0,), dtype=np.float32),
+            selected_range_m=2.15,
+            nominal_hop_s=0.000234,
+            unambiguous_velocity_m_s=10.0,
+        )
+        post_queue = queue.Queue()
+        for frame_index in (4, 5):
+            post_queue.put(
+                RotorPostprocessItem(
+                    frame_index=frame_index,
+                    save_update=True,
+                    feature_step=np.ones((2, 64), dtype=np.float32),
+                    rotor_result=result,
+                )
+            )
+        post_queue.put(None)
+        log_queue = queue.Queue()
+        status_queue = queue.Queue()
+        failure_event = threading.Event()
+        counter = SharedCounter()
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output_path = Path(temporary_directory) / "processed.jsonl"
+            with (
+                patch(
+                    "rawdatacapture.livedatacapture.create_inference_engine",
+                    return_value=FakeInference(),
+                ),
+                patch("rawdatacapture.livedatacapture.signal.signal"),
+            ):
+                _run_rotor_postprocessor(
+                    config,
+                    post_queue,
+                    log_queue,
+                    status_queue,
+                    failure_event,
+                    counter,
+                    output_path,
+                    1,
+                    Path("artifacts"),
+                    Path("profile.cfg"),
+                    "cuda",
+                    2.15,
+                    1,
+                    2,
+                    1,
+                    None,
+                    500.0,
+                    10_700.0,
+                )
+            records = [
+                json.loads(line)
+                for line in output_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        updates = records[1:]
+        self.assertEqual(
+            [record["processed_frame_index"] for record in updates],
+            [4, 5],
+        )
+        self.assertEqual(
+            [record["classification"]["label"] for record in updates],
+            ["not_drone", "drone"],
+        )
+        self.assertEqual(counter.value, 2)
+        self.assertFalse(failure_event.is_set())
+        self.assertEqual(status_queue.get_nowait()["state"], "ready")
 
 
 class ProcessedOutputWriterTests(unittest.TestCase):

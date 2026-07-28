@@ -52,14 +52,18 @@ DCA1000 UDP packets (host 192.168.33.30, port 4098)
   -> RadarFrameProcessor process
        optionally save raw frame
        reshape int16 LVDS data to [chirp, rx, sample]
-       range FFT and selected display DSP
+       range FFT, selected display DSP, and compact CNN feature extraction
        enqueue latest display result
+       enqueue ordered dedicated-rotor results
+  -> RotorPostProcessor process (dedicated rotor classification)
+       run the fixed-shape TensorRT FP16 CNN on CUDA
+       serialize processed JSONL in frame order
   -> RadarLiveDisplay process (when enabled)
        update persistent Matplotlib artists for modes 1-5
        or PyQtGraph image/curve items for dedicated rotor mode
 ```
 
-Capture, processing, and display use bounded queues. The UDP receiver thread
+Capture, processing, rotor post-processing, and display use bounded queues. The UDP receiver thread
 never waits for frame assembly, FFT, logging, or plotting. A full packet queue
 increments `receiver_queue_drops`; a full processing queue increments
 `processing_frames_dropped`; the one-item display queue discards stale display
@@ -70,10 +74,13 @@ results in favor of the newest one.
 - UDP receiver thread: socket receive only.
 - Main process: packet dequeue and `FrameBuffer` assembly.
 - `RadarFrameProcessor`: frame conversion, DSP, logging, and optional raw write.
+- `RotorPostProcessor`: spawned CUDA/TensorRT inference and JSON serialization
+  for classified dedicated-rotor capture.
 - `RadarLiveDisplay`: Matplotlib UI for modes 1-5 or PyQtGraph UI for rotor
   mode.
 - Packet queue: `--packet-queue-size`, default 8,192 datagrams.
 - Processing queue: `--processing-queue-size`, default 32 frames.
+- Rotor post-processing queue: the same 32-frame capacity by default.
 - Display payload queue: one result.
 - Processor log queue: 1,000 messages.
 
@@ -82,9 +89,10 @@ are emitted immediately whenever an error counter changes. Shutdown emits
 capture, processing, and display summaries, including the number of updates
 actually rendered by the GUI. The processor ignores the parent process's
 SIGINT, consumes the queue sentinel, and drains all frames queued before that
-sentinel. Its final report includes aggregate p50, p95, and maximum timings for
-range FFT, Doppler, dynamic detection/CFAR, static detection, clustering,
-micro-Doppler, serialization, and total processing.
+sentinel. Final DSP and post-processing reports include aggregate p50, p95,
+and maximum timings for range FFT, Doppler, dynamic detection/CFAR, static
+detection, clustering, micro-Doppler, classification feature extraction,
+TensorRT classification, serialization, and each process's total.
 
 ## Configuration
 
@@ -316,6 +324,14 @@ this filtered spectrum.
 The default estimator model is two blades with a 500-to-10,700 RPM search band,
 matching the current drone. Dedicated rotor processing uses the same verified
 `profile.cfg` acquisition waveform as the other live modes.
+
+When classification is enabled, the DSP worker sends only the ordered frame
+index, rotor result, and 2-by-64 feature step to a spawned post-processor. That
+process owns the CUDA context, TensorRT execution context and stream, and
+persistent host/device buffers. CNN inference and JSON serialization therefore
+run concurrently with the next frame's radar DSP without changing STFT or
+classification cadence. The bounded handoff applies backpressure and never
+silently discards a post-processing item.
 
 Window centres combine packet-derived frame time with configured within-frame
 chirp timing. RPM estimation retains two seconds of those physical timestamps.

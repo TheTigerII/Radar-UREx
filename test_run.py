@@ -131,6 +131,11 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--static-cluster-min-samples", command)
         self.assertIn("--classification", command)
         self.assertIn("--classification-artifacts", command)
+        self.assertIn("--classification-device", command)
+        self.assertEqual(
+            command[command.index("--classification-device") + 1],
+            "auto",
+        )
         self.assertNotIn("--raw-output", command)
         self.assertEqual(command[1], "-u")
 
@@ -295,6 +300,45 @@ class ClassificationResultChannelTests(unittest.TestCase):
                 timeout_seconds=0.0,
             )
         )
+
+    def test_explicit_cuda_allows_first_engine_build(self) -> None:
+        args = SimpleNamespace(
+            classification=True,
+            classification_device="cuda",
+        )
+
+        self.assertEqual(
+            run.capture_startup_timeout_seconds(args),
+            run.CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS,
+        )
+
+    def test_cpu_classification_keeps_normal_startup_timeout(self) -> None:
+        args = SimpleNamespace(
+            classification=True,
+            classification_device="cpu",
+        )
+
+        self.assertEqual(
+            run.capture_startup_timeout_seconds(args),
+            run.CAPTURE_STARTUP_TIMEOUT_SECONDS,
+        )
+
+    def test_auto_uses_gpu_timeout_on_jetson(self) -> None:
+        args = SimpleNamespace(
+            classification=True,
+            classification_device="auto",
+        )
+
+        with patch.object(
+            run,
+            "JETSON_MODEL_PATH",
+            SimpleNamespace(
+                read_text=lambda **_kwargs: "NVIDIA Jetson Orin Nano"
+            ),
+        ):
+            timeout = run.capture_startup_timeout_seconds(args)
+
+        self.assertEqual(timeout, run.CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS)
 
     def test_report_formats_ready_classification(self) -> None:
         result_queue = queue.SimpleQueue()

@@ -57,6 +57,8 @@ LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
 CLASSIFICATION_RESULT_PREFIX = "CLASSIFICATION_RESULT "
 CAPTURE_READY_PREFIX = "Listening for live radar stream "
 CAPTURE_STARTUP_TIMEOUT_SECONDS = 30.0
+CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS = 300.0
+JETSON_MODEL_PATH = Path("/proc/device-tree/model")
 
 
 class SerialPortInfo(NamedTuple):
@@ -256,6 +258,15 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_CLASSIFICATION_ARTIFACT_DIR,
         help="Directory containing the trained CNN deployment artifacts.",
+    )
+    parser.add_argument(
+        "--classification-device",
+        choices=("auto", "cuda", "cpu"),
+        default="auto",
+        help=(
+            "Inference device. On Jetson, auto requires TensorRT CUDA; "
+            "use cpu only as an explicit override."
+        ),
     )
     parser.add_argument(
         "--raw-output",
@@ -503,6 +514,31 @@ def wait_for_capture_ready(
     return process.poll() is None
 
 
+def capture_startup_timeout_seconds(args: argparse.Namespace) -> float:
+    """Allow first-run TensorRT build and parity validation to finish."""
+    if not bool(getattr(args, "classification", False)):
+        return CAPTURE_STARTUP_TIMEOUT_SECONDS
+    requested_device = str(
+        getattr(args, "classification_device", "auto")
+    ).strip().lower()
+    if requested_device == "cpu":
+        return CAPTURE_STARTUP_TIMEOUT_SECONDS
+    if requested_device == "cuda":
+        return CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS
+    try:
+        model = JETSON_MODEL_PATH.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        )
+    except OSError:
+        return CAPTURE_STARTUP_TIMEOUT_SECONDS
+    return (
+        CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS
+        if "nvidia" in model.lower()
+        else CAPTURE_STARTUP_TIMEOUT_SECONDS
+    )
+
+
 def report_pending_classifications(
     classification_queue: queue.SimpleQueue,
     latest: Optional[dict] = None,
@@ -678,6 +714,8 @@ def build_capture_command(
                 "--classification",
                 "--classification-artifacts",
                 str(classification_artifacts),
+                "--classification-device",
+                str(getattr(args, "classification_device", "auto")),
             )
         )
     else:
@@ -820,7 +858,8 @@ def main() -> int:
     print(
         "CNN classification: "
         + (
-            f"enabled ({args.classification_artifacts})"
+            f"enabled ({args.classification_artifacts}, "
+            f"device={args.classification_device})"
             if args.classification
             else "disabled"
         )
@@ -845,12 +884,17 @@ def main() -> int:
             daemon=True,
         )
         capture_output_thread.start()
-        if not wait_for_capture_ready(capture_process, capture_ready):
+        capture_startup_timeout = capture_startup_timeout_seconds(args)
+        if not wait_for_capture_ready(
+            capture_process,
+            capture_ready,
+            timeout_seconds=capture_startup_timeout,
+        ):
             capture_returncode = capture_process.poll()
             if capture_returncode is None:
                 print(
                     "live capture did not become ready within "
-                    f"{CAPTURE_STARTUP_TIMEOUT_SECONDS:g} seconds",
+                    f"{capture_startup_timeout:g} seconds",
                     file=sys.stderr,
                 )
                 return 1
