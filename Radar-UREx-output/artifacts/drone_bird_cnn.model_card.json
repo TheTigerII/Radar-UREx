@@ -1,0 +1,52 @@
+{
+  "architecture": "compact depthwise-separable residual 2D CNN",
+  "parameters": 19825,
+  "best_epoch": 1,
+  "validation_pr_auc": 1.0,
+  "threshold": 0.9829048536087723,
+  "window_test_metrics": {
+    "samples": 800,
+    "threshold": 0.9829048536087723,
+    "drone_recall": 0.9142857142857143,
+    "bird_false_positive_rate": 0.3333333333333333,
+    "precision": 0.8648648648648649,
+    "f1": 0.8888888888888888,
+    "pr_auc_average_precision": 0.9059661488152783,
+    "roc_auc": 0.8471502976190477,
+    "brier_score": 0.10331769825330037,
+    "ece_10_bins": 0.11015324844905472,
+    "confusion_matrix_tn_fp_fn_tp": [
+      160,
+      80,
+      48,
+      512
+    ]
+  },
+  "recording_test_metrics": {
+    "samples": 20,
+    "threshold": 0.9829048536087723,
+    "drone_recall": 0.9285714285714286,
+    "bird_false_positive_rate": 0.3333333333333333,
+    "precision": 0.8666666666666667,
+    "f1": 0.896551724137931,
+    "pr_auc_average_precision": 0.929853083424512,
+    "roc_auc": 0.8571428571428572,
+    "brier_score": 0.10263083160035395,
+    "ece_10_bins": 0.11089801647418847,
+    "confusion_matrix_tn_fp_fn_tp": [
+      4,
+      2,
+      1,
+      13
+    ]
+  },
+  "feature_version": "archive-micro-doppler-v3",
+  "input_shape_chw": [
+    2,
+    48,
+    64
+  ],
+  "archive_manifest_sha256": "bbabd36a1344fae0a915f22e154f1752c87f434e8fd19e749564d86cddbe0881",
+  "compatible_profile_sha256": "1996a2fa008bdd81d63b9fd5806a191fe0945cbc7be002689ef14c90dec4a982",
+  "deployment_status": "archive_pretrained_unvalidated_on_iwr6843"
+}
