@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+from rawdatacapture.pmm import MINI4_DEFAULT_DETECTION_THRESHOLD
+
 
 ROOT = Path(__file__).resolve().parent
 RAW_DATA_DIR = ROOT / "rawdatacapture"
@@ -25,7 +27,7 @@ DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
 DEFAULT_PACKET_QUEUE_SIZE = 8192
 DEFAULT_PROCESSING_QUEUE_SIZE = 32
 DEFAULT_RADAR_BAUD = 115200
-DEFAULT_DURATION_MINUTES = 3.0
+DEFAULT_DURATION_MINUTES = 5.0
 DEFAULT_MAX_RANGE_M = 20.0
 DISPLAY_CHOICES = (
     "none",
@@ -91,7 +93,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pmm-max-target-speed-m-s", type=float, default=4.0)
     parser.add_argument("--pmm-folding-size-min", type=int, default=2)
     parser.add_argument("--pmm-folding-size-max", type=int, default=20)
-    parser.add_argument("--pmm-detection-threshold", type=float, default=30_000.0)
+    parser.add_argument(
+        "--pmm-detection-threshold",
+        type=float,
+        default=MINI4_DEFAULT_DETECTION_THRESHOLD,
+    )
     parser.add_argument("--pmm-history-seconds", type=float, default=3.6)
     parser.add_argument("--pmm-provisional-frames", type=int, default=5)
     parser.add_argument("--pmm-confirmation-window-frames", type=int, default=10)

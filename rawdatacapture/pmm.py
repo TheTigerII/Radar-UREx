@@ -11,7 +11,7 @@ from scipy import fft as scipy_fft
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
-MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v2"
+MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v4"
 MINI4_NUM_ADC_SAMPLES = 256
 MINI4_NUM_RX_CHANNELS = 4
 MINI4_NUM_LOOPS = 32
@@ -27,6 +27,7 @@ MINI4_FRAME_PERIODICITY_MS = 100.0
 MINI4_DOPPLER_FFT_SIZE = 64
 MINI4_MIN_RANGE_M = 0.3
 MINI4_MAX_RANGE_M = 20.0
+MINI4_DEFAULT_DETECTION_THRESHOLD = 750.0
 
 TrackState = Literal[
     "calibrating",
@@ -60,7 +61,7 @@ class PmmConfig:
     maximum_target_speed_m_s: float = 4.0
     folding_size_min: int = 2
     folding_size_max: int = 20
-    detection_threshold: float = 30_000.0
+    detection_threshold: float = MINI4_DEFAULT_DETECTION_THRESHOLD
     history_seconds: float = 3.6
     provisional_frames: int = 5
     confirmation_window_frames: int = 10
@@ -222,16 +223,18 @@ def spectrum_folding(
     flattened = values.reshape(-1, values.shape[-1])
     best_scores = np.full(flattened.shape[0], -np.inf, dtype=np.float32)
     best_sizes = np.full(flattened.shape[0], folding_size_min, dtype=np.int16)
-    bin_indices = np.arange(flattened.shape[1], dtype=np.intp)
 
     for folding_size in range(folding_size_min, folding_size_max + 1):
         if folding_size > flattened.shape[1]:
             break
-        columns = bin_indices % folding_size
-        sums = np.zeros((flattened.shape[0], folding_size), dtype=np.float32)
-        for column in range(folding_size):
-            sums[:, column] = flattened[:, columns == column].sum(axis=1)
-        score = np.max(sums, axis=1)
+        row_count = flattened.shape[1] // folding_size
+        usable_bins = row_count * folding_size
+        folded = flattened[:, :usable_bins].reshape(
+            flattened.shape[0],
+            row_count,
+            folding_size,
+        )
+        score = np.max(folded.mean(axis=1), axis=1)
         improved = score > best_scores
         best_scores[improved] = score[improved]
         best_sizes[improved] = folding_size
@@ -509,7 +512,9 @@ def capon_pmm_angle_scores(
     azimuth_rad = np.deg2rad(azimuth.ravel())
     elevation_rad = np.deg2rad(elevation.ravel())
     direction_x = np.sin(azimuth_rad) * np.cos(elevation_rad)
-    direction_z = np.sin(elevation_rad)
+    # The ODS vertical antenna-coordinate direction is opposite the physical
+    # display Z direction. Report positive elevation as upward.
+    direction_z = -np.sin(elevation_rad)
     steering = np.exp(
         1j
         * np.pi
@@ -661,7 +666,7 @@ class PmmTracker:
             "profile_fingerprint": mini4_profile_fingerprint(self.radar_config),
             "feature_fingerprint": feature_fingerprint,
             "doppler_fft_size": MINI4_DOPPLER_FFT_SIZE,
-            "folding_score": "maximum raw summed linear-magnitude column",
+            "folding_score": "maximum column-averaged linear magnitude",
             "config": asdict(self.config),
         }
 

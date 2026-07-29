@@ -39,7 +39,7 @@ python run.py --display combined
 
 The launcher starts capture first, configures and arms the DCA1000, sends the
 fixed 20 m profile to the radar, and then sends `sensorStart`. It prompts for a
-duration; Enter selects three minutes and `0` runs until Ctrl+C.
+duration; Enter selects five minutes and `0` runs until Ctrl+C.
 By default it selects the serial device whose USB description is
 `CP2105 Dual USB to UART Bridge Controller - Enhanced COM Port`. Use
 `--radar-port` only to override that selection.
@@ -54,7 +54,7 @@ python run.py --radar-port /dev/ttyUSB0 --display range-doppler \
   --raw-output rawdatacapture/captures/session.bin
 
 python run.py --radar-port /dev/ttyUSB0 \
-  --pmm-detection-threshold 30000 \
+  --pmm-detection-threshold 750 \
   --pmm-background-calibration-seconds 30
 ```
 
@@ -70,7 +70,7 @@ Keep the monitored area target-free during the first 30 seconds. The status is
 - `--pmm-background-calibration-seconds`: target-free calibration time.
 - `--pmm-max-target-speed-m-s`: dynamic-programming motion limit.
 - `--pmm-folding-size-min` and `--pmm-folding-size-max`: tested periods.
-- `--pmm-detection-threshold`: initial linear PMM score threshold.
+- `--pmm-detection-threshold`: linear PMM score threshold; default 750.
 - `--pmm-history-seconds`: retained range-time history.
 - `--pmm-provisional-frames`: observations before tentative tracking.
 - `--pmm-confirmation-window-frames` and `--pmm-confirmation-hits`: confirmation

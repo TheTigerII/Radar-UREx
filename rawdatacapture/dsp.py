@@ -35,7 +35,11 @@ def frame_bytes_to_radar_cube(
     frame_bytes: bytes,
     config: RadarDspConfig,
 ) -> np.ndarray:
-    """Decode DCA1000 two-lane complex int16 data as [chirp, rx, sample]."""
+    """Decode DCA1000 two-lane complex int16 data as [chirp, rx, sample].
+
+    The non-interleaved layout follows section 24.8 of TI's mmWave Studio
+    guide: all samples for one receiver are contiguous within each chirp.
+    """
     expected_int16_count = config.bytes_per_frame // np.dtype("<i2").itemsize
     adc_samples = np.frombuffer(
         frame_bytes,
@@ -76,14 +80,14 @@ def frame_bytes_to_radar_cube(
     if config.channel_interleave:
         return complex_samples.reshape(
             config.num_chirps_per_frame,
-            config.num_rx_channels,
             config.num_adc_samples,
-        )
+            config.num_rx_channels,
+        ).transpose(0, 2, 1)
     return complex_samples.reshape(
         config.num_chirps_per_frame,
-        config.num_adc_samples,
         config.num_rx_channels,
-    ).transpose(0, 2, 1)
+        config.num_adc_samples,
+    )
 
 
 def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:

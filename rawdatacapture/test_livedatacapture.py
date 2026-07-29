@@ -5,16 +5,20 @@ from itertools import chain, repeat
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import numpy as np
+
 from rawdatacapture.livedatacapture import (
     CapturedFrame,
     CaptureStats,
     DCA1000PacketHeader,
     FrameBuffer,
+    RadarCaptureConfig,
     SequenceTracker,
     UdpPacketReceiver,
     _format_capture_summary,
     _put_latest_queue_payload,
 )
+from rawdatacapture.dsp import frame_bytes_to_radar_cube
 
 
 class DcaHeaderTests(unittest.TestCase):
@@ -127,6 +131,55 @@ class QueueTests(unittest.TestCase):
 
         self.assertEqual(skipped, 1)
         self.assertEqual(payload_queue.get_nowait(), "new")
+
+
+class AdcLayoutTests(unittest.TestCase):
+    @staticmethod
+    def _frame_bytes() -> bytes:
+        values = np.asarray(
+            (
+                (1, 2, 10, 20),
+                (3, 4, 30, 40),
+            ),
+            dtype="<i2",
+        )
+        return values.tobytes()
+
+    def test_non_interleaved_profile_keeps_each_rx_contiguous(self) -> None:
+        config = RadarCaptureConfig.from_dimensions(
+            num_adc_samples=2,
+            num_rx_channels=2,
+            num_chirps_per_frame=1,
+            channel_interleave=False,
+        )
+
+        cube = frame_bytes_to_radar_cube(self._frame_bytes(), config)
+
+        np.testing.assert_array_equal(
+            cube,
+            np.asarray(
+                (((1 + 10j, 2 + 20j), (3 + 30j, 4 + 40j)),),
+                dtype=np.complex64,
+            ),
+        )
+
+    def test_interleaved_profile_groups_samples_before_receivers(self) -> None:
+        config = RadarCaptureConfig.from_dimensions(
+            num_adc_samples=2,
+            num_rx_channels=2,
+            num_chirps_per_frame=1,
+            channel_interleave=True,
+        )
+
+        cube = frame_bytes_to_radar_cube(self._frame_bytes(), config)
+
+        np.testing.assert_array_equal(
+            cube,
+            np.asarray(
+                (((1 + 10j, 3 + 30j), (2 + 20j, 4 + 40j)),),
+                dtype=np.complex64,
+            ),
+        )
 
 
 class UdpPacketReceiverTests(unittest.TestCase):

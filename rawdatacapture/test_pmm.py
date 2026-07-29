@@ -67,7 +67,7 @@ class SpectrumFoldingTests(unittest.TestCase):
 
         scores, sizes = spectrum_folding(spectra)
 
-        np.testing.assert_allclose(scores, 32.0)
+        np.testing.assert_allclose(scores, 1.0)
         np.testing.assert_array_equal(sizes, np.full(8, 2))
 
 
@@ -182,7 +182,7 @@ class CaponAngleTests(unittest.TestCase):
         azimuth_rad = np.deg2rad(azimuth_deg)
         elevation_rad = np.deg2rad(elevation_deg)
         direction_x = np.sin(azimuth_rad) * np.cos(elevation_rad)
-        direction_z = np.sin(elevation_rad)
+        direction_z = -np.sin(elevation_rad)
         steering = np.exp(
             1j
             * np.pi

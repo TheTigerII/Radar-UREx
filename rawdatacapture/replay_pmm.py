@@ -19,7 +19,12 @@ from rawdatacapture.dsp import (
     frame_bytes_to_radar_cube,
 )
 from rawdatacapture.livedatacapture import RadarCaptureConfig
-from rawdatacapture.pmm import PmmConfig, PmmTracker, validate_mini4_profile
+from rawdatacapture.pmm import (
+    MINI4_DEFAULT_DETECTION_THRESHOLD,
+    PmmConfig,
+    PmmTracker,
+    validate_mini4_profile,
+)
 
 
 def replay_raw_frames(
@@ -80,7 +85,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--calibration-seconds", type=float, default=30.0)
-    parser.add_argument("--threshold", type=float, default=30_000.0)
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=MINI4_DEFAULT_DETECTION_THRESHOLD,
+    )
     return parser.parse_args()
 
 

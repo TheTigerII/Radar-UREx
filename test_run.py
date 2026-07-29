@@ -93,9 +93,9 @@ class PromptTests(unittest.TestCase):
         with patch("builtins.input", return_value=""):
             self.assertEqual(run.choose_display(None), "combined")
 
-    def test_blank_duration_uses_three_minutes(self) -> None:
+    def test_blank_duration_uses_five_minutes(self) -> None:
         with patch("builtins.input", return_value=""):
-            self.assertEqual(run.choose_duration_minutes(None), 3.0)
+            self.assertEqual(run.choose_duration_minutes(None), 5.0)
 
     def test_negative_duration_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

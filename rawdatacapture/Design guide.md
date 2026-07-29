@@ -41,6 +41,8 @@ Only `profile-mini4-20m.cfg` is accepted:
 
 Preflight rejects any dimension, timing, slope, sampling-rate, TX order, or
 frame-period mismatch. Processing and display are gated to 0.3–20 m.
+The profile's `adcbufCfg` selects the IWR68xx non-interleaved ADC layout, so
+each receiver's samples are decoded contiguously within a chirp.
 
 ## Capture integrity
 
@@ -54,10 +56,10 @@ metadata.
 ## PMM extraction and calibration
 
 For every range bin, the linear-magnitude Doppler spectrum is folded for
-integer sizes 2 through 20. Each folding column is summed without averaging so
-the score remains on the paper's raw folding scale. The maximum score and its
-folding size are retained. The tracker keeps at most 36 frames (3.6 seconds at
-10 Hz), including while it is searching.
+integer sizes 2 through 20. Each folding column is averaged as specified by
+Equation 10 in the paper. The maximum score and its folding size are retained.
+The tracker keeps at most 36 frames (3.6 seconds at 10 Hz), including while it
+is searching.
 
 Startup requires 300 valid target-free frames by default. Their mean PMM
 spectrum becomes the background. Projection-based subtraction estimates the
@@ -66,8 +68,16 @@ finishes, the only state is `calibrating` and no detection is emitted.
 Calibration is tied to profile and feature fingerprints and is reset by a
 profile mismatch or observation discontinuity.
 
-The initial score threshold is 30,000. It is a runtime setting and must be
-tuned from target-free and controlled Mini 4 Pro recordings.
+The default score threshold is 750. It is a runtime setting derived from the
+first local target-free and Mini 4 Pro recordings after correcting the ADC
+layout and folding implementation. In that pair, the target-free maximum was
+about 615 and the target recording's median post-calibration score was about
+1,145. More target-free and controlled-flight recordings are still required
+before treating 750 as a site-independent threshold.
+
+The paper's value of 30,000 is not used here: it gates complete 3.6-second
+Doppler-Time segments before the paper's identification stage, rather than
+individual tracking frames. Phase 1 has no identification stage.
 
 ## Tracking
 
@@ -80,7 +90,9 @@ A 5,000-particle constant-velocity filter smooths range and estimates radial
 velocity. At the filtered range, Capon beamforming searches the 12-element ODS
 virtual array from -60 to +60 degrees in azimuth and elevation on a 2-degree
 grid. PMM folding, continuity constraints, and particle filters are also
-applied to the angle estimates.
+applied to the angle estimates. Positive elevation and positive display Z both
+mean upward; the ODS vertical antenna coordinate is sign-corrected to maintain
+that convention.
 
 Track states are:
 

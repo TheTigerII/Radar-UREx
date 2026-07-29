@@ -32,6 +32,7 @@ if __package__ in {None, ""}:
         range_resolution_m,
     )
     from rawdatacapture.pmm import (
+        MINI4_DEFAULT_DETECTION_THRESHOLD,
         PmmConfig,
         PmmTrackResult,
         PmmTracker,
@@ -48,6 +49,7 @@ else:
         range_resolution_m,
     )
     from .pmm import (
+        MINI4_DEFAULT_DETECTION_THRESHOLD,
         PmmConfig,
         PmmTrackResult,
         PmmTracker,
@@ -1407,7 +1409,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pmm-max-target-speed-m-s", type=float, default=4.0)
     parser.add_argument("--pmm-folding-size-min", type=int, default=2)
     parser.add_argument("--pmm-folding-size-max", type=int, default=20)
-    parser.add_argument("--pmm-detection-threshold", type=float, default=30_000.0)
+    parser.add_argument(
+        "--pmm-detection-threshold",
+        type=float,
+        default=MINI4_DEFAULT_DETECTION_THRESHOLD,
+    )
     parser.add_argument("--pmm-history-seconds", type=float, default=3.6)
     parser.add_argument("--pmm-provisional-frames", type=int, default=5)
     parser.add_argument("--pmm-confirmation-window-frames", type=int, default=10)
