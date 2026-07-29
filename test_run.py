@@ -63,6 +63,32 @@ class CaptureCommandTests(unittest.TestCase):
 
 
 class PromptTests(unittest.TestCase):
+    def test_cp2105_enhanced_port_is_the_default(self) -> None:
+        ports = [
+            run.SerialPortInfo(
+                "/dev/ttyUSB0",
+                "CP2105 Dual USB to UART Bridge Controller - Standard COM Port",
+            ),
+            run.SerialPortInfo(
+                "/dev/ttyUSB1",
+                "CP2105 Dual USB to UART Bridge Controller - Enhanced COM Port",
+            ),
+        ]
+        with (
+            patch("run.list_serial_ports", return_value=ports),
+            patch("builtins.print"),
+        ):
+            selected = run.resolve_radar_port(None)
+
+        self.assertEqual(selected, "/dev/ttyUSB1")
+
+    def test_explicit_radar_port_overrides_cp2105_default(self) -> None:
+        with patch("run.list_serial_ports") as list_ports:
+            selected = run.resolve_radar_port("/dev/serial/radar")
+
+        self.assertEqual(selected, "/dev/serial/radar")
+        list_ports.assert_not_called()
+
     def test_blank_display_uses_combined_mode(self) -> None:
         with patch("builtins.input", return_value=""):
             self.assertEqual(run.choose_display(None), "combined")

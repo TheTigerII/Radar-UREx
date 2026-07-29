@@ -16,11 +16,12 @@ the radar.
 ## Integrated operation
 
 ```bash
-python run.py --radar-port /dev/ttyUSB0 --display combined
+python run.py --display combined
 ```
 
 The launcher uses the same profile for hardware commands and frame dimensions,
-preventing acquisition/processing mismatches.
+preventing acquisition/processing mismatches. It automatically selects the
+CP2105 `Enhanced COM Port`; an explicit `--radar-port` overrides this default.
 
 ## Preflight
 

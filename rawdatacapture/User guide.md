@@ -34,12 +34,15 @@ From the repository root:
 
 ```bash
 source .venv/bin/activate
-python run.py --radar-port /dev/ttyUSB0 --display combined
+python run.py --display combined
 ```
 
 The launcher starts capture first, configures and arms the DCA1000, sends the
 fixed 20 m profile to the radar, and then sends `sensorStart`. It prompts for a
 duration; Enter selects three minutes and `0` runs until Ctrl+C.
+By default it selects the serial device whose USB description is
+`CP2105 Dual USB to UART Bridge Controller - Enhanced COM Port`. Use
+`--radar-port` only to override that selection.
 
 Useful examples:
 

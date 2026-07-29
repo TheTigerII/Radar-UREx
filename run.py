@@ -36,6 +36,9 @@ DISPLAY_CHOICES = (
 )
 CAPTURE_READY_PREFIX = "Listening for live radar stream "
 CAPTURE_STARTUP_TIMEOUT_SECONDS = 30.0
+DEFAULT_RADAR_UART_DESCRIPTION = (
+    "CP2105 Dual USB to UART Bridge Controller - Enhanced COM Port"
+)
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
 
@@ -140,6 +143,20 @@ def resolve_radar_port(explicit_port: Optional[str]) -> Optional[str]:
     if explicit_port:
         return explicit_port
     ports = list_serial_ports()
+    preferred_ports = [
+        port
+        for port in ports
+        if "cp2105" in port.description.casefold()
+        and "enhanced" in port.description.casefold()
+        and "com port" in port.description.casefold()
+    ]
+    if len(preferred_ports) == 1:
+        selected = preferred_ports[0]
+        print(
+            "Using default radar command UART: "
+            f"{selected.device} {selected.description}"
+        )
+        return selected.device
     if len(ports) == 1:
         return ports[0].device
     if ports:

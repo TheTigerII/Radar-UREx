@@ -78,6 +78,9 @@ class PyQtGraphDisplayTests(unittest.TestCase):
             axis = np.linspace(0.3, 20.0, 16, dtype=np.float32)
             display._render((axis, np.ones((64, 16), dtype=np.float32)))
             self.assertEqual(display.range_doppler_image.image.shape, (64, 16))
+            lookup_table = display.range_doppler_image.lut
+            self.assertEqual(lookup_table.shape[0], 256)
+            self.assertFalse(np.array_equal(lookup_table[0], lookup_table[-1]))
         finally:
             self._close(display)
 
@@ -109,6 +112,9 @@ class PyQtGraphDisplayTests(unittest.TestCase):
             )
             self.assertEqual(display.target_scatter.pos.shape, (1, 3))
             self.assertEqual(display.doppler_time_image.image.shape, (64, 36))
+            lookup_table = display.doppler_time_image.lut
+            self.assertEqual(lookup_table.shape[0], 256)
+            self.assertFalse(np.array_equal(lookup_table[0], lookup_table[-1]))
         finally:
             self._close(display)
 

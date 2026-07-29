@@ -65,9 +65,10 @@ class SpectrumFoldingTests(unittest.TestCase):
     def test_noise_only_score_remains_at_noise_level(self) -> None:
         spectra = np.ones((8, 64), dtype=np.float32)
 
-        scores, _sizes = spectrum_folding(spectra)
+        scores, sizes = spectrum_folding(spectra)
 
-        np.testing.assert_allclose(scores, 1.0)
+        np.testing.assert_allclose(scores, 32.0)
+        np.testing.assert_array_equal(sizes, np.full(8, 2))
 
 
 class BackgroundSubtractionTests(unittest.TestCase):
@@ -227,6 +228,38 @@ class CaponAngleTests(unittest.TestCase):
 
 
 class PmmTrackerStateTests(unittest.TestCase):
+    def test_searching_retains_history_without_claiming_noise_ownership(
+        self,
+    ) -> None:
+        config = _mini4_config()
+        tracker = PmmTracker(
+            config,
+            PmmConfig(
+                background_calibration_seconds=0.1,
+                detection_threshold=1_000_000.0,
+                provisional_frames=2,
+                confirmation_window_frames=2,
+                confirmation_hits=2,
+                coast_frames=2,
+                particle_count=100,
+            ),
+        )
+        range_axis = np.arange(MINI4_NUM_ADC_SAMPLES) * 0.07807095
+        background = np.ones((64, 3, 4, 256), dtype=np.complex64)
+        range_fft = np.ones((96, 4, 256), dtype=np.complex64)
+        tracker.update(background, range_fft, range_axis)
+
+        result = None
+        for _ in range(20):
+            result = tracker.update(background, range_fft, range_axis)
+
+        assert result is not None
+        self.assertEqual(result.state, "searching")
+        self.assertEqual(result.history_frames, 20)
+        self.assertEqual(tracker.spectrogram_db.shape, (64, 19))
+        self.assertFalse(tracker.range_filter.initialized)
+        self.assertIsNone(result.radial_velocity_m_s)
+
     def test_calibrates_then_confirms_and_coasts(self) -> None:
         config = _mini4_config()
         tracker = PmmTracker(

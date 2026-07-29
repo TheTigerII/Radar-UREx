@@ -732,12 +732,29 @@ class DisplayPayloadSink:
                 heatmap = compute_range_doppler_heatmap(range_fft, self.config)
                 payload = (range_axis[gate], heatmap[:, gate])
             else:
+                score_text = (
+                    "—"
+                    if result.pmm_score is None
+                    else f"{result.pmm_score:,.0f}"
+                )
+                range_text = (
+                    "—"
+                    if result.range_m is None
+                    else f"{result.range_m:.2f} m"
+                )
+                folding_text = (
+                    "—"
+                    if result.folding_size is None
+                    else str(result.folding_size)
+                )
                 point = PointCloudDisplayPayload(
                     target_track=_target_track(result),
                     tracking_status=(
-                        f"PMM target — {result.state}; calibration "
+                        f"PMM target — {result.state} | calibration "
                         f"{result.calibration_frames_seen}/"
-                        f"{result.calibration_frames_required}"
+                        f"{result.calibration_frames_required} | score "
+                        f"{score_text}/{result.threshold:,.0f} | range "
+                        f"{range_text} | fold {folding_text}"
                     ),
                 )
                 payload = (
@@ -967,7 +984,7 @@ class _PyQtGraphDisplay:
                 axisOrder="row-major"
             )
             self.range_doppler_image.setLookupTable(
-                self.pg.colormap.get("viridis").getLookupTable(256)
+                self.pg.colormap.get("viridis").getLookupTable(nPts=256)
             )
             plot.addItem(self.range_doppler_image)
             self.window.resize(1050, 650)
@@ -991,7 +1008,7 @@ class _PyQtGraphDisplay:
                 axisOrder="row-major"
             )
             self.doppler_time_image.setLookupTable(
-                self.pg.colormap.get("viridis").getLookupTable(256)
+                self.pg.colormap.get("viridis").getLookupTable(nPts=256)
             )
             doppler_plot.addItem(self.doppler_time_image)
             layout.addWidget(point_panel, 1)

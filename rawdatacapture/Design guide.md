@@ -54,8 +54,10 @@ metadata.
 ## PMM extraction and calibration
 
 For every range bin, the linear-magnitude Doppler spectrum is folded for
-integer sizes 2 through 20. The maximum score and its folding size are retained.
-The tracker keeps at most 36 frames (3.6 seconds at 10 Hz).
+integer sizes 2 through 20. Each folding column is summed without averaging so
+the score remains on the paper's raw folding scale. The maximum score and its
+folding size are retained. The tracker keeps at most 36 frames (3.6 seconds at
+10 Hz), including while it is searching.
 
 Startup requires 300 valid target-free frames by default. Their mean PMM
 spectrum becomes the background. Projection-based subtraction estimates the

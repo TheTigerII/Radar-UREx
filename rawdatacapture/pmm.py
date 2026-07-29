@@ -11,7 +11,7 @@ from scipy import fft as scipy_fft
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
-MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v1"
+MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v2"
 MINI4_NUM_ADC_SAMPLES = 256
 MINI4_NUM_RX_CHANNELS = 4
 MINI4_NUM_LOOPS = 32
@@ -229,10 +229,9 @@ def spectrum_folding(
             break
         columns = bin_indices % folding_size
         sums = np.zeros((flattened.shape[0], folding_size), dtype=np.float32)
-        row_count = int(np.ceil(flattened.shape[1] / folding_size))
         for column in range(folding_size):
             sums[:, column] = flattened[:, columns == column].sum(axis=1)
-        score = np.max(sums / float(row_count), axis=1)
+        score = np.max(sums, axis=1)
         improved = score > best_scores
         best_scores[improved] = score[improved]
         best_sizes[improved] = folding_size
@@ -662,6 +661,7 @@ class PmmTracker:
             "profile_fingerprint": mini4_profile_fingerprint(self.radar_config),
             "feature_fingerprint": feature_fingerprint,
             "doppler_fft_size": MINI4_DOPPLER_FFT_SIZE,
+            "folding_score": "maximum raw summed linear-magnitude column",
             "config": asdict(self.config),
         }
 
@@ -863,14 +863,26 @@ class PmmTracker:
             self.misses += 1
             if self.state == "confirmed":
                 self.state = "coasting"
-            if self.misses > self.config.coast_frames:
+            if (
+                self.state == "coasting"
+                and self.misses > self.config.coast_frames
+            ):
                 self.reset_tracking(lost=True)
                 self.latest_result = self._empty_result("lost")
                 return self.latest_result
+            if (
+                self.state == "tentative"
+                and len(self.evidence_history)
+                == self.config.confirmation_window_frames
+                and sum(self.evidence_history) < self.config.confirmation_hits
+            ):
+                self.state = "searching"
 
-        if not self.range_filter.initialized:
-            self.range_filter.initialize(measured_range_m)
-        filtered_range_m, radial_velocity_m_s = self.range_filter.estimate
+        if self.range_filter.initialized:
+            filtered_range_m, radial_velocity_m_s = self.range_filter.estimate
+        else:
+            filtered_range_m = measured_range_m
+            radial_velocity_m_s = None
 
         target_spectrum = magnitude[range_bin]
         self.doppler_history.append(target_spectrum.astype(np.float32))
