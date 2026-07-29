@@ -26,8 +26,8 @@ before the first run. On Linux:
 sudo apt-get install libxcb-cursor0
 python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install \
-  "numpy<2" scipy matplotlib pyserial "scikit-learn>=1.4,<2" \
-  "pyqtgraph>=0.13.7,<0.15" "PySide6>=6.7,<7"
+  "numpy<2" scipy pyserial "scikit-learn>=1.4,<2" \
+  "pyqtgraph>=0.13.7,<0.15" "PySide6>=6.7,<7" "PyOpenGL>=3.1.7"
 .venv/bin/python -m pip install \
   "openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94"
 ```
@@ -37,8 +37,8 @@ On Windows PowerShell:
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install `
-  'numpy<2' scipy matplotlib pyserial 'scikit-learn>=1.4,<2' `
-  'pyqtgraph>=0.13.7,<0.15' 'PySide6>=6.7,<7'
+  'numpy<2' scipy pyserial 'scikit-learn>=1.4,<2' `
+  'pyqtgraph>=0.13.7,<0.15' 'PySide6>=6.7,<7' 'PyOpenGL>=3.1.7'
 .venv\Scripts\python -m pip install `
   'openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94'
 ```
@@ -47,8 +47,8 @@ The version bounds and OpenRadar commit are intentional. Use the same commands
 when recreating an environment so range/Doppler behavior and saved model
 metadata remain reproducible.
 
-`libxcb-cursor0` is required for the PySide6 rotor window on an X11 desktop.
-Rotor mode checks this before capture and reports an installation command
+`libxcb-cursor0` is required for PySide6 windows on an X11 desktop.
+Display startup checks this before capture and reports an installation command
 instead of silently running Qt's invisible offscreen backend.
 The launcher also isolates the radar `--display micro-doppler` option from
 Qt's own X11 command-line parser.
@@ -103,9 +103,10 @@ Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
 local implementation for real-time performance. The IWR6843ISK-ODS planar-array
 coordinate mapping remains in the local DSP adapter because
 OpenRadar's supplied XYZ helper targets the AWR1843 virtual antenna layout.
-Range, range-Doppler, and 3D point-cloud displays use Matplotlib. The combined
-point-cloud/micro-Doppler mode shows both plots in one window. Dedicated rotor
-mode uses PyQtGraph with the PySide6 Qt binding.
+All live views use PyQtGraph with the PySide6 Qt binding. Range and
+range-Doppler views use native 2D plot/image items, 3D point clouds use
+PyQtGraph OpenGL, and combined mode places the OpenGL point cloud and
+micro-Doppler image in one window.
 
 ## Recommended: Integrated Run
 
@@ -346,12 +347,10 @@ After a selection gap, it starts fresh when the reacquired target is more than
 0.75 m from the previous target position or the gap exceeds 30 updates,
 preventing different objects from sharing one visible history.
 
-The plot titles show their measured refresh rate. On Matplotlib backends that
-support it, the combined view blits only the changing scatter, image, and title
-artists rather than redrawing the full 3D axes and colorbar for every frame.
-Both the micro-Doppler and 3D panels render every available display payload.
-The 3D collections disable depth shading so the fixed magnitude colors remain
-unchanged while reducing GUI rendering work.
+The plot titles or status labels show their measured refresh rate. PyQtGraph
+updates persistent curve, image, and OpenGL scatter items rather than rebuilding
+the full view for every frame. Both the micro-Doppler and 3D panels render every
+available display payload.
 
 ### Dedicated rotor micro-Doppler
 

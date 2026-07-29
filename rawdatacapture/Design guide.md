@@ -12,9 +12,9 @@ vectorized ordered-window implementation with cached training indices and
 scale factors. Raw DCA1000 decoding and the
 IWR6843ISK-ODS-specific planar antenna mapping remain local because OpenRadar's
 generic XYZ implementation assumes a different virtual antenna layout.
-Range, range-Doppler, point-cloud, and combined displays run with Matplotlib in
-the display child process. Dedicated rotor mode uses PyQtGraph/PySide6 in that
-same isolated display process.
+All live displays run with PyQtGraph/PySide6 in an isolated display process.
+Range and spectrogram modes use `PlotItem`/`ImageItem`; point-cloud modes use
+PyQtGraph's OpenGL view.
 
 ## Runtime Components
 
@@ -59,8 +59,7 @@ DCA1000 UDP packets (host 192.168.33.30, port 4098)
        run the fixed-shape TensorRT FP16 CNN on CUDA
        serialize processed JSONL in frame order
   -> RadarLiveDisplay process (when enabled)
-       update persistent Matplotlib artists for modes 1-5
-       or PyQtGraph image/curve items for dedicated rotor mode
+       update persistent PyQtGraph curve, image, or OpenGL scatter items
 ```
 
 Capture, processing, rotor post-processing, and display use bounded queues. The UDP receiver thread
@@ -76,8 +75,7 @@ results in favor of the newest one.
 - `RadarFrameProcessor`: frame conversion, DSP, logging, and optional raw write.
 - `RotorPostProcessor`: spawned CUDA/TensorRT inference and JSON serialization
   for classified dedicated-rotor capture.
-- `RadarLiveDisplay`: Matplotlib UI for modes 1-5 or PyQtGraph UI for rotor
-  mode.
+- `RadarLiveDisplay`: PyQtGraph UI for every display mode.
 - Packet queue: `--packet-queue-size`, default 8,192 datagrams.
 - Processing queue: `--processing-queue-size`, default 32 frames.
 - Rotor post-processing queue: the same 32-frame capacity by default.
@@ -289,19 +287,14 @@ updates and continues during uninterrupted motion regardless of displacement.
 A dynamic-to-static handoff also retains history. After a selection gap, a
 reacquired target beyond 0.75 m or a gap longer than 30 updates starts fresh
 history. An explicit static gate retains the centered zero-Doppler bin. The
-Matplotlib image uses a visible-spectrum `turbo` color map, running from dark
+PyQtGraph image uses a visible-spectrum `turbo` color map, running from dark
 blue at the fixed 60 dB minimum to red at the fixed 120 dB maximum rather than
-rescaling each history update. The combined layout uses one shared magnitude
-colorbar for both axes.
-The colorbar occupies a dedicated narrow grid column between the point cloud
-and micro-Doppler axes, with a spacer on its right so it does not crowd the
-spectrogram's Doppler-axis label. Both plot titles report measured updates per
-second. Supported Matplotlib backends use artist-level blitting for the dynamic
-scatters, spectrogram, and titles so the static 3D axes and colorbar do not
-require a full redraw every update. The combined display renders micro-Doppler
-and the 3D collections for every consumed payload. The 3D collections disable
-depth shading to avoid redundant color processing and preserve the shared
-magnitude scale.
+rescaling each history update. The point cloud uses the same fixed lookup
+table, and the spectrogram has a fixed magnitude colorbar. Status labels report
+measured updates per second. A Qt timer drains the latest-only queue and updates
+persistent image and OpenGL scatter items without rebuilding axes or layouts.
+The combined display renders micro-Doppler and the 3D collections for every
+consumed payload.
 
 ### Dedicated rotor micro-Doppler
 

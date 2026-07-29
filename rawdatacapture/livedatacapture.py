@@ -2544,19 +2544,29 @@ class RawFrameWriter:
 
 
 def _display_dependency_error(mode: str) -> Optional[str]:
-    if mode != ROTOR_DISPLAY_MODE:
+    if mode == "none":
         return None
     if importlib.util.find_spec("pyqtgraph") is None:
         return (
-            "Dedicated rotor display requires PyQtGraph. Install "
+            "Live display requires PyQtGraph. Install "
             "'pyqtgraph>=0.13.7,<0.15' and 'PySide6>=6.7,<7'."
         )
     qt_bindings = ("PySide6", "PyQt6", "PySide2", "PyQt5")
     if not any(importlib.util.find_spec(name) is not None for name in qt_bindings):
         return (
-            "Dedicated rotor display requires a Qt binding. Install "
+            "Live display requires a Qt binding. Install "
             "'PySide6>=6.7,<7'."
         )
+    if mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
+        try:
+            pyqtgraph_opengl = importlib.util.find_spec("pyqtgraph.opengl")
+        except (ImportError, ModuleNotFoundError):
+            pyqtgraph_opengl = None
+        if pyqtgraph_opengl is None or importlib.util.find_spec("OpenGL") is None:
+            return (
+                "3D live display requires PyQtGraph OpenGL support. Install "
+                "'PyOpenGL>=3.1.7'."
+            )
     if (
         sys.platform.startswith("linux")
         and os.environ.get("XDG_SESSION_TYPE", "").lower() == "x11"
@@ -2608,9 +2618,9 @@ def _report_display_startup(
         pass
 
 
-def _rotor_qt_application_arguments() -> list[str]:
+def _qt_application_arguments() -> list[str]:
     """Keep radar's --display option away from Qt's X11 argument parser."""
-    return ["radar-rotor-display"]
+    return ["radar-live-display"]
 
 
 def _run_rotor_pyqtgraph_display(
@@ -2638,7 +2648,7 @@ def _run_rotor_pyqtgraph_display(
     application = QtWidgets.QApplication.instance()
     if application is None:
         application = QtWidgets.QApplication(
-            _rotor_qt_application_arguments()
+            _qt_application_arguments()
         )
     application.setApplicationName("Radar Rotor Micro-Doppler")
     qt_platform = application.platformName().lower()
@@ -2981,581 +2991,372 @@ def _run_display_process(
         )
         return
 
+    _run_pyqtgraph_display(
+        mode,
+        pause_seconds,
+        max_range_m,
+        point_cloud_range_m,
+        point_cloud_fov_deg,
+        payload_queue,
+        stop_event,
+        rendered_updates,
+        skipped_updates,
+        startup_status_queue,
+    )
+
+
+def _run_pyqtgraph_display(
+    mode: str,
+    pause_seconds: float,
+    max_range_m: float,
+    point_cloud_range_m: float,
+    point_cloud_fov_deg: float,
+    payload_queue: mp.Queue,
+    stop_event: mp.Event,
+    rendered_updates: Any,
+    skipped_updates: Any,
+    startup_status_queue: mp.Queue,
+) -> None:
+    """Run range, heatmap, point-cloud, and combined PyQtGraph displays."""
+    preload_error = _preload_bundled_xcb_cursor_library()
+    if preload_error is not None:
+        print(f"Live display runtime warning: {preload_error}")
     try:
-        import matplotlib.pyplot as plt
-    except ImportError:
-        message = "Live display requires Matplotlib, but it is not installed."
+        import pyqtgraph as pg
+        from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
+        if mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
+            import pyqtgraph.opengl as gl
+        else:
+            gl = None
+    except (ImportError, RuntimeError) as exc:
+        message = f"Live display could not load PyQtGraph/Qt: {exc}"
         print(message)
         _report_display_startup(startup_status_queue, "error", message)
         return
 
-    plt.ion()
-    figure = plt.figure(
-        figsize=(12, 6)
-        if mode in {COMBINED_DISPLAY_MODE, ROTOR_DISPLAY_MODE}
-        else None
+    pg.setConfigOption("imageAxisOrder", "row-major")
+    application = QtWidgets.QApplication.instance()
+    if application is None:
+        application = QtWidgets.QApplication(_qt_application_arguments())
+    application.setApplicationName("Radar Live Display")
+    qt_platform = application.platformName().lower()
+    if qt_platform in {"offscreen", "minimal", "minimalegl"}:
+        message = (
+            "Live display cannot open a visible window: Qt selected the "
+            f"'{qt_platform}' platform. On Ubuntu/X11 install "
+            "'libxcb-cursor0'."
+        )
+        _report_display_startup(startup_status_queue, "error", message)
+        application.quit()
+        return
+
+    turbo_lut = _turbo_lookup_table()
+    turbo_colormap = pg.ColorMap(
+        np.linspace(0.0, 1.0, turbo_lut.shape[0]),
+        turbo_lut,
     )
-    micro_doppler_axis = None
-    rotor_flash_axis = None
-    magnitude_colorbar_axis = None
-    if mode == "point-cloud":
-        axis = figure.add_subplot(111, projection="3d")
-    elif mode == ROTOR_DISPLAY_MODE:
-        layout = figure.add_gridspec(
-            2,
-            1,
-            height_ratios=(3.0, 1.0),
-            hspace=0.12,
-        )
-        axis = figure.add_subplot(layout[0, 0])
-        rotor_flash_axis = figure.add_subplot(layout[1, 0], sharex=axis)
-    elif mode == COMBINED_DISPLAY_MODE:
-        layout = figure.add_gridspec(
-            1,
-            4,
-            width_ratios=(1.0, 0.04, 0.08, 1.0),
-            wspace=0.18,
-        )
-        axis = figure.add_subplot(layout[0, 0], projection="3d")
-        magnitude_colorbar_axis = figure.add_subplot(layout[0, 1])
-        micro_doppler_axis = figure.add_subplot(layout[0, 3])
-    else:
-        axis = figure.add_subplot(111)
-    line = None
-    image = None
+    window: Any
+    plot = None
+    curve = None
+    image_item = None
+    point_cloud_view = None
+    point_cloud_status = None
+    scatter_items: dict[str, Any] = {}
+    micro_doppler_plot = None
     micro_doppler_image = None
-    scatter = None
-    cluster_scatter = None
-    static_scatter = None
-    static_cluster_scatter = None
-    target_scatter = None
-    point_cloud_rate_text = None
-    static_reference_text = None
-    micro_doppler_rate_text = None
-    rotor_flash_line = None
-    rotor_status_text = None
+    micro_doppler_status = None
 
-    if mode == "range":
-        line = axis.plot([], [], lw=1.5)[0]
-        axis.set_title("Live Range Profile")
-        axis.set_xlabel("Range (m)")
-        axis.set_ylabel("Magnitude")
-        axis.grid(True, alpha=0.3)
-    elif mode == "range-doppler":
-        image = axis.imshow(
-            np.zeros((1, 1)),
-            aspect="auto",
-            origin="lower",
-            interpolation="nearest",
-            cmap=MAGNITUDE_COLORMAP,
+    if mode in {"range", "range-doppler"}:
+        window = pg.GraphicsLayoutWidget(
+            title="Live Radar Display",
+            show=False,
         )
-        figure.colorbar(image, ax=axis, label="Magnitude (dB)")
-        axis.set_title("Live Range-Doppler Heatmap")
-        axis.set_xlabel("Range (m)")
-        axis.set_ylabel("Doppler bin")
-    elif mode == ROTOR_DISPLAY_MODE:
-        rotor_colormap = plt.get_cmap(MAGNITUDE_COLORMAP).copy()
-        rotor_colormap.set_bad(color="0.35")
-        image = axis.imshow(
-            np.full((ROTOR_MICRO_DOPPLER_FFT_SIZE, 2), np.nan),
-            aspect="auto",
-            origin="lower",
-            interpolation="nearest",
-            cmap=rotor_colormap,
-            vmin=0.0,
-            vmax=ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX,
-            resample=False,
-            extent=(
-                -ROTOR_DISPLAY_HISTORY_SECONDS,
-                0.0,
-                -1.0,
-                1.0,
-            ),
-        )
-        figure.colorbar(
-            image,
-            ax=axis,
-            label="Relative power above robust floor (dB)",
-        )
-        axis.set_title("Live Rotor Micro-Doppler")
-        axis.set_ylabel("Radial velocity (m/s)")
-        axis.set_xlim(-ROTOR_DISPLAY_HISTORY_SECONDS, 0.0)
-        axis.tick_params(labelbottom=False)
-        assert rotor_flash_axis is not None
-        rotor_flash_line = rotor_flash_axis.plot(
-            [],
-            [],
-            lw=1.2,
-            color="tab:orange",
-        )[0]
-        rotor_flash_axis.set_xlabel(
-            "Active acquisition time relative to newest window (s)"
-        )
-        rotor_flash_axis.set_ylabel("Flash score (dB)")
-        rotor_flash_axis.set_xlim(-ROTOR_DISPLAY_HISTORY_SECONDS, 0.0)
-        rotor_flash_axis.set_ylim(0.0, ROTOR_MICRO_DOPPLER_RELATIVE_DB_MAX)
-        rotor_flash_axis.grid(True, alpha=0.25)
-        rotor_status_text = axis.text(
-            0.01,
-            0.98,
-            "RPM: collecting history...",
-            transform=axis.transAxes,
-            horizontalalignment="left",
-            verticalalignment="top",
-            bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
-        )
-    elif mode in {"point-cloud", COMBINED_DISPLAY_MODE}:
-        scatter = axis.scatter(
-            [],
-            [],
-            [],
-            c=[],
-            s=18,
-            cmap=MAGNITUDE_COLORMAP,
-            depthshade=False,
-        )
-        scatter.set_clim(POINT_CLOUD_MAGNITUDE_DB_MIN, POINT_CLOUD_MAGNITUDE_DB_MAX)
-        cluster_scatter = axis.scatter(
-            [],
-            [],
-            [],
-            c="red",
-            marker="x",
-            s=70,
-            linewidths=2,
-            label="Cluster centers",
-            depthshade=False,
-        )
-        static_scatter = axis.scatter(
-            [],
-            [],
-            [],
-            c="orange",
-            marker="s",
-            s=30,
-            edgecolors="black",
-            linewidths=0.4,
-            label="Static changes",
-            depthshade=False,
-        )
-        static_cluster_scatter = axis.scatter(
-            [],
-            [],
-            [],
-            c="cyan",
-            marker="D",
-            s=70,
-            edgecolors="black",
-            linewidths=0.8,
-            label="Static clusters",
-            depthshade=False,
-        )
-        target_scatter = axis.scatter(
-            [],
-            [],
-            [],
-            c="lime",
-            edgecolors="black",
-            marker="*",
-            s=180,
-            linewidths=0.8,
-            label="Tracked target",
-            depthshade=False,
-        )
-        axis.set_title(
-            "Live 3D Point Cloud "
-            f"(±{point_cloud_fov_deg:g}° FOV, {point_cloud_range_m:g} m)"
-        )
-        axis.set_xlabel("X left/right (m)")
-        axis.set_ylabel("Y forward (m)")
-        axis.set_zlabel("Z elevation (m)")
-        _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
-        axis.view_init(elev=24, azim=-60)
-        axis.grid(True, alpha=0.3)
-        axis.legend(loc="upper right")
-        point_cloud_rate_text = axis.text2D(
-            0.02,
-            0.98,
-            "",
-            transform=axis.transAxes,
-            horizontalalignment="left",
-            verticalalignment="top",
-            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
-        )
-        _set_rate_indicator(point_cloud_rate_text, None)
-        static_reference_text = axis.text2D(
-            0.02,
-            0.90,
-            "",
-            transform=axis.transAxes,
-            horizontalalignment="left",
-            verticalalignment="top",
-            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
-        )
-        if micro_doppler_axis is not None:
-            initial_micro_doppler = np.zeros(
-                (MICRO_DOPPLER_FFT_SIZE, MICRO_DOPPLER_HISTORY_UPDATES),
-                dtype=np.float32,
-            )
-            initial_micro_doppler_extent = _micro_doppler_extent(
-                *initial_micro_doppler.shape
-            )
-            micro_doppler_image = micro_doppler_axis.imshow(
-                initial_micro_doppler,
-                aspect="auto",
-                origin="lower",
-                interpolation="nearest",
-                cmap=MAGNITUDE_COLORMAP,
-                vmin=POINT_CLOUD_MAGNITUDE_DB_MIN,
-                vmax=POINT_CLOUD_MAGNITUDE_DB_MAX,
-                extent=initial_micro_doppler_extent,
-            )
-            micro_doppler_axis.set_xlim(*initial_micro_doppler_extent[:2])
-            micro_doppler_axis.set_ylim(*initial_micro_doppler_extent[2:])
-            micro_doppler_axis.set_title("Live Micro-Doppler Spectrogram")
-            micro_doppler_axis.set_xlabel("STFT windows (newest at 0)")
-            micro_doppler_axis.set_ylabel("Centered Doppler bin")
-            micro_doppler_rate_text = micro_doppler_axis.text(
-                0.02,
-                0.98,
-                "",
-                transform=micro_doppler_axis.transAxes,
-                horizontalalignment="left",
-                verticalalignment="top",
-                bbox={
-                    "facecolor": "white",
-                    "alpha": 0.75,
-                    "edgecolor": "none",
-                },
-            )
-            _set_rate_indicator(
-                micro_doppler_rate_text,
-                None,
-            )
-        if magnitude_colorbar_axis is not None:
-            figure.colorbar(
-                scatter,
-                cax=magnitude_colorbar_axis,
-                label="Magnitude (dB)",
-            )
+        plot = window.addPlot(row=0, col=0)
+        plot.showGrid(x=True, y=True, alpha=0.25)
+        plot.setMouseEnabled(x=False, y=False)
+        plot.hideButtons()
+        if mode == "range":
+            plot.setTitle("Live Range Profile")
+            plot.setLabel("bottom", "Range", units="m")
+            plot.setLabel("left", "Magnitude")
+            curve = plot.plot(pen=pg.mkPen("#4da3ff", width=2))
         else:
-            figure.colorbar(
-                scatter,
-                ax=axis,
+            plot.setTitle("Live Range-Doppler Heatmap")
+            plot.setLabel("bottom", "Range", units="m")
+            plot.setLabel("left", "Doppler bin")
+            image_item = pg.ImageItem(
+                np.zeros((1, 1), dtype=np.float32),
+                axisOrder="row-major",
+                autoDownsample=True,
+            )
+            plot.addItem(image_item)
+            plot.addColorBar(
+                image_item,
+                colorMap=turbo_colormap,
+                interactive=False,
+                colorMapMenu=False,
                 label="Magnitude (dB)",
-                pad=0.12,
             )
-    if mode in {COMBINED_DISPLAY_MODE, ROTOR_DISPLAY_MODE}:
-        figure.subplots_adjust(left=0.04, right=0.97, bottom=0.12, top=0.90)
     else:
-        figure.tight_layout()
-    plt.show(block=False)
-    _report_display_startup(
-        startup_status_queue,
-        "ready",
-        (
-            "Live display ready: "
-            f"backend=Matplotlib/{plt.get_backend()}, "
-            f"DISPLAY={os.environ.get('DISPLAY', '<unset>')}."
-        ),
-    )
+        assert gl is not None
+        window = QtWidgets.QWidget()
+        window.setWindowTitle("Live Radar Display")
+        outer_layout = QtWidgets.QHBoxLayout(window)
+        point_cloud_panel = QtWidgets.QWidget()
+        point_cloud_layout = QtWidgets.QVBoxLayout(point_cloud_panel)
+        point_cloud_status = QtWidgets.QLabel()
+        point_cloud_status.setWordWrap(True)
+        point_cloud_layout.addWidget(point_cloud_status)
+        point_cloud_view = gl.GLViewWidget()
+        point_cloud_layout.addWidget(point_cloud_view, 1)
+        outer_layout.addWidget(point_cloud_panel, 1)
 
-    dynamic_artists = []
-    if getattr(figure.canvas, "supports_blit", False) and mode in {
-        "point-cloud",
-        COMBINED_DISPLAY_MODE,
-        ROTOR_DISPLAY_MODE,
-    }:
-        if mode == ROTOR_DISPLAY_MODE:
-            dynamic_artists.extend(
-                artist
-                for artist in (
-                    image,
-                    rotor_flash_line,
-                    rotor_status_text,
-                )
-                if artist is not None
-            )
-        dynamic_artists.extend(
-            artist
-            for artist in (
-                scatter,
-                cluster_scatter,
-                static_scatter,
-                static_cluster_scatter,
-                target_scatter,
-                point_cloud_rate_text,
-                static_reference_text,
-            )
-            if artist is not None
+        cross_range_m = _point_cloud_cross_range_limit(
+            point_cloud_range_m,
+            point_cloud_fov_deg,
         )
-        if micro_doppler_axis is not None and micro_doppler_image is not None:
-            dynamic_artists.extend(
-                artist
-                for artist in (
-                    micro_doppler_image,
-                    micro_doppler_rate_text,
-                )
-                if artist is not None
-            )
-        for artist in dynamic_artists:
-            artist.set_animated(True)
-    figure.canvas.draw()
-    dynamic_axes = tuple(
-        dict.fromkeys(
-            artist.axes for artist in dynamic_artists if artist.axes is not None
+        ground_grid = gl.GLGridItem()
+        ground_grid.setSize(
+            x=2.0 * cross_range_m,
+            y=point_cloud_range_m,
+            z=1.0,
         )
-    )
-    display_backgrounds = {
-        dynamic_axis: figure.canvas.copy_from_bbox(dynamic_axis.bbox)
-        for dynamic_axis in dynamic_axes
-    }
-
-    def draw_dynamic_artists(
-        axes_to_draw: Optional[tuple[Any, ...]] = None,
-    ) -> None:
-        for artist in dynamic_artists:
-            if not artist.get_visible():
-                continue
-            if axes_to_draw is not None and artist.axes not in axes_to_draw:
-                continue
-            if hasattr(artist, "do_3d_projection"):
-                artist.do_3d_projection()
-            artist.axes.draw_artist(artist)
-
-    def blit_dynamic_axes(
-        axes_to_blit: Optional[tuple[Any, ...]] = None,
-    ) -> None:
-        for dynamic_axis in axes_to_blit or dynamic_axes:
-            figure.canvas.blit(dynamic_axis.bbox)
-
-    def invalidate_display_background(_event: Any) -> None:
-        display_backgrounds.clear()
-
-    def restore_dynamic_artists_after_draw(_event: Any) -> None:
-        """Keep animated artists visible after a GUI backend performs a redraw."""
-        if not dynamic_artists:
-            return
-        display_backgrounds.clear()
-        display_backgrounds.update(
-            (
-                dynamic_axis,
-                figure.canvas.copy_from_bbox(dynamic_axis.bbox),
-            )
-            for dynamic_axis in dynamic_axes
+        ground_grid.setSpacing(x=1.0, y=1.0, z=1.0)
+        ground_grid.translate(0.0, point_cloud_range_m / 2.0, 0.0)
+        point_cloud_view.addItem(ground_grid)
+        axis_item = gl.GLAxisItem()
+        axis_item.setSize(
+            x=cross_range_m,
+            y=point_cloud_range_m,
+            z=cross_range_m,
         )
-        draw_dynamic_artists()
-        blit_dynamic_axes()
+        point_cloud_view.addItem(axis_item)
+        point_cloud_view.setCameraPosition(
+            pos=QtGui.QVector3D(0.0, point_cloud_range_m / 2.0, 0.0),
+            distance=max(point_cloud_range_m * 2.2, 5.0),
+            elevation=24.0,
+            azimuth=-60.0,
+        )
+        point_cloud_view.setBackgroundColor("#101418")
+        for name, color, size in (
+            ("points", (1.0, 1.0, 1.0, 1.0), 5.0),
+            ("clusters", (1.0, 0.15, 0.15, 1.0), 10.0),
+            ("static_points", (1.0, 0.55, 0.05, 0.9), 7.0),
+            ("static_clusters", (0.0, 0.9, 0.9, 1.0), 10.0),
+            ("target", (0.3, 1.0, 0.2, 1.0), 16.0),
+        ):
+            item = gl.GLScatterPlotItem(
+                pos=np.empty((0, 3), dtype=np.float32),
+                color=color,
+                size=size,
+                pxMode=True,
+            )
+            point_cloud_view.addItem(item)
+            scatter_items[name] = item
 
-    figure.canvas.mpl_connect("resize_event", invalidate_display_background)
-    figure.canvas.mpl_connect("draw_event", restore_dynamic_artists_after_draw)
+        if mode == COMBINED_DISPLAY_MODE:
+            graph_panel = pg.GraphicsLayoutWidget(show=False)
+            micro_doppler_status = graph_panel.addLabel(
+                "Refresh rate: measuring...",
+                row=0,
+                col=0,
+                justify="left",
+            )
+            micro_doppler_plot = graph_panel.addPlot(row=1, col=0)
+            micro_doppler_plot.setTitle("Live Micro-Doppler Spectrogram")
+            micro_doppler_plot.setLabel(
+                "bottom",
+                "STFT windows (newest at 0)",
+            )
+            micro_doppler_plot.setLabel("left", "Centered Doppler bin")
+            micro_doppler_plot.setMouseEnabled(x=False, y=False)
+            micro_doppler_plot.hideButtons()
+            micro_doppler_image = pg.ImageItem(
+                np.zeros(
+                    (MICRO_DOPPLER_FFT_SIZE, MICRO_DOPPLER_HISTORY_UPDATES),
+                    dtype=np.float32,
+                ),
+                axisOrder="row-major",
+                levels=(
+                    POINT_CLOUD_MAGNITUDE_DB_MIN,
+                    POINT_CLOUD_MAGNITUDE_DB_MAX,
+                ),
+                autoDownsample=True,
+            )
+            micro_doppler_plot.addItem(micro_doppler_image)
+            micro_doppler_plot.addColorBar(
+                micro_doppler_image,
+                colorMap=turbo_colormap,
+                values=(
+                    POINT_CLOUD_MAGNITUDE_DB_MIN,
+                    POINT_CLOUD_MAGNITUDE_DB_MAX,
+                ),
+                interactive=False,
+                colorMapMenu=False,
+                label="Magnitude (dB)",
+            )
+            outer_layout.addWidget(graph_panel, 1)
+
+    window.resize(1200 if mode == COMBINED_DISPLAY_MODE else 900, 700)
     display_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
     display_refresh_rate_hz: Optional[float] = None
     point_cloud_rate_events: deque[tuple[float, float]] = deque(maxlen=120)
     point_cloud_refresh_rate_hz: Optional[float] = None
     combined_update_count = 0
-    rotor_axes_initialized = False
+    timer = QtCore.QTimer()
 
-    try:
-        while not stop_event.is_set():
-            refreshed_payload = False
-            point_cloud_refreshed = False
-            axes_to_refresh = dynamic_axes
+    def poll_latest_payload() -> None:
+        nonlocal display_refresh_rate_hz
+        nonlocal point_cloud_refresh_rate_hz
+        nonlocal combined_update_count
+        if stop_event.is_set():
+            timer.stop()
+            window.close()
+            application.quit()
+            return
+        try:
+            payload = payload_queue.get_nowait()
+        except queue.Empty:
+            return
+        stale_payloads = 0
+        while True:
             try:
-                payload = payload_queue.get(timeout=pause_seconds)
-                stale_payloads = 0
-                while True:
-                    try:
-                        payload = payload_queue.get_nowait()
-                        stale_payloads += 1
-                    except queue.Empty:
-                        break
-                _increment_shared_counter(skipped_updates, stale_payloads)
+                payload = payload_queue.get_nowait()
+                stale_payloads += 1
+            except queue.Empty:
+                break
+        _increment_shared_counter(skipped_updates, stale_payloads)
 
-                if mode == "range" and line is not None:
-                    range_axis_m, range_profile = payload
-                    _draw_range_profile(
-                        axis,
-                        line,
-                        range_axis_m,
-                        range_profile,
-                        max_range_m,
-                        display_refresh_rate_hz,
-                    )
-                elif mode == "range-doppler" and image is not None:
-                    range_axis_m, heatmap = payload
-                    _draw_range_doppler(
-                        axis,
-                        image,
-                        range_axis_m,
-                        heatmap,
-                        max_range_m,
-                        display_refresh_rate_hz,
-                    )
-                elif (
-                    mode == ROTOR_DISPLAY_MODE
-                    and image is not None
-                    and rotor_flash_axis is not None
-                    and rotor_flash_line is not None
-                    and rotor_status_text is not None
-                ):
-                    rotor_payload = payload
-                    _draw_rotor_micro_doppler(
-                        axis,
-                        image,
-                        rotor_flash_axis,
-                        rotor_flash_line,
-                        rotor_status_text,
-                        rotor_payload.result,
-                    )
-                elif (
-                    mode == "point-cloud"
-                    and scatter is not None
-                    and cluster_scatter is not None
-                    and static_scatter is not None
-                    and static_cluster_scatter is not None
-                    and target_scatter is not None
-                ):
-                    point_cloud = payload
-                    if point_cloud_rate_text is not None:
-                        _set_rate_indicator(
-                            point_cloud_rate_text,
-                            display_refresh_rate_hz,
-                        )
-                    _draw_point_cloud(
-                        axis,
-                        scatter,
-                        cluster_scatter,
-                        point_cloud.points,
-                        point_cloud.clusters,
+        point_cloud_refreshed = False
+        try:
+            if mode == "range" and plot is not None and curve is not None:
+                range_values, range_profile = payload
+                _draw_range_profile(
+                    plot,
+                    curve,
+                    range_values,
+                    range_profile,
+                    max_range_m,
+                    display_refresh_rate_hz,
+                )
+            elif (
+                mode == "range-doppler"
+                and plot is not None
+                and image_item is not None
+            ):
+                range_values, heatmap = payload
+                _draw_range_doppler(
+                    plot,
+                    image_item,
+                    range_values,
+                    heatmap,
+                    max_range_m,
+                    display_refresh_rate_hz,
+                )
+            elif mode == "point-cloud":
+                _draw_point_cloud_pyqtgraph(
+                    scatter_items,
+                    point_cloud_status,
+                    payload,
+                    point_cloud_range_m,
+                    point_cloud_fov_deg,
+                    display_refresh_rate_hz,
+                    turbo_lut,
+                )
+                point_cloud_refreshed = True
+            elif (
+                mode == COMBINED_DISPLAY_MODE
+                and micro_doppler_plot is not None
+                and micro_doppler_image is not None
+            ):
+                combined_update_count += 1
+                point_cloud_refreshed = _combined_point_cloud_update_due(
+                    combined_update_count
+                )
+                if point_cloud_refreshed:
+                    _draw_point_cloud_pyqtgraph(
+                        scatter_items,
+                        point_cloud_status,
+                        payload.point_cloud,
                         point_cloud_range_m,
                         point_cloud_fov_deg,
-                        target_scatter,
-                        point_cloud.target_track,
-                        static_scatter=static_scatter,
-                        static_cluster_scatter=static_cluster_scatter,
-                        static_points=point_cloud.static_points,
-                        static_clusters=point_cloud.static_clusters,
-                        static_reference_text=static_reference_text,
-                        static_reference=point_cloud.static_reference,
-                        target_source=point_cloud.target_source,
-                        update_static_artists=False,
+                        point_cloud_refresh_rate_hz,
+                        turbo_lut,
                     )
-                    point_cloud_refreshed = True
-                elif (
-                    mode == COMBINED_DISPLAY_MODE
-                    and scatter is not None
-                    and cluster_scatter is not None
-                    and static_scatter is not None
-                    and static_cluster_scatter is not None
-                    and target_scatter is not None
-                    and micro_doppler_axis is not None
-                    and micro_doppler_image is not None
-                ):
-                    combined = payload
-                    point_cloud = combined.point_cloud
-                    combined_update_count += 1
-                    point_cloud_refreshed = (
-                        _combined_point_cloud_update_due(combined_update_count)
-                    )
-                    if point_cloud_refreshed:
-                        if point_cloud_rate_text is not None:
-                            _set_rate_indicator(
-                                point_cloud_rate_text,
-                                point_cloud_refresh_rate_hz,
-                            )
-                        _draw_point_cloud(
-                            axis,
-                            scatter,
-                            cluster_scatter,
-                            point_cloud.points,
-                            point_cloud.clusters,
-                            point_cloud_range_m,
-                            point_cloud_fov_deg,
-                            target_scatter,
-                            point_cloud.target_track,
-                            static_scatter=static_scatter,
-                            static_cluster_scatter=static_cluster_scatter,
-                            static_points=point_cloud.static_points,
-                            static_clusters=point_cloud.static_clusters,
-                            static_reference_text=static_reference_text,
-                            static_reference=point_cloud.static_reference,
-                            target_source=point_cloud.target_source,
-                            update_static_artists=False,
-                        )
-                    else:
-                        axes_to_refresh = (micro_doppler_axis,)
-                    if micro_doppler_rate_text is not None:
-                        _set_rate_indicator(
-                            micro_doppler_rate_text,
-                            display_refresh_rate_hz,
-                            range_gate_m=combined.selected_range_m,
-                        )
-                    _draw_micro_doppler(
-                        micro_doppler_axis,
-                        micro_doppler_image,
-                        combined.spectrogram_db,
-                        combined.selected_range_m,
-                        update_axes=False,
-                        update_title=False,
-                    )
-                if dynamic_artists:
-                    if mode == ROTOR_DISPLAY_MODE and not rotor_axes_initialized:
-                        # The first payload supplies the physical velocity
-                        # limits. Refresh the static ticks/background once,
-                        # then use fast artist-only blitting.
-                        figure.canvas.draw()
-                        rotor_axes_initialized = True
-                    if len(display_backgrounds) != len(dynamic_axes):
-                        figure.canvas.draw()
-                    if len(display_backgrounds) != len(dynamic_axes):
-                        display_backgrounds.update(
-                            (
-                                dynamic_axis,
-                                figure.canvas.copy_from_bbox(dynamic_axis.bbox),
-                            )
-                            for dynamic_axis in dynamic_axes
-                        )
-                    for dynamic_axis in axes_to_refresh:
-                        figure.canvas.restore_region(
-                            display_backgrounds[dynamic_axis]
-                        )
-                    draw_dynamic_artists(axes_to_refresh)
-                    blit_dynamic_axes(axes_to_refresh)
-                    figure.canvas.flush_events()
-                    figure.stale = False
-                else:
-                    figure.canvas.draw()
-
-                refreshed_at_s = time.perf_counter()
-                display_refresh_rate_hz = _record_event_rate(
-                    display_rate_events,
+                _set_rate_indicator(
+                    micro_doppler_status,
+                    display_refresh_rate_hz,
+                    range_gate_m=payload.selected_range_m,
+                )
+                _draw_micro_doppler(
+                    micro_doppler_plot,
+                    micro_doppler_image,
+                    payload.spectrogram_db,
+                    payload.selected_range_m,
+                    update_axes=True,
+                    update_title=False,
+                )
+            refreshed_at_s = time.perf_counter()
+            display_refresh_rate_hz = _record_event_rate(
+                display_rate_events,
+                refreshed_at_s,
+                1.0,
+            )
+            if point_cloud_refreshed:
+                point_cloud_refresh_rate_hz = _record_event_rate(
+                    point_cloud_rate_events,
                     refreshed_at_s,
                     1.0,
                 )
-                if point_cloud_refreshed:
-                    point_cloud_refresh_rate_hz = _record_event_rate(
-                        point_cloud_rate_events,
-                        refreshed_at_s,
-                        1.0,
-                    )
-                _increment_shared_counter(rendered_updates)
-                refreshed_payload = True
-            except queue.Empty:
-                pass
-            except KeyboardInterrupt:
-                break
+            _increment_shared_counter(rendered_updates)
+        except Exception as exc:
+            print(f"PyQtGraph display update failed: {exc}")
+            timer.stop()
+            window.close()
+            application.quit()
 
-            try:
-                if dynamic_artists:
-                    if not refreshed_payload:
-                        figure.canvas.flush_events()
-                else:
-                    plt.pause(pause_seconds)
-            except KeyboardInterrupt:
-                break
+    timer.timeout.connect(poll_latest_payload)
+    timer.start(max(1, int(round(max(pause_seconds, 0.001) * 1000.0))))
+    primary_screen = application.primaryScreen()
+    if primary_screen is not None:
+        window.move(
+            primary_screen.availableGeometry().center()
+            - window.rect().center()
+        )
+    window.showNormal()
+    window.raise_()
+    window.activateWindow()
+    application.processEvents()
+    if not window.isVisible():
+        message = "Live display window was created but is not visible."
+        _report_display_startup(startup_status_queue, "error", message)
+        timer.stop()
+        window.close()
+        application.quit()
+        return
+    screen_name = (
+        window.screen().name()
+        if window.screen() is not None
+        else "unknown"
+    )
+    geometry = window.geometry()
+    _report_display_startup(
+        startup_status_queue,
+        "ready",
+        (
+            "Live display ready: "
+            f"backend=PyQtGraph/{qt_platform}, "
+            f"DISPLAY={os.environ.get('DISPLAY', '<unset>')}, "
+            f"screen={screen_name}, "
+            f"geometry={geometry.width()}x{geometry.height()}"
+            f"+{geometry.x()}+{geometry.y()}."
+        ),
+    )
+    try:
+        application.exec()
     finally:
-        plt.close(figure)
+        timer.stop()
+        window.close()
 
 
 def _record_event_rate(
@@ -3599,28 +3400,35 @@ def _set_rate_indicator(
         f"Gate: {range_gate_m:.2f} m\n" if range_gate_m is not None else ""
     )
     text += f"Refresh rate: {display_rate_text}"
-    artist.set_text(text)
+    if hasattr(artist, "setText"):
+        artist.setText(text)
+    else:
+        artist.set_text(text)
 
 
 def _draw_range_profile(
-    axis: Any,
-    line: Any,
+    plot: Any,
+    curve: Any,
     range_axis_m: Optional[np.ndarray],
     range_profile: np.ndarray,
     max_range_m: float,
     update_rate_hz: Optional[float] = None,
 ) -> None:
     x_axis = _range_plot_axis(range_axis_m, range_profile.size)
-    line.set_data(x_axis, range_profile)
-    axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
+    curve.setData(x_axis, range_profile)
+    plot.setXRange(
+        float(x_axis[0]),
+        _range_plot_xmax(x_axis, max_range_m),
+        padding=0.0,
+    )
     profile_max = float(np.max(range_profile)) if range_profile.size else 1.0
-    axis.set_ylim(0, max(profile_max * 1.1, 1.0))
+    plot.setYRange(0.0, max(profile_max * 1.1, 1.0), padding=0.0)
     rate_text = f" — {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
-    axis.set_title(f"Live Range Profile{rate_text}")
+    plot.setTitle(f"Live Range Profile{rate_text}")
 
 
 def _draw_range_doppler(
-    axis: Any,
+    plot: Any,
     image: Any,
     range_axis_m: Optional[np.ndarray],
     heatmap: np.ndarray,
@@ -3628,17 +3436,33 @@ def _draw_range_doppler(
     update_rate_hz: Optional[float] = None,
 ) -> None:
     x_axis = _range_plot_axis(range_axis_m, heatmap.shape[1])
-    image.set_data(heatmap)
-    image.set_extent((float(x_axis[0]), float(x_axis[-1]), 0, heatmap.shape[0] - 1))
-    image.set_clim(float(np.min(heatmap)), float(np.max(heatmap)))
-    axis.set_xlim(float(x_axis[0]), _range_plot_xmax(x_axis, max_range_m))
-    axis.set_ylim(0, max(heatmap.shape[0] - 1, 1))
+    minimum = float(np.min(heatmap))
+    maximum = float(np.max(heatmap))
+    if maximum <= minimum:
+        maximum = minimum + 1.0
+    image.setImage(
+        np.ascontiguousarray(heatmap),
+        autoLevels=False,
+        levels=(minimum, maximum),
+    )
+    image.setRect(
+        float(x_axis[0]),
+        0.0,
+        max(float(x_axis[-1] - x_axis[0]), 1e-6),
+        float(max(heatmap.shape[0] - 1, 1)),
+    )
+    plot.setXRange(
+        float(x_axis[0]),
+        _range_plot_xmax(x_axis, max_range_m),
+        padding=0.0,
+    )
+    plot.setYRange(0.0, float(max(heatmap.shape[0] - 1, 1)), padding=0.0)
     rate_text = f" — {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
-    axis.set_title(f"Live Range-Doppler Heatmap{rate_text}")
+    plot.setTitle(f"Live Range-Doppler Heatmap{rate_text}")
 
 
 def _draw_micro_doppler(
-    axis: Any,
+    plot: Any,
     image: Any,
     spectrogram_db: np.ndarray,
     selected_range_m: Optional[float],
@@ -3659,15 +3483,29 @@ def _draw_micro_doppler(
             dtype=np.float32,
         )
         display_data[:, -spectrogram_db.shape[1] :] = spectrogram_db
-    image.set_data(display_data)
-    if update_axes:
-        image.set_extent(extent)
-        image.set_clim(
+    image.setImage(
+        np.ascontiguousarray(display_data),
+        autoLevels=False,
+        levels=(
             POINT_CLOUD_MAGNITUDE_DB_MIN,
             POINT_CLOUD_MAGNITUDE_DB_MAX,
+        ),
+    )
+    if update_axes:
+        image.setRect(
+            float(extent[0]),
+            float(extent[2]),
+            float(extent[1] - extent[0]),
+            float(extent[3] - extent[2]),
         )
-        axis.set_xlim(*extent[:2])
-        axis.set_ylim(*extent[2:])
+        image.setLevels(
+            (
+                POINT_CLOUD_MAGNITUDE_DB_MIN,
+                POINT_CLOUD_MAGNITUDE_DB_MAX,
+            )
+        )
+        plot.setXRange(*extent[:2], padding=0.0)
+        plot.setYRange(*extent[2:], padding=0.0)
     if update_title:
         range_text = (
             f" — gate {selected_range_m:.2f} m"
@@ -3679,40 +3517,7 @@ def _draw_micro_doppler(
             if display_update_rate_hz is not None
             else ""
         )
-        axis.set_title(f"Live Micro-Doppler Spectrogram{range_text}{rate_text}")
-
-
-def _draw_rotor_micro_doppler(
-    axis: Any,
-    image: Any,
-    flash_axis: Any,
-    flash_line: Any,
-    status_text: Any,
-    result: MicroDopplerResult,
-) -> None:
-    display_frame = _prepare_rotor_display_frame(result)
-    if display_frame is None:
-        return
-
-    velocity_min = display_frame.extent[2]
-    velocity_max = display_frame.extent[3]
-    image.set_data(display_frame.spectrogram_db)
-    image.set_extent(display_frame.extent)
-    try:
-        velocity_limits_match = np.allclose(
-            axis.get_ylim(),
-            (velocity_min, velocity_max),
-        )
-    except (TypeError, ValueError):
-        velocity_limits_match = False
-    if not velocity_limits_match:
-        axis.set_ylim(velocity_min, velocity_max)
-
-    flash_line.set_data(
-        display_frame.flash_times_s,
-        display_frame.flash_scores_db,
-    )
-    status_text.set_text(display_frame.status_text)
+        plot.setTitle(f"Live Micro-Doppler Spectrogram{range_text}{rate_text}")
 
 
 def _prepare_rotor_display_frame(
@@ -3938,146 +3743,149 @@ def _micro_doppler_extent(
     )
 
 
-def _draw_point_cloud(
-    axis: Any,
-    scatter: Any,
-    cluster_scatter: Any,
-    points: np.ndarray,
-    clusters: np.ndarray,
+def _point_cloud_cross_range_limit(
     point_cloud_range_m: float,
     point_cloud_fov_deg: float,
-    target_scatter: Optional[Any] = None,
-    target_track: Optional[TargetTrack] = None,
-    update_rate_hz: Optional[float] = None,
-    *,
-    static_scatter: Optional[Any] = None,
-    static_cluster_scatter: Optional[Any] = None,
-    static_points: Optional[np.ndarray] = None,
-    static_clusters: Optional[np.ndarray] = None,
-    static_reference_text: Optional[Any] = None,
-    static_reference: Optional[StaticReferenceStatus] = None,
-    target_source: Optional[str] = None,
-    update_static_artists: bool = True,
-) -> None:
-    empty = np.array([], dtype=np.float32)
-    scatter.set_visible(bool(points.size))
-    if points.size == 0:
-        scatter._offsets3d = (empty, empty, empty)
-        scatter.set_array(empty)
-    else:
-        scatter._offsets3d = (points[:, 0], points[:, 1], points[:, 2])
-        scatter.set_array(points[:, 3])
-        if update_static_artists:
-            scatter.set_clim(
-                POINT_CLOUD_MAGNITUDE_DB_MIN,
-                POINT_CLOUD_MAGNITUDE_DB_MAX,
-            )
-
-    cluster_scatter.set_visible(bool(clusters.size))
-    if clusters.size == 0:
-        cluster_scatter._offsets3d = (empty, empty, empty)
-        cluster_scatter.set_sizes(empty)
-    else:
-        cluster_scatter._offsets3d = (
-            clusters[:, 0],
-            clusters[:, 1],
-            clusters[:, 2],
-        )
-        cluster_scatter.set_sizes(
-            np.clip(40.0 + (clusters[:, 3] * 10.0), 50.0, 180.0)
-        )
-
-    if static_scatter is not None:
-        visible_static_points = (
-            np.asarray(static_points)
-            if static_points is not None
-            else np.empty((0, 5), dtype=np.float32)
-        )
-        static_scatter.set_visible(bool(visible_static_points.size))
-        if visible_static_points.size == 0:
-            static_scatter._offsets3d = (empty, empty, empty)
-        else:
-            static_scatter._offsets3d = (
-                visible_static_points[:, 0],
-                visible_static_points[:, 1],
-                visible_static_points[:, 2],
-            )
-
-    if static_cluster_scatter is not None:
-        visible_static_clusters = (
-            np.asarray(static_clusters)
-            if static_clusters is not None
-            else np.empty((0, 4), dtype=np.float32)
-        )
-        static_cluster_scatter.set_visible(bool(visible_static_clusters.size))
-        if visible_static_clusters.size == 0:
-            static_cluster_scatter._offsets3d = (empty, empty, empty)
-            static_cluster_scatter.set_sizes(empty)
-        else:
-            static_cluster_scatter._offsets3d = (
-                visible_static_clusters[:, 0],
-                visible_static_clusters[:, 1],
-                visible_static_clusters[:, 2],
-            )
-            static_cluster_scatter.set_sizes(
-                np.clip(
-                    45.0 + (visible_static_clusters[:, 3] * 10.0),
-                    55.0,
-                    190.0,
-                )
-            )
-
-    if target_scatter is not None:
-        target_scatter.set_visible(target_track is not None)
-        if target_track is None:
-            target_scatter._offsets3d = (empty, empty, empty)
-            target_scatter.set_sizes(empty)
-        else:
-            target_position = np.asarray(target_track.position_m, dtype=np.float32)
-            target_scatter._offsets3d = (
-                target_position[0:1],
-                target_position[1:2],
-                target_position[2:3],
-            )
-            target_scatter.set_sizes(
-                np.asarray((120.0 if target_track.is_predicted else 180.0,))
-            )
-            target_scatter.set_alpha(0.4 if target_track.is_predicted else 1.0)
-            target_scatter.set_facecolor(
-                "orange" if target_source == "static" else "lime"
-            )
-
-    if static_reference_text is not None:
-        static_reference_text.set_text(
-            static_reference.label if static_reference is not None else ""
-        )
-
-    if update_static_artists:
-        _set_point_cloud_axes(axis, point_cloud_range_m, point_cloud_fov_deg)
-        rate_text = (
-            f", {update_rate_hz:.1f} Hz" if update_rate_hz is not None else ""
-        )
-        axis.set_title(
-            "Live 3D Point Cloud "
-            f"(±{point_cloud_fov_deg:g}° FOV, "
-            f"{point_cloud_range_m:g} m{rate_text})"
-        )
-
-
-def _set_point_cloud_axes(
-    axis: Any,
-    point_cloud_range_m: float,
-    point_cloud_fov_deg: float,
-) -> None:
+) -> float:
     range_limit_m = max(float(point_cloud_range_m), 1.0)
     fov_deg = min(max(float(point_cloud_fov_deg), 0.0), 90.0)
-    cross_range_limit_m = max(range_limit_m * np.sin(np.deg2rad(fov_deg)), 0.5)
-    axis.set_xlim(-cross_range_limit_m, cross_range_limit_m)
-    axis.set_ylim(0.0, range_limit_m)
-    axis.set_zlim(-cross_range_limit_m, cross_range_limit_m)
-    axis.set_box_aspect(
-        (2.0 * cross_range_limit_m, range_limit_m, 2.0 * cross_range_limit_m)
+    return max(
+        range_limit_m * np.sin(np.deg2rad(fov_deg)),
+        0.5,
     )
+
+
+def _set_gl_scatter_data(
+    item: Any,
+    positions: np.ndarray,
+    colors: np.ndarray | tuple[float, float, float, float],
+    sizes: np.ndarray | float,
+) -> None:
+    item.setData(
+        pos=np.ascontiguousarray(positions, dtype=np.float32).reshape((-1, 3)),
+        color=colors,
+        size=sizes,
+        pxMode=True,
+    )
+
+
+def _magnitude_colors(
+    magnitudes_db: np.ndarray,
+    lookup_table: np.ndarray,
+) -> np.ndarray:
+    normalized = np.clip(
+        (
+            np.asarray(magnitudes_db, dtype=np.float32)
+            - POINT_CLOUD_MAGNITUDE_DB_MIN
+        )
+        / (POINT_CLOUD_MAGNITUDE_DB_MAX - POINT_CLOUD_MAGNITUDE_DB_MIN),
+        0.0,
+        1.0,
+    )
+    indices = np.rint(normalized * (lookup_table.shape[0] - 1)).astype(np.intp)
+    colors = np.empty((indices.size, 4), dtype=np.float32)
+    colors[:, :3] = lookup_table[indices].astype(np.float32) / 255.0
+    colors[:, 3] = 1.0
+    return colors
+
+
+def _draw_point_cloud_pyqtgraph(
+    scatter_items: dict[str, Any],
+    status_label: Any,
+    point_cloud: PointCloudDisplayPayload,
+    point_cloud_range_m: float,
+    point_cloud_fov_deg: float,
+    update_rate_hz: Optional[float],
+    lookup_table: np.ndarray,
+) -> None:
+    empty = np.empty((0, 3), dtype=np.float32)
+    points = np.asarray(point_cloud.points)
+    if points.size:
+        _set_gl_scatter_data(
+            scatter_items["points"],
+            points[:, :3],
+            _magnitude_colors(points[:, 3], lookup_table),
+            5.0,
+        )
+    else:
+        _set_gl_scatter_data(
+            scatter_items["points"],
+            empty,
+            np.empty((0, 4), dtype=np.float32),
+            5.0,
+        )
+
+    clusters = np.asarray(point_cloud.clusters)
+    _set_gl_scatter_data(
+        scatter_items["clusters"],
+        clusters[:, :3] if clusters.size else empty,
+        (1.0, 0.15, 0.15, 1.0),
+        (
+            np.clip(7.0 + clusters[:, 3] * 1.5, 8.0, 18.0)
+            if clusters.size
+            else 10.0
+        ),
+    )
+    static_points = np.asarray(point_cloud.static_points)
+    _set_gl_scatter_data(
+        scatter_items["static_points"],
+        static_points[:, :3] if static_points.size else empty,
+        (1.0, 0.55, 0.05, 0.9),
+        7.0,
+    )
+    static_clusters = np.asarray(point_cloud.static_clusters)
+    _set_gl_scatter_data(
+        scatter_items["static_clusters"],
+        static_clusters[:, :3] if static_clusters.size else empty,
+        (0.0, 0.9, 0.9, 1.0),
+        (
+            np.clip(8.0 + static_clusters[:, 3] * 1.5, 9.0, 19.0)
+            if static_clusters.size
+            else 10.0
+        ),
+    )
+    if point_cloud.target_track is None:
+        target_position = empty
+        target_color = (0.3, 1.0, 0.2, 1.0)
+        target_size = 16.0
+    else:
+        target_position = np.asarray(
+            point_cloud.target_track.position_m,
+            dtype=np.float32,
+        ).reshape((1, 3))
+        alpha = 0.4 if point_cloud.target_track.is_predicted else 1.0
+        target_color = (
+            (1.0, 0.55, 0.05, alpha)
+            if point_cloud.target_source == "static"
+            else (0.3, 1.0, 0.2, alpha)
+        )
+        target_size = 13.0 if point_cloud.target_track.is_predicted else 16.0
+    _set_gl_scatter_data(
+        scatter_items["target"],
+        target_position,
+        target_color,
+        target_size,
+    )
+
+    rate_text = (
+        f"{update_rate_hz:.1f} Hz"
+        if update_rate_hz is not None
+        else "measuring..."
+    )
+    reference_text = (
+        point_cloud.static_reference.label
+        if point_cloud.static_reference is not None
+        else ""
+    )
+    status = (
+        "Live 3D Point Cloud "
+        f"(±{point_cloud_fov_deg:g}° FOV, {point_cloud_range_m:g} m) · "
+        f"Refresh rate: {rate_text}\n"
+        "Axes: X left/right · Y forward · Z elevation"
+    )
+    if reference_text:
+        status += f"\n{reference_text}"
+    status_label.setText(status)
 
 
 def _point_cloud_range_limit_m(config: RadarCaptureConfig) -> Optional[float]:

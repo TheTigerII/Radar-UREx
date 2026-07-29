@@ -63,9 +63,8 @@ from rawdatacapture.livedatacapture import (
     _combined_point_cloud_update_due,
     _colorize_rotor_spectrogram,
     _concatenated_active_window_times,
-    _draw_point_cloud,
+    _draw_point_cloud_pyqtgraph,
     _draw_micro_doppler,
-    _draw_rotor_micro_doppler,
     _display_dependency_error,
     _fill_rotor_display_time_gaps,
     _gap_aware_series,
@@ -77,7 +76,7 @@ from rawdatacapture.livedatacapture import (
     _put_latest_queue_payload,
     _record_event_rate,
     _report_display_startup,
-    _rotor_qt_application_arguments,
+    _qt_application_arguments,
     _prepare_rotor_display_frame,
     _report_new_error_stats,
     _request_processor_stop,
@@ -86,7 +85,7 @@ from rawdatacapture.livedatacapture import (
     _run_frame_processor,
     _run_rotor_postprocessor,
     _set_rate_indicator,
-    _set_point_cloud_axes,
+    _point_cloud_cross_range_limit,
     _turbo_lookup_table,
     process_complete_frame,
 )
@@ -746,16 +745,10 @@ class PointCloudBoundsTests(unittest.TestCase):
         self.assertEqual(DEFAULT_CLUSTER_MIN_SAMPLES, 2)
 
     def test_point_cloud_axes_match_ten_meter_sixty_degree_fov(self) -> None:
-        axis = Mock()
-
-        _set_point_cloud_axes(axis, 10.0, 60.0)
-
         cross_range_m = 10.0 * math.sin(math.radians(60.0))
-        axis.set_xlim.assert_called_once_with(-cross_range_m, cross_range_m)
-        axis.set_ylim.assert_called_once_with(0.0, 10.0)
-        axis.set_zlim.assert_called_once_with(-cross_range_m, cross_range_m)
-        axis.set_box_aspect.assert_called_once_with(
-            (2.0 * cross_range_m, 10.0, 2.0 * cross_range_m)
+        self.assertAlmostEqual(
+            _point_cloud_cross_range_limit(10.0, 60.0),
+            cross_range_m,
         )
 
     def test_direction_cosine_gate_rejects_points_beyond_sixty_degrees(self) -> None:
@@ -800,38 +793,88 @@ class PointCloudBoundsTests(unittest.TestCase):
         assert range_axis_m is not None
         self.assertGreater(limit_m, float(range_axis_m[-1]))
 
+    @staticmethod
+    def _scatter_items() -> dict[str, Mock]:
+        return {
+            name: Mock()
+            for name in (
+                "points",
+                "clusters",
+                "static_points",
+                "static_clusters",
+                "target",
+            )
+        }
+
+    @staticmethod
+    def _payload(
+        *,
+        points: np.ndarray | None = None,
+        clusters: np.ndarray | None = None,
+        static_points: np.ndarray | None = None,
+        static_clusters: np.ndarray | None = None,
+        target_track: TargetTrack | None = None,
+        target_source: str | None = None,
+        static_reference: StaticReferenceStatus | None = None,
+    ) -> PointCloudDisplayPayload:
+        return PointCloudDisplayPayload(
+            points=(
+                points
+                if points is not None
+                else np.empty((0, 4), dtype=np.float32)
+            ),
+            clusters=(
+                clusters
+                if clusters is not None
+                else np.empty((0, 4), dtype=np.float32)
+            ),
+            static_points=(
+                static_points
+                if static_points is not None
+                else np.empty((0, 5), dtype=np.float32)
+            ),
+            static_clusters=(
+                static_clusters
+                if static_clusters is not None
+                else np.empty((0, 4), dtype=np.float32)
+            ),
+            target_track=target_track,
+            target_source=target_source,
+            static_reference=(
+                static_reference
+                if static_reference is not None
+                else StaticReferenceStatus(False, False, 0, 0)
+            ),
+        )
+
     def test_draw_updates_points_and_cluster_centers(self) -> None:
-        axis = Mock()
-        scatter = Mock()
-        cluster_scatter = Mock()
+        scatter_items = self._scatter_items()
+        status = Mock()
         points = np.asarray(((1.0, 2.0, 3.0, 50.0),), dtype=np.float32)
         clusters = np.asarray(((1.0, 2.0, 3.0, 2.0),), dtype=np.float32)
 
-        _draw_point_cloud(
-            axis,
-            scatter,
-            cluster_scatter,
-            points,
-            clusters,
+        _draw_point_cloud_pyqtgraph(
+            scatter_items,
+            status,
+            self._payload(points=points, clusters=clusters),
             10.0,
             60.0,
-            update_rate_hz=29.8,
+            29.8,
+            np.zeros((256, 3), dtype=np.uint8),
         )
 
-        for actual, expected in zip(scatter._offsets3d, points[:, :3].T):
-            np.testing.assert_array_equal(actual, expected)
-        for actual, expected in zip(cluster_scatter._offsets3d, clusters[:, :3].T):
-            np.testing.assert_array_equal(actual, expected)
-        cluster_scatter.set_sizes.assert_called_once()
-        axis.set_title.assert_called_once_with(
-            "Live 3D Point Cloud (±60° FOV, 10 m, 29.8 Hz)"
+        np.testing.assert_array_equal(
+            scatter_items["points"].setData.call_args.kwargs["pos"],
+            points[:, :3],
         )
+        np.testing.assert_array_equal(
+            scatter_items["clusters"].setData.call_args.kwargs["pos"],
+            clusters[:, :3],
+        )
+        self.assertIn("29.8 Hz", status.setText.call_args.args[0])
 
     def test_draw_updates_tracked_target_marker(self) -> None:
-        axis = Mock()
-        scatter = Mock()
-        cluster_scatter = Mock()
-        target_scatter = Mock()
+        scatter_items = self._scatter_items()
         track = TargetTrack(
             position_m=(1.0, 2.0, 3.0),
             velocity_m_per_update=(0.0, 0.0, 0.0),
@@ -841,27 +884,28 @@ class PointCloudBoundsTests(unittest.TestCase):
             confirmed=True,
         )
 
-        _draw_point_cloud(
-            axis,
-            scatter,
-            cluster_scatter,
-            np.empty((0, 4), dtype=np.float32),
-            np.empty((0, 4), dtype=np.float32),
+        _draw_point_cloud_pyqtgraph(
+            scatter_items,
+            Mock(),
+            self._payload(target_track=track),
             10.0,
             60.0,
-            target_scatter,
-            track,
+            None,
+            np.zeros((256, 3), dtype=np.uint8),
         )
 
-        np.testing.assert_array_equal(target_scatter._offsets3d[0], (1.0,))
-        np.testing.assert_array_equal(target_scatter._offsets3d[1], (2.0,))
-        np.testing.assert_array_equal(target_scatter._offsets3d[2], (3.0,))
-        target_scatter.set_alpha.assert_called_once_with(1.0)
+        np.testing.assert_array_equal(
+            scatter_items["target"].setData.call_args.kwargs["pos"],
+            ((1.0, 2.0, 3.0),),
+        )
+        self.assertEqual(
+            scatter_items["target"].setData.call_args.kwargs["color"],
+            (0.3, 1.0, 0.2, 1.0),
+        )
 
     def test_draw_updates_static_points_and_calibration_indicator(self) -> None:
-        static_scatter = Mock()
-        static_cluster_scatter = Mock()
-        reference_text = Mock()
+        scatter_items = self._scatter_items()
+        status = Mock()
         static_points = np.asarray(
             ((1.0, 2.0, 3.0, 55.0, 8.0),),
             dtype=np.float32,
@@ -871,49 +915,28 @@ class PointCloudBoundsTests(unittest.TestCase):
             dtype=np.float32,
         )
 
-        _draw_point_cloud(
-            Mock(),
-            Mock(),
-            Mock(),
-            np.empty((0, 4), dtype=np.float32),
-            np.empty((0, 4), dtype=np.float32),
+        _draw_point_cloud_pyqtgraph(
+            scatter_items,
+            status,
+            self._payload(
+                static_points=static_points,
+                static_clusters=static_clusters,
+                static_reference=StaticReferenceStatus(True, False, 12, 30),
+            ),
             10.0,
             60.0,
-            static_scatter=static_scatter,
-            static_cluster_scatter=static_cluster_scatter,
-            static_points=static_points,
-            static_clusters=static_clusters,
-            static_reference_text=reference_text,
-            static_reference=StaticReferenceStatus(True, False, 12, 30),
+            None,
+            np.zeros((256, 3), dtype=np.uint8),
         )
 
-        for actual, expected in zip(
-            static_scatter._offsets3d,
-            static_points[:, :3].T,
-        ):
-            np.testing.assert_array_equal(actual, expected)
-        reference_text.set_text.assert_called_once_with(
-            "Calibrating static reference 12/30"
+        np.testing.assert_array_equal(
+            scatter_items["static_points"].setData.call_args.kwargs["pos"],
+            static_points[:, :3],
         )
-
-    def test_blitted_point_cloud_draw_does_not_mutate_static_axes(self) -> None:
-        axis = Mock()
-
-        _draw_point_cloud(
-            axis,
-            Mock(),
-            Mock(),
-            np.empty((0, 4), dtype=np.float32),
-            np.empty((0, 4), dtype=np.float32),
-            10.0,
-            60.0,
-            update_static_artists=False,
+        self.assertIn(
+            "Calibrating static reference 12/30",
+            status.setText.call_args.args[0],
         )
-
-        axis.set_xlim.assert_not_called()
-        axis.set_ylim.assert_not_called()
-        axis.set_zlim.assert_not_called()
-        axis.set_title.assert_not_called()
 
 
 class SingleTargetTrackerTests(unittest.TestCase):
@@ -1888,8 +1911,8 @@ class RangeDisplayBoundsTests(unittest.TestCase):
             29.8,
         )
 
-        axis.set_xlim.assert_called_once_with(0.0, 10.0)
-        axis.set_title.assert_called_once_with("Live Range Profile — 29.8 Hz")
+        axis.setXRange.assert_called_once_with(0.0, 10.0, padding=0.0)
+        axis.setTitle.assert_called_once_with("Live Range Profile — 29.8 Hz")
 
     def test_range_doppler_uses_ten_meter_default_limit(self) -> None:
         axis = Mock()
@@ -1905,8 +1928,8 @@ class RangeDisplayBoundsTests(unittest.TestCase):
             29.8,
         )
 
-        axis.set_xlim.assert_called_once_with(0.0, 10.0)
-        axis.set_title.assert_called_once_with(
+        axis.setXRange.assert_called_once_with(0.0, 10.0, padding=0.0)
+        axis.setTitle.assert_called_once_with(
             "Live Range-Doppler Heatmap — 29.8 Hz"
         )
 
@@ -1945,15 +1968,20 @@ class MicroDopplerDisplayTests(unittest.TestCase):
 
         _draw_micro_doppler(axis, image, spectrogram, 2.5, 29.8)
 
-        image.set_data.assert_called_once_with(spectrogram)
-        image.set_extent.assert_called_once_with((-2, 0, -2, 1))
-        image.set_clim.assert_called_once_with(
-            POINT_CLOUD_MAGNITUDE_DB_MIN,
-            POINT_CLOUD_MAGNITUDE_DB_MAX,
+        np.testing.assert_array_equal(
+            image.setImage.call_args.args[0],
+            spectrogram,
         )
-        axis.set_xlim.assert_called_once_with(-2, 0)
-        axis.set_ylim.assert_called_once_with(-2, 1)
-        axis.set_title.assert_called_once_with(
+        image.setRect.assert_called_once_with(-2.0, -2.0, 2.0, 3.0)
+        image.setLevels.assert_called_once_with(
+            (
+                POINT_CLOUD_MAGNITUDE_DB_MIN,
+                POINT_CLOUD_MAGNITUDE_DB_MAX,
+            )
+        )
+        axis.setXRange.assert_called_once_with(-2, 0, padding=0.0)
+        axis.setYRange.assert_called_once_with(-2, 1, padding=0.0)
+        axis.setTitle.assert_called_once_with(
             "Live Micro-Doppler Spectrogram — gate 2.50 m"
             " — 29.8 Hz"
         )
@@ -1972,9 +2000,9 @@ class MicroDopplerDisplayTests(unittest.TestCase):
             update_title=False,
         )
 
-        axis.set_xlim.assert_not_called()
-        axis.set_ylim.assert_not_called()
-        axis.set_title.assert_not_called()
+        axis.setXRange.assert_not_called()
+        axis.setYRange.assert_not_called()
+        axis.setTitle.assert_not_called()
 
     def test_event_rate_counts_units_after_initial_timestamp(self) -> None:
         events = deque()
@@ -1992,7 +2020,7 @@ class MicroDopplerDisplayTests(unittest.TestCase):
             range_gate_m=2.5,
         )
 
-        artist.set_text.assert_called_once_with(
+        artist.setText.assert_called_once_with(
             "Gate: 2.50 m\nRefresh rate: 29.8 Hz"
         )
 
@@ -2001,7 +2029,7 @@ class MicroDopplerDisplayTests(unittest.TestCase):
 
         _set_rate_indicator(artist, None)
 
-        artist.set_text.assert_called_once_with("Refresh rate: measuring...")
+        artist.setText.assert_called_once_with("Refresh rate: measuring...")
 
     def test_dedicated_rotor_defaults_prioritize_flash_timing(self) -> None:
         self.assertEqual(ROTOR_DISPLAY_MODE, "micro-doppler")
@@ -2038,47 +2066,6 @@ class MicroDopplerDisplayTests(unittest.TestCase):
             ROTOR_DISPLAY_HISTORY_SECONDS / ROTOR_DISPLAY_TIME_BINS,
             blade_passage_interval_s / 2.0,
         )
-
-    def test_rotor_draw_uses_relative_scale_velocity_and_rpm_status(self) -> None:
-        axis = Mock()
-        image = Mock()
-        flash_axis = Mock()
-        flash_line = Mock()
-        status_text = Mock()
-        result = MicroDopplerResult(
-            raw_spectrogram_db=np.ones((8, 3), dtype=np.float32),
-            enhanced_spectrogram_db=np.ones((8, 3), dtype=np.float32) * 9.0,
-            window_times_s=np.asarray((0.001, 0.002, 0.011)),
-            velocity_axis_m_s=np.linspace(-4.0, 3.0, 8, dtype=np.float32),
-            flash_scores_db=np.asarray((2.0, 5.0, 3.0), dtype=np.float32),
-            noise_floor_db=np.ones(3, dtype=np.float32),
-            selected_range_m=2.15,
-            nominal_hop_s=0.001,
-            unambiguous_velocity_m_s=4.0,
-            rotor_estimates=(
-                RotorEstimate(
-                    blade_passage_hz=200.0,
-                    rpm=6000.0,
-                    confidence=0.9,
-                ),
-            ),
-        )
-
-        _draw_rotor_micro_doppler(
-            axis,
-            image,
-            flash_axis,
-            flash_line,
-            status_text,
-            result,
-        )
-
-        axis.set_ylim.assert_called_once_with(-4.0, 3.0)
-        displayed = image.set_data.call_args.args[0]
-        self.assertEqual(displayed.shape, (8, ROTOR_DISPLAY_TIME_BINS))
-        self.assertTrue(np.isfinite(displayed[0]).all())
-        self.assertIn("6000 RPM", status_text.set_text.call_args.args[0])
-        self.assertIn("Gate: 2.15 m", status_text.set_text.call_args.args[0])
 
     def test_rotor_display_frame_includes_notch_overlay_bounds(self) -> None:
         result = MicroDopplerResult(
@@ -2160,6 +2147,43 @@ class MicroDopplerDisplayTests(unittest.TestCase):
             startup_status_queue,
         )
 
+    @patch("rawdatacapture.livedatacapture._run_pyqtgraph_display")
+    def test_range_display_process_dispatches_to_pyqtgraph(
+        self,
+        renderer: Mock,
+    ) -> None:
+        payload_queue = Mock()
+        stop_event = Mock()
+        rendered_updates = Mock()
+        skipped_updates = Mock()
+        startup_status_queue = Mock()
+
+        _run_display_process(
+            "range",
+            0.03,
+            10.0,
+            10.0,
+            60.0,
+            payload_queue,
+            stop_event,
+            rendered_updates,
+            skipped_updates,
+            startup_status_queue,
+        )
+
+        renderer.assert_called_once_with(
+            "range",
+            0.03,
+            10.0,
+            10.0,
+            60.0,
+            payload_queue,
+            stop_event,
+            rendered_updates,
+            skipped_updates,
+            startup_status_queue,
+        )
+
     def test_display_startup_status_reports_ready_backend(self) -> None:
         startup_status_queue = queue.Queue(maxsize=1)
 
@@ -2188,9 +2212,9 @@ class MicroDopplerDisplayTests(unittest.TestCase):
                 "micro-doppler",
             ),
         ):
-            qt_arguments = _rotor_qt_application_arguments()
+            qt_arguments = _qt_application_arguments()
 
-        self.assertEqual(qt_arguments, ["radar-rotor-display"])
+        self.assertEqual(qt_arguments, ["radar-live-display"])
         self.assertNotIn("--display", qt_arguments)
         self.assertNotIn("micro-doppler", qt_arguments)
 

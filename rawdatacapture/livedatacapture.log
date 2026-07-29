@@ -958,3 +958,65 @@
 [2026-07-23T18:10:00+08:00] Display summary: rendered_updates=5241, latest_updates_skipped=88, frames_not_rendered=94/5335 (1.762%)
 [2026-07-23T18:10:00+08:00] Capture pipeline shutdown complete.
 [2026-07-23T18:10:00+08:00] --- Live capture log ended at 2026-07-23T18:10:00+08:00 ---
+[2026-07-29T23:42:14+08:00] 
+[2026-07-29T23:42:14+08:00] --- Live capture log started at 2026-07-29T23:42:14+08:00: /home/rgmtc/Desktop/Radar-UREx/rawdatacapture/livedatacapture.log ---
+[2026-07-29T23:42:14+08:00] Classification requested: device=cuda, artifacts=/home/rgmtc/Desktop/Radar-UREx/Radar-UREx-output/artifacts
+[2026-07-29T23:42:14+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=64, num_rx_channels=4, num_chirps_per_frame=384, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=128, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=5000.0, frequency_slope_mhz_per_us=60.0, start_frequency_ghz=60.0, idle_time_us=7.0, ramp_end_time_us=32.0, frame_periodicity_ms=33.33)
+[2026-07-29T23:42:16+08:00] DSP backend: OpenRadar (/home/rgmtc/Desktop/Radar-UREx/.venv/lib/python3.12/site-packages/mmwave/dsp/__init__.py)
+[2026-07-29T23:42:16+08:00] Loaded capture setup: CaptureSetupConfig(packet_sequence_enable=True, packet_delay_us=50, capture_hardware='DCA1000', config_used='D:\\Library\\Documents\\GitHub\\Radar-UREx\\rawdatacapture\\exp2.mmwave.json')
+[2026-07-29T23:42:19+08:00] Live display ready: backend=PyQtGraph/xcb, DISPLAY=:0, screen=DP-0, geometry=1200x700+360+173.
+[2026-07-29T23:42:40+08:00] Shutting down capture pipeline...
+[2026-07-29T23:43:02+08:00] 
+[2026-07-29T23:43:02+08:00] --- Live capture log started at 2026-07-29T23:43:02+08:00: /home/rgmtc/Desktop/Radar-UREx/rawdatacapture/livedatacapture.log ---
+[2026-07-29T23:43:02+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=64, num_rx_channels=4, num_chirps_per_frame=384, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=128, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=5000.0, frequency_slope_mhz_per_us=60.0, start_frequency_ghz=60.0, idle_time_us=7.0, ramp_end_time_us=32.0, frame_periodicity_ms=33.33)
+[2026-07-29T23:43:03+08:00] DSP backend: OpenRadar (/home/rgmtc/Desktop/Radar-UREx/.venv/lib/python3.12/site-packages/mmwave/dsp/__init__.py)
+[2026-07-29T23:43:03+08:00] Loaded capture setup: CaptureSetupConfig(packet_sequence_enable=True, packet_delay_us=50, capture_hardware='DCA1000', config_used='D:\\Library\\Documents\\GitHub\\Radar-UREx\\rawdatacapture\\exp2.mmwave.json')
+[2026-07-29T23:43:07+08:00] Live display ready: backend=PyQtGraph/xcb, DISPLAY=:0, screen=DP-0, geometry=1200x700+360+173.
+[2026-07-29T23:43:08+08:00] Saving processed radar output to /home/rgmtc/Desktop/Radar-UREx/rawdatacapture/captures/processed_capture_2026_07_29T23_43_01.jsonl
+[2026-07-29T23:43:08+08:00] Adaptive clutter map enabled: update_rate=0.02, warmup=30 updates, minimum_snr=3 dB
+[2026-07-29T23:43:08+08:00] Static scene detection enabled: warmup=30 updates, reference=90 updates, minimum_change=3 dB, background_update_rate=0.01. Keep the target absent until calibration is complete.
+[2026-07-29T23:43:08+08:00] Radar frame processor ready.
+[2026-07-29T23:43:08+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=393216
+[2026-07-29T23:43:08+08:00] DCA1000 setup: packet_sequence_enable=True, packet_delay_us=50
+[2026-07-29T23:43:08+08:00] UDP socket receive buffer: requested=4194304B, actual=425984B
+[2026-07-29T23:43:08+08:00] WARNING: The operating system granted less UDP receive buffering than requested. On Linux, raise the limit before capture with 'sudo sysctl -w net.core.rmem_max=4194304'.
+[2026-07-29T23:43:08+08:00] UDP packet queue capacity: 8192 datagrams
+[2026-07-29T23:43:08+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-07-29T23:43:47+08:00] stats: packets=298133, frames=1103, invalid_frames=0, lost_packets=3, out_of_order=0, duplicates=0, byte_gaps=1/4368B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:43:47+08:00] stats: packets=298150, frames=1104, invalid_frames=1, lost_packets=3, out_of_order=0, duplicates=0, byte_gaps=1/4368B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:44:08+08:00] stats: packets=466354, frames=1727, invalid_frames=2, lost_packets=50, out_of_order=0, duplicates=0, byte_gaps=2/72800B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:44:15+08:00] stats: packets=524615, frames=1942, invalid_frames=2, lost_packets=102, out_of_order=0, duplicates=0, byte_gaps=3/148512B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:44:15+08:00] stats: packets=524637, frames=1943, invalid_frames=3, lost_packets=102, out_of_order=0, duplicates=0, byte_gaps=3/148512B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:44:16+08:00] stats: packets=533475, frames=1976, invalid_frames=4, lost_packets=176, out_of_order=0, duplicates=0, byte_gaps=4/256256B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:44:21+08:00] stats: packets=573406, frames=2123, invalid_frames=4, lost_packets=206, out_of_order=0, duplicates=0, byte_gaps=5/299936B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:44:21+08:00] stats: packets=573415, frames=2124, invalid_frames=5, lost_packets=206, out_of_order=0, duplicates=0, byte_gaps=5/299936B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:44:26+08:00] stats: packets=617151, frames=2286, invalid_frames=6, lost_packets=220, out_of_order=0, duplicates=0, byte_gaps=6/320320B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:17+08:00] stats: packets=1029198, frames=3811, invalid_frames=6, lost_packets=241, out_of_order=0, duplicates=0, byte_gaps=7/350896B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:17+08:00] stats: packets=1029251, frames=3812, invalid_frames=7, lost_packets=241, out_of_order=0, duplicates=0, byte_gaps=7/350896B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:17+08:00] stats: packets=1030305, frames=3816, invalid_frames=8, lost_packets=267, out_of_order=0, duplicates=0, byte_gaps=8/388752B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:18+08:00] stats: packets=1038603, frames=3846, invalid_frames=8, lost_packets=282, out_of_order=0, duplicates=0, byte_gaps=9/410592B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:18+08:00] stats: packets=1038662, frames=3847, invalid_frames=9, lost_packets=282, out_of_order=0, duplicates=0, byte_gaps=9/410592B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:19+08:00] stats: packets=1041053, frames=3855, invalid_frames=9, lost_packets=299, out_of_order=0, duplicates=0, byte_gaps=10/435344B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:19+08:00] stats: packets=1041076, frames=3856, invalid_frames=10, lost_packets=299, out_of_order=0, duplicates=0, byte_gaps=10/435344B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:22+08:00] stats: packets=1066124, frames=3948, invalid_frames=10, lost_packets=325, out_of_order=0, duplicates=0, byte_gaps=11/473200B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:22+08:00] stats: packets=1066166, frames=3949, invalid_frames=11, lost_packets=325, out_of_order=0, duplicates=0, byte_gaps=11/473200B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:23+08:00] stats: packets=1071769, frames=3969, invalid_frames=11, lost_packets=333, out_of_order=0, duplicates=0, byte_gaps=12/484848B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:23+08:00] stats: packets=1071778, frames=3969, invalid_frames=11, lost_packets=336, out_of_order=0, duplicates=0, byte_gaps=13/489216B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:23+08:00] stats: packets=1071826, frames=3970, invalid_frames=12, lost_packets=336, out_of_order=0, duplicates=0, byte_gaps=13/489216B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:23+08:00] stats: packets=1078537, frames=3994, invalid_frames=12, lost_packets=353, out_of_order=0, duplicates=0, byte_gaps=14/513968B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:23+08:00] stats: packets=1078561, frames=3995, invalid_frames=13, lost_packets=353, out_of_order=0, duplicates=0, byte_gaps=14/513968B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:45+08:00] stats: packets=1252447, frames=4638, invalid_frames=13, lost_packets=364, out_of_order=0, duplicates=0, byte_gaps=15/529984B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:45+08:00] stats: packets=1252472, frames=4639, invalid_frames=14, lost_packets=364, out_of_order=0, duplicates=0, byte_gaps=15/529984B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:55+08:00] stats: packets=1332623, frames=4935, invalid_frames=14, lost_packets=370, out_of_order=0, duplicates=0, byte_gaps=16/538720B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:45:55+08:00] stats: packets=1332676, frames=4936, invalid_frames=15, lost_packets=370, out_of_order=0, duplicates=0, byte_gaps=16/538720B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-07-29T23:46:08+08:00] Streaming stopped.
+[2026-07-29T23:46:08+08:00] Capture summary: packets=1436650, frames=5320, valid_frames=5305, invalid_frames=15, queued_frames=5305, lost_packets=370, receiver_queue_drops=0, processing_drops=0, stream_resyncs=0
+[2026-07-29T23:46:08+08:00] Shutting down capture pipeline...
+[2026-07-29T23:46:08+08:00] Processed radar output saved: updates=5305, path=/home/rgmtc/Desktop/Radar-UREx/rawdatacapture/captures/processed_capture_2026_07_29T23_43_01.jsonl
+[2026-07-29T23:46:08+08:00] Static detection summary: candidate_points=4873, handoff_pending_updates=1107, validated_updates=3123
+[2026-07-29T23:46:08+08:00] Processing timing summary: range_fft=p50:1.16ms/p95:3.79ms/max:14.68ms, doppler=p50:1.47ms/p95:4.12ms/max:12.15ms, dynamic_detection=p50:5.34ms/p95:8.20ms/max:23.14ms, static_detection=p50:7.94ms/p95:12.72ms/max:687.53ms, clustering=p50:0.30ms/p95:0.93ms/max:7.88ms, micro_doppler=p50:2.67ms/p95:6.54ms/max:43.71ms, serialization=p50:0.70ms/p95:0.89ms/max:6.58ms, total=p50:24.73ms/p95:35.42ms/max:701.86ms
+[2026-07-29T23:46:08+08:00] Processing summary: valid_frames=5305, queued_frames=5305, processed_frames=5305, processing_drops=0
+[2026-07-29T23:46:10+08:00] Live display closed.
+[2026-07-29T23:46:10+08:00] Display summary: rendered_updates=4936, coalesced_updates=369, radar_frame_redraw_coverage=92.782%, radar_frames_without_dedicated_redraw=384/5320. This is GUI cadence, not capture or processing loss.
+[2026-07-29T23:46:10+08:00] Capture pipeline shutdown complete.
+[2026-07-29T23:46:10+08:00] --- Live capture log ended at 2026-07-29T23:46:10+08:00 ---
