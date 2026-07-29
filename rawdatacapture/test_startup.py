@@ -14,7 +14,7 @@ from rawdatacapture.startup import (
 class DCA1000PacketDelayTests(unittest.TestCase):
     def setUp(self) -> None:
         options = RuntimeOptions(
-            config_path=Path("profile.cfg"),
+            config_path=Path("profile-mini4-20m.cfg"),
             setup_path=Path("setup.json"),
         )
         self.validator = PreflightValidator(options)

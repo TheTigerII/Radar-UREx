@@ -1,6 +1,5 @@
 .venv/
 __pycache__/
 *.py[cod]
-/tmp/classification_features*.npz
-Radar-UREx-output/artifacts/generated/
-*.engine
+rawdatacapture/*.log
+rawdatacapture/captures/

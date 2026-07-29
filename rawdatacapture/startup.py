@@ -42,7 +42,7 @@ DCA1000_FPGA_CLK_CONVERSION_FACTOR = 1000
 DCA1000_FPGA_CLK_PERIOD_NS = 8
 DCA1000_MIN_PACKET_DELAY_US = 5
 DCA1000_MAX_PACKET_DELAY_US = 500
-DEFAULT_SDK_PROFILE_PATH = Path(__file__).with_name("profile.cfg")
+DEFAULT_SDK_PROFILE_PATH = Path(__file__).with_name("profile-mini4-20m.cfg")
 EmitFunc = Callable[[str], None]
 
 
@@ -95,7 +95,6 @@ class RuntimeOptions:
     radar_command_timeout_s: float = 2.0
     radar_command_delay_s: float = 0.03
     radar_line_ending: str = "crlf"
-    load_firmware: bool = False
     skip_socket_preflight: bool = False
     readiness_delay_s: float = 0.25
 
@@ -105,8 +104,6 @@ class RadarDeviceSetup:
     device: Optional[str]
     control_port: Optional[str]
     baud_rate: Optional[int]
-    radar_ss_firmware: Optional[Path]
-    master_ss_firmware: Optional[Path]
 
 
 @dataclass(frozen=True)
@@ -125,7 +122,6 @@ class StartupConfig:
     setup_config: CaptureSetupConfig
     radar_device: RadarDeviceSetup
     dca1000: DCA1000Setup
-    mmwave_json: dict[str, Any]
     setup_json: dict[str, Any]
 
 
@@ -169,7 +165,6 @@ class ConfigLoader:
 
         radar_config = RadarCaptureConfig.from_file(config_path)
         setup_config = CaptureSetupConfig.from_file(setup_path)
-        mmwave_json = _read_json_object(config_path) if config_path.suffix.lower() == ".json" else {}
         setup_json = _read_json_object(setup_path)
 
         return StartupConfig(
@@ -177,7 +172,6 @@ class ConfigLoader:
             setup_config=setup_config,
             radar_device=_parse_radar_device_setup(setup_json),
             dca1000=_parse_dca1000_setup(setup_json, setup_config),
-            mmwave_json=mmwave_json,
             setup_json=setup_json,
         )
 
@@ -193,7 +187,6 @@ class PreflightValidator:
         self._validate_dca1000_settings(config, errors)
         self._validate_radar_control_settings(config, errors)
         self._validate_sdk_profile(errors)
-        self._validate_firmware_paths(config, errors)
         self._validate_socket_bind(errors)
 
         if errors:
@@ -265,22 +258,6 @@ class PreflightValidator:
             errors.append(f"SDK CLI profile has no commands: {profile_path}")
         if not any(command.split(maxsplit=1)[0] == "sensorStart" for command in commands):
             errors.append(f"SDK CLI profile is missing sensorStart: {profile_path}")
-
-    def _validate_firmware_paths(
-        self, config: StartupConfig, errors: list[str]
-    ) -> None:
-        if not self.options.load_firmware:
-            return
-
-        radar_device = config.radar_device
-        for label, firmware_path in (
-            ("radar SS firmware", radar_device.radar_ss_firmware),
-            ("master SS firmware", radar_device.master_ss_firmware),
-        ):
-            if firmware_path is None:
-                errors.append(f"missing {label} path in setup.json")
-            elif not firmware_path.exists():
-                errors.append(f"{label} not found: {firmware_path}")
 
     def _validate_socket_bind(self, errors: list[str]) -> None:
         if self.options.skip_socket_preflight:
@@ -466,13 +443,6 @@ class DryRunRadarControl:
             f"chirps_per_frame={radar.num_chirps_per_frame}, "
             f"bytes_per_frame={radar.bytes_per_frame}"
         )
-        if self.options.load_firmware:
-            self.emit(
-                "dry-run radar firmware load: "
-                f"radar_ss={radar_device.radar_ss_firmware}, "
-                f"master_ss={radar_device.master_ss_firmware}"
-            )
-
     def start_sensor(self) -> None:
         self.started = True
         self.emit("dry-run radar sensor start")
@@ -777,8 +747,6 @@ def _parse_radar_device_setup(setup_json: dict[str, Any]) -> RadarDeviceSetup:
         device=_optional_string(setup_json, "mmWaveDevice"),
         control_port=_optional_string(device_config, "RS232COMPort"),
         baud_rate=_optional_int(device_config, "RS232BaudRate"),
-        radar_ss_firmware=_optional_path(device_config, "radarSSFirmware"),
-        master_ss_firmware=_optional_path(device_config, "masterSSFirmware"),
     )
 
 
@@ -975,18 +943,8 @@ def _dca1000_payload_override(
 
 
 def _adc_data_format_mode(config: StartupConfig) -> int:
-    devices = config.mmwave_json.get("mmWaveDevices")
-    if isinstance(devices, list) and devices:
-        device = _as_mapping(devices[0]) or {}
-        rf_config = _as_mapping(device.get("rfConfig")) or {}
-        adc_out_config = _as_mapping(rf_config.get("rlAdcOutCfg_t")) or {}
-        fmt = _as_mapping(adc_out_config.get("fmt")) or {}
-        adc_bits = _optional_int(fmt, "b2AdcBits")
-        if adc_bits is not None:
-            # mmWaveLink encodes 0=12-bit, 1=14-bit, 2=16-bit. DCA1000 uses
-            # 1=12-bit, 2=14-bit, 3=16-bit for CONFIG_FPGA.
-            return adc_bits + 1
-
+    del config
+    # The fixed profile uses 16-bit complex ADC samples.
     return 3
 
 
@@ -1035,11 +993,6 @@ def _optional_int(data: dict[str, Any], *names: str) -> Optional[int]:
     return int(str(value).strip(), 0)
 
 
-def _optional_path(data: dict[str, Any], *names: str) -> Optional[Path]:
-    value = _optional_string(data, *names)
-    return None if value is None or not value else Path(value)
-
-
 def _enum_value(value: Any, mapping: dict[str, int], *, default: int) -> int:
     if value is None:
         return default
@@ -1065,8 +1018,7 @@ def _normalize_key(value: str) -> str:
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Validate and orchestrate radar/DCA1000 startup without mmWave Studio "
-            "as the runtime controller."
+            "Validate and orchestrate Mini4 radar/DCA1000 startup."
         )
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
@@ -1141,11 +1093,6 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         help="Load configs and run preflight checks without configuring hardware.",
     )
     parser.add_argument(
-        "--load-firmware",
-        action="store_true",
-        help="Require MSS/BSS firmware paths and include firmware loading in startup.",
-    )
-    parser.add_argument(
         "--skip-socket-preflight",
         action="store_true",
         help="Skip the host-ip/data-port bind check.",
@@ -1182,7 +1129,6 @@ def options_from_args(args: argparse.Namespace) -> RuntimeOptions:
         radar_command_timeout_s=max(args.radar_command_timeout, 0.1),
         radar_command_delay_s=max(args.radar_command_delay, 0.0),
         radar_line_ending=args.radar_line_ending,
-        load_firmware=args.load_firmware,
         skip_socket_preflight=args.skip_socket_preflight,
         readiness_delay_s=max(args.readiness_delay, 0.0),
     )

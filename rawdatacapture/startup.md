@@ -8,17 +8,16 @@ Use `run.py` for the integrated control-and-capture workflow.
 
 `startup.py` can:
 
-- Parse radar dimensions from mmWave Studio JSON or an SDK CLI `.cfg`.
+- Parse radar dimensions from the fixed SDK CLI `.cfg`.
 - Parse board and DCA1000 settings from `setup.json`.
-- Validate dimensions, two-lane LVDS support, ports, profile commands, optional
-  firmware paths, and availability of the capture UDP bind address.
+- Validate dimensions, two-lane LVDS support, ports, profile commands, and
+  availability of the capture UDP bind address.
 - Configure DCA1000 through UDP or simulate it with a dry-run backend.
 - Configure SDK CLI firmware over the radar command UART or use dry-run.
 - Defer `sensorStart` until DCA1000 recording has been armed.
 - Send `sensorStop` and DCA1000 `RECORD_STOP` during shutdown.
 
-It does not flash firmware. `--load-firmware` only makes firmware paths a
-preflight requirement and reports them in the dry-run backend.
+It does not flash firmware.
 
 ## Backends
 
@@ -64,11 +63,12 @@ does not save or display its frames.
 
 ## Configuration Selection
 
-Defaults are `mmwave.json`, `setup.json`, and `profile.cfg`. There is one useful
-automatic rule: when `--radar-backend direct-serial` is selected and `--config`
-was not explicitly changed, `profile.cfg` replaces the default `mmwave.json`
-as the dimension source. This prevents direct-serial startup from interpreting
-frames using unrelated JSON dimensions.
+The radar-config and SDK-profile defaults are both
+`profile-mini4-20m.cfg`; the capture setup default is `setup.json`. When
+`--radar-backend direct-serial` is selected and `--config` was not explicitly
+changed, that one profile supplies both the capture dimensions and the SDK CLI
+commands. This prevents direct-serial startup from interpreting frames using
+unrelated JSON dimensions.
 
 `--sdk-profile` chooses commands sent to the radar. Normally it should be the
 same `.cfg` passed through `--config`.
@@ -111,7 +111,6 @@ Preflight validates:
 - Valid UDP data/config ports.
 - Radar serial port and baud when direct serial is selected.
 - Existing SDK profile containing `sensorStart` for direct serial.
-- Firmware paths only when `--load-firmware` is selected.
 - Ability to bind `host_ip:data_port`, unless `--skip-socket-preflight` is used.
 
 The socket check is only a preflight probe; it closes immediately. In the
