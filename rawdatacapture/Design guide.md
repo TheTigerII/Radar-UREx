@@ -10,6 +10,7 @@ the reflector type. Every reported target is labelled `PMM target`.
 DCA1000 raw ADC
   -> validate and assemble complete frames
   -> 256-point range FFT
+  -> per-TX/RX/range slow-time mean subtraction
   -> 64-point Doppler FFT (32 samples/TX, zero-padded)
   -> PMM spectrum folding
   -> calibrated projection subtraction
@@ -38,6 +39,11 @@ Only `profile-mini4-20m.cfg` is accepted:
 - 393,216 raw bytes per frame.
 - 256 range bins at approximately 7.8 cm spacing.
 - 64 Doppler bins after zero-padding.
+
+Before Doppler windowing and transformation, each TX/RX/range slow-time vector
+has its complex mean removed. This suppresses stationary zero-Doppler clutter
+in PMM extraction and in the displayed range-Doppler and Doppler-time spectra.
+It can also attenuate genuinely very slow target components.
 
 Preflight rejects any dimension, timing, slope, sampling-rate, TX order, or
 frame-period mismatch. Processing and display are gated to 0.3–20 m.

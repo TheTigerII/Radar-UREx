@@ -18,7 +18,10 @@ from rawdatacapture.livedatacapture import (
     _format_capture_summary,
     _put_latest_queue_payload,
 )
-from rawdatacapture.dsp import frame_bytes_to_radar_cube
+from rawdatacapture.dsp import (
+    compute_range_doppler_fft,
+    frame_bytes_to_radar_cube,
+)
 
 
 class DcaHeaderTests(unittest.TestCase):
@@ -180,6 +183,31 @@ class AdcLayoutTests(unittest.TestCase):
                 dtype=np.complex64,
             ),
         )
+
+
+class DopplerProcessingTests(unittest.TestCase):
+    def test_slow_time_mean_subtraction_removes_static_clutter(self) -> None:
+        loops = 8
+        transmitters = 2
+        config = SimpleNamespace(
+            num_loops=loops,
+            num_chirps_per_loop=transmitters,
+            num_rx_channels=1,
+            num_adc_samples=3,
+        )
+        static_range_fft = np.full(
+            (loops * transmitters, 1, 3),
+            100.0 + 25.0j,
+            dtype=np.complex64,
+        )
+
+        doppler_cube = compute_range_doppler_fft(
+            static_range_fft,
+            config,
+            fft_size=8,
+        )
+
+        np.testing.assert_allclose(doppler_cube, 0.0, atol=1e-5)
 
 
 class UdpPacketReceiverTests(unittest.TestCase):
