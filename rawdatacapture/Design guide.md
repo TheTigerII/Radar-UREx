@@ -27,10 +27,13 @@ run.py
 ```
 
 `run.py` prompts for a duration before initialization (3 minutes by default;
-zero means unlimited), starts the receiver first, waits one second, and then
-starts the hardware controller. When the deadline expires or Ctrl+C is pressed,
-it stops `startup.py` first so `sensorStop` and DCA1000 `RECORD_STOP` are
-attempted before capture is closed.
+zero means unlimited), starts the capture pipeline first, and waits until it
+reports that the UDP receiver is listening before starting the hardware
+controller. The readiness wait also covers initialization of the selected
+display, frame processor, and optional rotor post-processor; its timeout is
+extended for CUDA/TensorRT startup. When the deadline expires or Ctrl+C is
+pressed, `run.py` stops `startup.py` first so `sensorStop` and DCA1000
+`RECORD_STOP` are attempted before capture is closed.
 
 The programs can also be run manually in two terminals. `startup.py` does not
 embed the real capture receiver: its `--capture-backend` currently supports
@@ -56,7 +59,7 @@ DCA1000 UDP packets (host 192.168.33.30, port 4098)
        enqueue latest display result
        enqueue ordered dedicated-rotor results
   -> RotorPostProcessor process (dedicated rotor classification)
-       run the fixed-shape TensorRT FP16 CNN on CUDA
+       run the fixed-shape CNN with PyTorch/CPU or TensorRT FP16/CUDA
        serialize processed JSONL in frame order
   -> RadarLiveDisplay process (when enabled)
        update persistent PyQtGraph curve, image, or OpenGL scatter items
@@ -73,8 +76,9 @@ results in favor of the newest one.
 - UDP receiver thread: socket receive only.
 - Main process: packet dequeue and `FrameBuffer` assembly.
 - `RadarFrameProcessor`: frame conversion, DSP, logging, and optional raw write.
-- `RotorPostProcessor`: spawned CUDA/TensorRT inference and JSON serialization
-  for classified dedicated-rotor capture.
+- `RotorPostProcessor`: spawned CNN inference and JSON serialization for
+  classified dedicated-rotor capture. `auto` uses TensorRT FP16/CUDA on Jetson
+  and PyTorch/CPU elsewhere; `--classification-device` can select the backend.
 - `RadarLiveDisplay`: PyQtGraph UI for every display mode.
 - Packet queue: `--packet-queue-size`, default 8,192 datagrams.
 - Processing queue: `--processing-queue-size`, default 32 frames.
@@ -90,7 +94,7 @@ SIGINT, consumes the queue sentinel, and drains all frames queued before that
 sentinel. Final DSP and post-processing reports include aggregate p50, p95,
 and maximum timings for range FFT, Doppler, dynamic detection/CFAR, static
 detection, clustering, micro-Doppler, classification feature extraction,
-TensorRT classification, serialization, and each process's total.
+classification, serialization, and each process's total.
 
 ## Configuration
 
@@ -229,9 +233,11 @@ cube is shifted, reducing allocation and memory-copy cost without changing the
 FFT dimensions or update rate.
 
 The first 30 processed detection updates are discarded as warm-up. The next
-90 target-free updates build a median reference, a per-range power floor, and
-a robust per-cell noise estimate from the median absolute deviation in log
-power. Each live change map is corrected by its per-range median to remove
+90 updates build a median reference, a per-range power floor, and a robust
+per-cell noise estimate from the median absolute deviation in log power. The
+implementation does not determine whether those calibration updates are
+target-free, so the operator must keep the target absent until calibration is
+complete. Each live change map is corrected by its per-range median to remove
 common receiver-gain drift and updated with a 0.35-rate temporal EMA. A
 detection must exceed both the default 3 dB absolute threshold and four times
 the learned cell variation. Unprotected reference and noise cells then adapt
@@ -310,21 +316,24 @@ are both retained; the enhanced view subtracts a robust off-centre noise floor
 and uses a fixed 0-to-30 dB relative scale. Per-window noise spread is estimated
 as `1.4826 × MAD` from the lower half below the median, preventing positive
 blade ridges from biasing their own threshold. The gate is the greater of 3 dB
-or three robust standard deviations. A 3×3 Doppler/time support filter requires
-at least three candidate cells. Rejected cells become zero while retained
-relative-dB values are not attenuated. Flash scoring and RPM estimation consume
-this filtered spectrum.
+or three robust standard deviations, capped at 15 dB so deep deterministic
+FFT/cancellation nulls cannot blank the whole display. A 3×3 Doppler/time
+support filter requires at least three candidate cells. Rejected cells become
+zero while retained relative-dB values are not attenuated. Flash scoring and
+RPM estimation consume this filtered spectrum.
 The default estimator model is two blades with a 500-to-10,700 RPM search band,
 matching the current drone. Dedicated rotor processing uses the same verified
 `profile.cfg` acquisition waveform as the other live modes.
 
 When classification is enabled, the DSP worker sends only the ordered frame
-index, rotor result, and 2-by-64 feature step to a spawned post-processor. That
-process owns the CUDA context, TensorRT execution context and stream, and
-persistent host/device buffers. CNN inference and JSON serialization therefore
-run concurrently with the next frame's radar DSP without changing STFT or
-classification cadence. The bounded handoff applies backpressure and never
-silently discards a post-processing item.
+index, rotor result, and 2-by-64 feature step to a spawned post-processor.
+CNN inference and JSON serialization therefore run concurrently with the next
+frame's radar DSP without changing STFT or classification cadence. With the
+CUDA backend, the post-processor owns the TensorRT execution context and
+stream, plus persistent host/device buffers. With the CPU backend, it owns the
+PyTorch inference engine instead. The `auto` device selects CUDA on Jetson and
+CPU elsewhere. The bounded handoff applies backpressure and never silently
+discards a post-processing item.
 
 Window centres combine packet-derived frame time with configured within-frame
 chirp timing. RPM estimation retains two seconds of those physical timestamps.
@@ -334,9 +343,10 @@ removing frame blind time, invalid frames, and processing drops. The newest
 grid. Processed output, capture-gap diagnostics, and gap-aware RPM estimation
 retain the true sampling intervals. Rotor mode
 updates a persistent PyQtGraph `ImageItem` with C-contiguous row-major
-`uint8` RGBA data and a fixed 256-entry Turbo lookup table. Quantization is
-display-only; processed output retains floating-point 0-to-30 dB values. A Qt
-timer polls at up to 60 Hz and drains the one-item queue to the newest payload.
+`uint8` RGBA data and a fixed 256-entry Turbo lookup table. Quantization and
+the 0-to-30 dB clamp are display-only; processed output retains floating-point
+relative-dB values without that upper clamp. A Qt timer polls at up to 60 Hz
+and drains the one-item queue to the newest payload.
 The velocity extent and status layout update only when they change. The clutter
 notch is a static overlay, so the uploaded image remains finite. Raw spectra
 and noise floors remain in processed output but are omitted from the
@@ -362,7 +372,7 @@ range and blade count; separated peaks become per-rotor RPM estimates.
 
 ## Processed and Raw Recording
 
-`--processed-output` streams version-4 newline-delimited JSON. Its first record
+`--processed-output` streams version-5 newline-delimited JSON. Its first record
 describes the radar configuration, data axes, and static-reference settings.
 Each subsequent update contains the dynamic and static point clouds, their
 DBSCAN clusters, static-reference and validation state, suppressed
