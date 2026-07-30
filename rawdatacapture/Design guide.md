@@ -195,6 +195,16 @@ bin index, not velocity in m/s.
 
 ### Point cloud
 
+```text
+range FFT [chirp, rx, range]
+  -> TDM-aware Doppler FFT [doppler, tx, rx, range]
+  -> mean TX/RX power and adaptive clutter normalization
+  -> 2D OS-CFAR, Doppler-local peaks, and range/FOV gates
+  -> batched 32-by-32 planar-array angle FFT
+  -> XYZ points and DBSCAN cluster centers
+  -> one constant-velocity, nearest-neighbor target track
+```
+
 The point-cloud path:
 
 1. Forms mean range-Doppler power.
@@ -268,6 +278,15 @@ RX3. Other layouts fall back to a generic grid. Returned coordinates use
 X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
 
 ### Combined point cloud and micro-Doppler
+
+```text
+selected 3D track range
+  -> nearest range bin plus/minus two bins
+  -> [loop, TX slot, RX, gated range]
+  -> independent 64-loop Hann STFTs with a 32-loop hop
+  -> sum power after the 128-point centered Doppler FFTs
+  -> append the frame's three spectra to a 150-spectrum display history
+```
 
 The `point-cloud-micro-doppler` display computes one Doppler cube for each
 processed update and reuses it for the dynamic point cloud, static angle cube,
