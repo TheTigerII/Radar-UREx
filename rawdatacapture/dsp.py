@@ -154,21 +154,10 @@ class AdaptiveClutterMap:
             self._frames_seen = 0
 
     def _expanded_protection_mask(self, detections: np.ndarray) -> np.ndarray:
-        expanded = np.zeros_like(detections, dtype=bool)
-        range_cells = self.range_protection_cells
-        for doppler_offset in range(
-            -self.doppler_protection_cells,
-            self.doppler_protection_cells + 1,
-        ):
-            doppler_shifted = np.roll(detections, doppler_offset, axis=0)
-            for range_offset in range(-range_cells, range_cells + 1):
-                shifted = np.roll(doppler_shifted, range_offset, axis=1)
-                if range_offset > 0:
-                    shifted[:, :range_offset] = False
-                elif range_offset < 0:
-                    shifted[:, range_offset:] = False
-                expanded |= shifted
-        return expanded
+        doppler_size = 2 * self.doppler_protection_cells + 1
+        range_size = 2 * self.range_protection_cells + 1
+        structure = np.ones((doppler_size, range_size), dtype=bool)
+        return scipy_ndimage.binary_dilation(detections, structure=structure)
 
 
 class StaticSceneMap:
