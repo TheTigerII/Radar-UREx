@@ -42,7 +42,7 @@ DEFAULT_STATIC_DETECTION = True
 DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_REFERENCE_FRAMES = 90
 DEFAULT_STATIC_MIN_CHANGE_DB = 3.0
-DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
+DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 DISPLAY_CHOICES = (
     "none",
@@ -161,7 +161,10 @@ def parse_args() -> argparse.Namespace:
         "--clutter-map-update-rate",
         type=float,
         default=DEFAULT_CLUTTER_MAP_UPDATE_RATE,
-        help="Adaptive clutter-map EMA update rate; use 0 to disable.",
+        help=(
+            "Clutter-map startup-learning EMA rate; the learned map is fixed "
+            "after warm-up. Use 0 to disable the map."
+        ),
     )
     parser.add_argument(
         "--clutter-map-warmup-frames",
@@ -180,8 +183,8 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_STATIC_DETECTION,
         help=(
-            "Detect motion-qualified stationary changes against an adaptive "
-            "startup reference. "
+            "Detect motion-qualified stationary changes against a startup "
+            "reference. "
             "Enabled by default."
         ),
     )
@@ -207,7 +210,10 @@ def parse_args() -> argparse.Namespace:
         "--static-background-update-rate",
         type=float,
         default=DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,
-        help="Adaptive static-background update rate. Defaults to 0.01.",
+        help=(
+            "Adaptive static-background update rate; use 0 to keep the "
+            "startup reference fixed. Defaults to 0."
+        ),
     )
     parser.add_argument(
         "--static-cluster-min-samples",

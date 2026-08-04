@@ -70,7 +70,11 @@ class AdaptiveClutterMapTests(unittest.TestCase):
         np.testing.assert_array_equal(normalized[normalized != 3.0], 1.0)
 
     def test_detection_protection_prevents_target_absorption(self) -> None:
-        clutter = AdaptiveClutterMap(update_rate=1.0, warmup_frames=1)
+        clutter = AdaptiveClutterMap(
+            update_rate=1.0,
+            warmup_frames=1,
+            adapt_after_warmup=True,
+        )
         background = np.ones((5, 8))
         clutter.normalize(background)
         clutter.update(background)
@@ -82,6 +86,19 @@ class AdaptiveClutterMapTests(unittest.TestCase):
         clutter.update(target_frame, detections)
 
         self.assertEqual(clutter.normalize(target_frame)[2, 4], 20.0)
+
+    def test_map_is_frozen_after_warmup_by_default(self) -> None:
+        clutter = AdaptiveClutterMap(update_rate=1.0, warmup_frames=1)
+        background = np.ones((3, 4))
+        clutter.update(background)
+
+        changed_background = np.full((3, 4), 5.0)
+        clutter.update(changed_background)
+
+        np.testing.assert_array_equal(
+            clutter.normalize(changed_background),
+            5.0,
+        )
 
     def test_shape_change_resets_warmup(self) -> None:
         clutter = AdaptiveClutterMap(warmup_frames=1)
@@ -99,6 +116,26 @@ class StaticSceneMapTests(unittest.TestCase):
         scene = StaticSceneMap()
 
         self.assertEqual(scene.minimum_change_db, 3.0)
+        self.assertEqual(scene.background_update_rate, 0.0)
+
+    def test_reference_is_frozen_after_calibration_by_default(self) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=1,
+            smoothing_rate=1.0,
+        )
+        background = np.full((2, 3, 4), 10.0, dtype=np.float32)
+        changed = background.copy()
+        changed[1, 1, 2] = 100.0
+        scene.observe(background)
+
+        first_change = scene.observe(changed)
+        scene.adapt()
+        second_change = scene.observe(changed)
+
+        assert first_change is not None
+        assert second_change is not None
+        np.testing.assert_allclose(second_change, first_change)
 
     def test_frozen_reference_preserves_new_static_change(self) -> None:
         scene = StaticSceneMap(

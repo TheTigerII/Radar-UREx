@@ -31,7 +31,7 @@ DEFAULT_STATIC_MAX_POINTS = 256
 DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER = 4.0
 DEFAULT_STATIC_SMOOTHING_RATE = 0.35
-DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
+DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE = 20.0
 DEFAULT_STATIC_MINIMUM_NOISE_DB = 1.0
 DEFAULT_ROTOR_NOISE_GATE_MIN_DB = 3.0
@@ -43,12 +43,13 @@ ROBUST_GAUSSIAN_MAD_SCALE = 1.4826
 
 
 class AdaptiveClutterMap:
-    """Normalize range-Doppler power with an adaptive background map.
+    """Normalize range-Doppler power with a startup background map.
 
     The map is learned during an initial warm-up period. After warm-up, cells
-    around current detections are not updated, which prevents a persistent
-    target from being absorbed into the background. A shape change resets the
-    map so profiles with different FFT dimensions cannot be mixed.
+    are frozen by default so persistent targets and environmental changes are
+    not absorbed into the background. Optional post-warm-up adaptation protects
+    cells around current detections. A shape change resets the map so profiles
+    with different FFT dimensions cannot be mixed.
     """
 
     def __init__(
@@ -59,6 +60,7 @@ class AdaptiveClutterMap:
         minimum_snr_db: float = 3.0,
         range_protection_cells: int = 2,
         doppler_protection_cells: int = 1,
+        adapt_after_warmup: bool = False,
     ) -> None:
         if not 0.0 < update_rate <= 1.0:
             raise ValueError("Clutter-map update rate must be in (0, 1]")
@@ -74,6 +76,7 @@ class AdaptiveClutterMap:
         self.minimum_snr_db = float(minimum_snr_db)
         self.range_protection_cells = int(range_protection_cells)
         self.doppler_protection_cells = int(doppler_protection_cells)
+        self.adapt_after_warmup = bool(adapt_after_warmup)
         self._background_power: Optional[np.ndarray] = None
         self._frames_seen = 0
 
@@ -114,10 +117,13 @@ class AdaptiveClutterMap:
         power_map: np.ndarray,
         protected_detections: Optional[np.ndarray] = None,
     ) -> None:
-        """Update the map, freezing detection neighborhoods after warm-up."""
+        """Learn the map during warm-up and optionally adapt it afterward."""
         power = self._validated_power(power_map)
         self._ensure_shape(power.shape)
         assert self._background_power is not None
+
+        if self.is_ready and not self.adapt_after_warmup:
+            return
 
         if self._frames_seen == 0:
             self._background_power[...] = power

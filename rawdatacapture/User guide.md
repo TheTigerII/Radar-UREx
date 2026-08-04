@@ -245,13 +245,12 @@ Static-change detection is enabled by default. Keep the radar and monitored
 scene fixed and leave the target absent for startup calibration. The first
 30 processed detection updates are discarded as warm-up, then the next
 90 updates build a median range-azimuth-elevation reference. The plot reports
-the warm-up and calibration progress, then `Static reference ready (adaptive)`.
+the warm-up and calibration progress, then `Static reference ready (fixed)`.
 The detector learns normal per-angle-cell variation, applies a per-range power
 floor, removes common receiver-gain drift, and temporally smooths the change
 map. A cell must exceed both the configured 3 dB minimum and four times its
-learned noise variation. Unprotected background and noise estimates adapt at
-0.01 per processed frame, suppressing slow thermal, gain, and stationary-room
-drift.
+learned noise variation. The reference and learned noise estimates remain
+fixed after calibration by default, so later scene changes are not absorbed.
 
 Raw changes do not become displayed static targets by themselves. A confirmed
 dynamic track must move at least 0.3 m during the preceding 30 frames. For the
@@ -292,9 +291,9 @@ Use `--cluster-eps-m` and `--cluster-min-samples` to tune DBSCAN. Set
 python run.py --display point-cloud --cluster-eps-m 0.4 --cluster-min-samples 3
 ```
 
-The clutter-map update rate defaults to `0.02`, and its minimum normalized
-target-to-background ratio defaults to 3 dB. A smaller update rate adapts more
-slowly to environmental changes. Change the initial learning period and
+The clutter-map warm-up update rate defaults to `0.02`, and its minimum
+normalized target-to-background ratio defaults to 3 dB. The map is fixed once
+warm-up completes. Change the initial learning period and
 minimum ratio with `--clutter-map-warmup-frames` and
 `--clutter-map-min-snr-db`. Use `--clutter-map-update-rate 0` to disable the
 software clutter map. These options affect point detection only; point-cloud
@@ -304,8 +303,9 @@ Use `--static-warmup-frames`, `--static-reference-frames`,
 `--static-background-update-rate`, `--static-cluster-min-samples`, and
 `--static-min-change-db` to tune calibration, adaptation, validation, and the
 absolute sensitivity floor. Defaults are 30 warm-up frames, 90 reference
-frames, a 0.01 adaptation rate, one same-frame cluster member, and 3 dB. Set
-`--static-cluster-min-samples 3` to require three spatially adjacent candidates
+frames, a fixed reference (zero adaptation rate), one same-frame cluster member,
+and 3 dB. Set a nonzero `--static-background-update-rate` to opt into adaptation.
+Set `--static-cluster-min-samples 3` to require three spatially adjacent candidates
 in every update in addition to temporal confirmation. The learned
 noise threshold can make the effective threshold higher in unstable cells.
 Disable the static branch without changing the moving-target path with:

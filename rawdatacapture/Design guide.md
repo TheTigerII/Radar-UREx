@@ -208,14 +208,14 @@ range FFT [chirp, rx, range]
 The point-cloud path:
 
 1. Forms mean range-Doppler power.
-2. Applies an adaptive power-domain clutter map. During the initial warm-up it
+2. Applies a power-domain clutter map. During the initial warm-up it
    learns every cell using an exponential moving average and emits no point
    detections. It then divides every cell by its learned background power before
    CFAR and applies a default 3 dB minimum target-to-background ratio. This
    keeps the normalized background near one instead of producing large regions
-   of zero-valued CFAR training cells. Range and Doppler guard neighborhoods
-   around current detections are frozen during map updates so targets are not
-   immediately absorbed. An FFT-shape change resets the map.
+   of zero-valued CFAR training cells. The map remains fixed after warm-up so
+   later targets and scene changes are not absorbed. An FFT-shape change resets
+   the map and starts a new warm-up.
 3. Runs two-dimensional OS-CFAR with Doppler wrapping and a default requested
    false-alarm probability of `1e-3` per axis.
 4. Keeps Doppler-local peaks without suppressing adjacent range detections, then

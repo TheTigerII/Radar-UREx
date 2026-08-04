@@ -119,7 +119,7 @@ DEFAULT_STATIC_DETECTION = True
 DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_REFERENCE_FRAMES = 90
 DEFAULT_STATIC_MIN_CHANGE_DB = 3.0
-DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.01
+DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 STATIC_MOTION_HISTORY_UPDATES = 30
 STATIC_MOTION_MIN_DISPLACEMENT_M = 0.3
@@ -325,7 +325,8 @@ class StaticReferenceStatus:
                 f"{self.warmup_frames_seen}/{self.warmup_frames_required}"
             )
         if self.ready:
-            return "Static reference ready (adaptive)"
+            reference_mode = "adaptive" if self.adaptive else "fixed"
+            return f"Static reference ready ({reference_mode})"
         return (
             "Calibrating static reference "
             f"{self.frames_seen}/{self.required_frames}"
@@ -1442,6 +1443,7 @@ class DisplayPayloadSink:
                 update_rate=clutter_map_update_rate,
                 warmup_frames=clutter_map_warmup_frames,
                 minimum_snr_db=clutter_map_min_snr_db,
+                adapt_after_warmup=False,
             )
             if clutter_map_update_rate > 0.0
             else None
@@ -4345,10 +4347,11 @@ def _run_frame_processor_impl(
         or processed_writer.enabled
     ):
         worker_emit(
-            "Adaptive clutter map enabled: "
-            f"update_rate={clutter_map_update_rate:g}, "
+            "Clutter map enabled: "
+            f"warmup_update_rate={clutter_map_update_rate:g}, "
             f"warmup={clutter_map_warmup_frames} updates, "
-            f"minimum_snr={clutter_map_min_snr_db:g} dB"
+            f"minimum_snr={clutter_map_min_snr_db:g} dB, "
+            "post_warmup_updates=disabled"
         )
     if display.static_scene_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -4864,7 +4867,8 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_CLUTTER_MAP_UPDATE_RATE,
         help=(
-            "Adaptive clutter-map EMA update rate. Defaults to 0.02; "
+            "Clutter-map startup-learning EMA rate. The learned map is fixed "
+            "after warm-up. Defaults to 0.02; "
             "use 0 to disable clutter suppression."
         ),
     )
@@ -4891,8 +4895,8 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=DEFAULT_STATIC_DETECTION,
         help=(
-            "Detect motion-qualified stationary changes against an adaptive "
-            "startup reference. "
+            "Detect motion-qualified stationary changes against a startup "
+            "reference. "
             "Enabled by default; use --no-static-detection to disable."
         ),
     )
@@ -4928,7 +4932,8 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,
         help=(
-            "Adaptive update rate for unprotected static background cells. "
+            "Adaptive update rate for unprotected static background cells; "
+            "use 0 to keep the startup reference fixed. "
             f"Defaults to {DEFAULT_STATIC_BACKGROUND_UPDATE_RATE:g}."
         ),
     )
