@@ -137,7 +137,7 @@ The final state is `STOPPED`.
 `run.py` supplies the missing integration externally:
 
 ```text
-prompt for duration (default 3 minutes; 0 is unlimited)
+prompt for duration (default 5 minutes; 0 is unlimited)
 start livedatacapture.py
 wait 1 second and verify it is still running
 start startup.py with:

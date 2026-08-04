@@ -117,6 +117,7 @@ class StaticSceneMapTests(unittest.TestCase):
 
         self.assertEqual(scene.minimum_change_db, 3.0)
         self.assertEqual(scene.background_update_rate, 0.0)
+        self.assertEqual(scene.reference_frames, 150)
 
     def test_reference_is_frozen_after_calibration_by_default(self) -> None:
         scene = StaticSceneMap(

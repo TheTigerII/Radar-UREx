@@ -10,11 +10,11 @@ import run
 
 
 class ChooseDurationMinutesTests(unittest.TestCase):
-    def test_blank_input_uses_three_minute_default(self) -> None:
+    def test_blank_input_uses_five_minute_default(self) -> None:
         with patch("builtins.input", return_value=""):
             self.assertEqual(
                 run.choose_duration_minutes(None),
-                run.DEFAULT_DURATION_MINUTES,
+                5.0,
             )
 
     def test_zero_means_unlimited(self) -> None:
@@ -88,6 +88,7 @@ class ChooseDisplayTests(unittest.TestCase):
         self.assertEqual(args.clutter_map_min_snr_db, 3.0)
         self.assertEqual(args.static_min_change_db, 3.0)
         self.assertEqual(args.static_background_update_rate, 0.0)
+        self.assertEqual(args.static_reference_frames, 150)
 
 
 class CaptureCommandTests(unittest.TestCase):

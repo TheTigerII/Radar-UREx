@@ -117,7 +117,7 @@ micro-Doppler image in one window.
 `run.py`:
 
 1. Prompts for a display mode unless `--display` is supplied.
-2. Prompts for a run duration in minutes. Press Enter for the 3-minute default,
+2. Prompts for a run duration in minutes. Press Enter for the 5-minute default,
    or enter `0` for an unlimited run.
 3. Detects serial ports and asks which command UART to use when needed.
 4. Starts `livedatacapture.py` with `profile.cfg` and `setup.json` by default.
@@ -150,7 +150,7 @@ python run.py --display range --max-range-m 0.5
 Skip the duration prompt with an explicit value:
 
 ```powershell
-python run.py --duration-minutes 3
+python run.py --duration-minutes 5
 python run.py --duration-minutes 0
 ```
 
@@ -244,7 +244,7 @@ Doppler-only peak filtering, and a batched virtual antenna 2D FFT.
 Static-change detection is enabled by default. Keep the radar and monitored
 scene fixed and leave the target absent for startup calibration. The first
 30 processed detection updates are discarded as warm-up, then the next
-90 updates build a median range-azimuth-elevation reference. The plot reports
+150 updates build a median range-azimuth-elevation reference. The plot reports
 the warm-up and calibration progress, then `Static reference ready (fixed)`.
 The detector learns normal per-angle-cell variation, applies a per-range power
 floor, removes common receiver-gain drift, and temporally smooths the change
@@ -269,7 +269,7 @@ point-cloud update with the complete 32-by-32 angle FFT. Temporal smoothing
 can delay a new static point by a few frames. Objects present during
 calibration become part of the reference and are not reported as changes.
 Calibration counts updates that actually reach point-cloud processing, so
-packet/frame loss makes it take longer than 120 physical frames.
+packet/frame loss makes it take longer than 180 physical frames.
 
 Both paths apply a 10 m radial range and a ±60-degree azimuth/elevation field
 of view. Spatial DBSCAN defaults to a 0.4 m neighborhood and two-point minimum.
@@ -302,7 +302,7 @@ magnitude, the range-Doppler display, and micro-Doppler retain raw power.
 Use `--static-warmup-frames`, `--static-reference-frames`,
 `--static-background-update-rate`, `--static-cluster-min-samples`, and
 `--static-min-change-db` to tune calibration, adaptation, validation, and the
-absolute sensitivity floor. Defaults are 30 warm-up frames, 90 reference
+absolute sensitivity floor. Defaults are 30 warm-up frames, 150 reference
 frames, a fixed reference (zero adaptation rate), one same-frame cluster member,
 and 3 dB. Set a nonzero `--static-background-update-rate` to opt into adaptation.
 Set `--static-cluster-min-samples 3` to require three spatially adjacent candidates
@@ -505,7 +505,7 @@ metadata path is `test_capture.bin.json`; override it with `--raw-metadata`.
 The sidecar is written during clean shutdown.
 
 Raw recording is opt-in because its files are much larger than processed JSONL
-output. Files have no size limit. A `run.py` session is limited to 3 minutes by
+output. Files have no size limit. A `run.py` session is limited to 5 minutes by
 default, but `livedatacapture.py` alone and `run.py --duration-minutes 0` run
 until stopped.
 

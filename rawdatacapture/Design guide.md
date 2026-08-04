@@ -26,7 +26,7 @@ run.py
   +-- startup.py           radar serial control and DCA1000 UDP control
 ```
 
-`run.py` prompts for a duration before initialization (3 minutes by default;
+`run.py` prompts for a duration before initialization (5 minutes by default;
 zero means unlimited), starts the capture pipeline first, and waits until it
 reports that the UDP receiver is listening before starting the hardware
 controller. The readiness wait also covers initialization of the selected
@@ -243,15 +243,15 @@ cube is shifted, reducing allocation and memory-copy cost without changing the
 FFT dimensions or update rate.
 
 The first 30 processed detection updates are discarded as warm-up. The next
-90 updates build a median reference, a per-range power floor, and a robust
+150 updates build a median reference, a per-range power floor, and a robust
 per-cell noise estimate from the median absolute deviation in log power. The
 implementation does not determine whether those calibration updates are
 target-free, so the operator must keep the target absent until calibration is
 complete. Each live change map is corrected by its per-range median to remove
 common receiver-gain drift and updated with a 0.35-rate temporal EMA. A
 detection must exceed both the default 3 dB absolute threshold and four times
-the learned cell variation. Unprotected reference and noise cells then adapt
-at 0.01 per processed frame. Range/FOV gating occurs before local-maximum
+the learned cell variation. The reference and noise estimates remain fixed
+after calibration. Range/FOV gating occurs before local-maximum
 testing; when the threshold produces no candidates, the full 3D maximum scan
 is skipped. The remaining cells are capped at the 256 strongest before XYZ
 conversion and DBSCAN. Returned raw candidates are

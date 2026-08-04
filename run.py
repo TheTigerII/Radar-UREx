@@ -28,7 +28,7 @@ DEFAULT_RADAR_BAUD = 115200
 DEFAULT_RADAR_COMMAND_TIMEOUT = 10.0
 DEFAULT_DCA_TIMEOUT = 3.0
 DEFAULT_DCA_RETRIES = 5
-DEFAULT_DURATION_MINUTES = 3.0
+DEFAULT_DURATION_MINUTES = 5.0
 DEFAULT_MICRO_DOPPLER_RANGE_M = 2.15
 DEFAULT_ROTOR_BLADES = 2
 DEFAULT_ROTOR_RPM_MAX = 10_700.0
@@ -40,7 +40,7 @@ DEFAULT_CLUTTER_MAP_WARMUP_FRAMES = 30
 DEFAULT_CLUTTER_MAP_MIN_SNR_DB = 3.0
 DEFAULT_STATIC_DETECTION = True
 DEFAULT_STATIC_WARMUP_FRAMES = 30
-DEFAULT_STATIC_REFERENCE_FRAMES = 90
+DEFAULT_STATIC_REFERENCE_FRAMES = 150
 DEFAULT_STATIC_MIN_CHANGE_DB = 3.0
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
@@ -198,7 +198,7 @@ def parse_args() -> argparse.Namespace:
         "--static-reference-frames",
         type=int,
         default=DEFAULT_STATIC_REFERENCE_FRAMES,
-        help="Processed updates used for static-scene calibration. Defaults to 90.",
+        help="Processed updates used for static-scene calibration. Defaults to 150.",
     )
     parser.add_argument(
         "--static-min-change-db",
@@ -230,7 +230,7 @@ def parse_args() -> argparse.Namespace:
         type=float,
         help=(
             "Run duration in minutes. Use 0 for no time limit. "
-            "When omitted, prompt with a default of 3 minutes."
+            "When omitted, prompt with a default of 5 minutes."
         ),
     )
     parser.add_argument(
