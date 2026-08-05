@@ -775,6 +775,7 @@ def build_capture_command(
     processed_output: Optional[Path],
     raw_output: Optional[Path] = None,
     config_path: Optional[Path] = None,
+    host_compensation_profile: Optional[Path] = None,
 ) -> list[str]:
     display_update_every = args.display_update_every
     if display_update_every is None:
@@ -877,6 +878,17 @@ def build_capture_command(
                 "--calibration-angle-deg",
                 str(calibration_angle_deg),
             )
+        )
+    if display in {
+        radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE,
+        radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE,
+    }:
+        if host_compensation_profile is None:
+            raise ValueError(
+                "Angular calibration requires a host compensation profile"
+            )
+        command.extend(
+            ("--host-compensation-profile", str(host_compensation_profile))
         )
     if display == "micro-doppler":
         target_range_m = getattr(args, "micro_doppler_range_m", None)
@@ -1070,11 +1082,6 @@ def run_calibration_mode(
                     runtime_profile,
                     source_config,
                     settings,
-                    (
-                        operational_profile
-                        if calibration_type in {"azimuth", "elevation"}
-                        else None
-                    ),
                 )
             except (OSError, ValueError) as exc:
                 print(f"Could not create calibration runtime profile: {exc}", file=sys.stderr)
@@ -1104,6 +1111,11 @@ def run_calibration_mode(
                     None,
                     None,
                     runtime_profile,
+                    (
+                        operational_profile
+                        if calibration_type in {"azimuth", "elevation"}
+                        else None
+                    ),
                 ),
                 capture_output=True,
             )

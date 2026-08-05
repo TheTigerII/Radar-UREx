@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Iterable, Optional, TextIO
@@ -818,6 +818,31 @@ class RadarCaptureConfig:
             return None
         active_time_s = self.num_chirps_per_frame * self.chirp_period_s
         return active_time_s / (self.frame_periodicity_ms * 1e-3)
+
+
+def _with_host_compensation(
+    capture_config: RadarCaptureConfig,
+    compensation_config: RadarCaptureConfig,
+) -> RadarCaptureConfig:
+    """Import host DSP corrections without changing capture dimensions."""
+
+    coefficients = compensation_config.rx_channel_compensation
+    if coefficients is None or len(coefficients) != 12:
+        raise ValueError(
+            "Host compensation profile must contain 12 complex channel coefficients"
+        )
+    if not all(
+        np.isfinite(value.real) and np.isfinite(value.imag)
+        for value in coefficients
+    ):
+        raise ValueError("Host channel compensation coefficients must be finite")
+    if not np.isfinite(compensation_config.range_bias_m):
+        raise ValueError("Host range bias must be finite")
+    return replace(
+        capture_config,
+        range_bias_m=compensation_config.range_bias_m,
+        rx_channel_compensation=coefficients,
+    )
 
 
 @dataclass(frozen=True)
@@ -4779,6 +4804,14 @@ def parse_args() -> argparse.Namespace:
             f"Defaults to {DEFAULT_SETUP_PATH}."
         ),
     )
+    parser.add_argument(
+        "--host-compensation-profile",
+        type=Path,
+        help=(
+            "Operational profile supplying range/channel corrections to host DSP. "
+            "It is not sent to radar firmware."
+        ),
+    )
     parser.add_argument("--host-ip", default=UDP_IP, help="Host Ethernet IP to bind.")
     parser.add_argument("--data-port", type=int, default=UDP_PORT)
     parser.add_argument("--buffer-size", type=int, default=BUFFER_SIZE)
@@ -5779,6 +5812,31 @@ def main() -> None:
             args.static_detection = False
         resolved_config_path = _resolve_config_path(args.config)
         config = RadarCaptureConfig.from_file(resolved_config_path)
+        if args.display in {
+            radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE,
+            radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE,
+        }:
+            if args.host_compensation_profile is None:
+                raise CaptureStartupError(
+                    "Angular calibration requires --host-compensation-profile"
+                )
+            resolved_compensation_path = _resolve_config_path(
+                args.host_compensation_profile
+            )
+            try:
+                compensation_config = RadarCaptureConfig.from_file(
+                    resolved_compensation_path
+                )
+                config = _with_host_compensation(config, compensation_config)
+            except (OSError, ValueError) as exc:
+                raise CaptureStartupError(
+                    f"Invalid host compensation profile: {exc}"
+                ) from exc
+            emit(
+                "Loaded host-only range/channel compensation: "
+                f"profile={resolved_compensation_path}, "
+                f"range_bias={config.range_bias_m:+.6f} m"
+            )
         if calibration_settings is not None:
             radar_calibration.validate_calibration_profile_text(
                 resolved_config_path.read_text(encoding="utf-8"),

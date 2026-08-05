@@ -327,7 +327,6 @@ def create_runtime_profile(
     destination_path: Path | str,
     radar_config: Any,
     settings: CalibrationSettings,
-    compensation_profile_path: Path | str | None = None,
 ) -> Path:
     """Create the temporary capture profile while leaving the source untouched."""
 
@@ -356,36 +355,6 @@ def create_runtime_profile(
             output_lines.append(raw_line)
     if any(count != 1 for count in replaced.values()):
         raise ValueError(f"Ambiguous runtime profile commands: {replaced}")
-    if compensation_profile_path is not None:
-        compensation_text = Path(compensation_profile_path).read_text(encoding="utf-8")
-        compensation_lines = _command_occurrences(
-            compensation_text, "compRangeBiasAndRxChanPhase"
-        )
-        source_compensation_lines = _command_occurrences(
-            "".join(output_lines), "compRangeBiasAndRxChanPhase"
-        )
-        if len(compensation_lines) != 1 or len(source_compensation_lines) != 1:
-            raise ValueError(
-                "Angular calibration requires exactly one compensation command "
-                "in both calibration and operational profiles"
-            )
-        compensation_command = " ".join(compensation_lines[0][2])
-        copied_lines: list[str] = []
-        for raw_line in output_lines:
-            body = raw_line.rstrip("\r\n")
-            ending = raw_line[len(body) :]
-            stripped = body.strip()
-            command = (
-                stripped.split(maxsplit=1)[0]
-                if stripped and not stripped.startswith(("%", "#"))
-                else ""
-            )
-            if command == "compRangeBiasAndRxChanPhase":
-                indent = body[: len(body) - len(body.lstrip())]
-                copied_lines.append(indent + compensation_command + ending)
-            else:
-                copied_lines.append(raw_line)
-        output_lines = copied_lines
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes("".join(output_lines).encode("utf-8"))
     return destination

@@ -9,7 +9,10 @@ from rawdatacapture.dsp import (
     _apply_host_angle_calibration,
     build_virtual_antenna_grids,
 )
-from rawdatacapture.livedatacapture import RadarCaptureConfig
+from rawdatacapture.livedatacapture import (
+    RadarCaptureConfig,
+    _with_host_compensation,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,12 +67,11 @@ class CalibrationProfileTests(unittest.TestCase):
                 require_raw_lvds=True,
             )
 
-    def test_angular_runtime_imports_operational_channel_compensation(self) -> None:
+    def test_angular_runtime_keeps_firmware_neutral_and_imports_host_compensation(self) -> None:
         operational = ROOT / "rawdatacapture" / "profile.cfg"
-        operational_text = operational.read_text(encoding="utf-8")
-        operational_command = next(
+        source_command = next(
             line.strip()
-            for line in operational_text.splitlines()
+            for line in CALIBRATION_PROFILE.read_text(encoding="utf-8").splitlines()
             if line.strip().startswith("compRangeBiasAndRxChanPhase")
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -79,14 +81,23 @@ class CalibrationProfileTests(unittest.TestCase):
                 runtime,
                 self.config,
                 calibrate.CalibrationSettings(calibration_type="azimuth"),
-                operational,
             )
             runtime_command = next(
                 line.strip()
                 for line in runtime.read_text(encoding="utf-8").splitlines()
                 if line.strip().startswith("compRangeBiasAndRxChanPhase")
             )
-            self.assertEqual(runtime_command, operational_command)
+            self.assertEqual(runtime_command, source_command)
+            runtime_config = RadarCaptureConfig.from_file(runtime)
+            operational_config = RadarCaptureConfig.from_file(operational)
+            host_config = _with_host_compensation(
+                runtime_config, operational_config
+            )
+            self.assertEqual(
+                host_config.rx_channel_compensation,
+                operational_config.rx_channel_compensation,
+            )
+            self.assertEqual(host_config.range_bias_m, operational_config.range_bias_m)
 
     def test_duplicate_required_command_is_rejected(self) -> None:
         text = CALIBRATION_PROFILE.read_text(encoding="utf-8")

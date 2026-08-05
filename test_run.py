@@ -146,6 +146,23 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertNotIn("--processed-output", command)
         self.assertIn("--calibration-frames", command)
 
+        angular_command = run.build_capture_command(
+            args,
+            "azimuth-calibration",
+            None,
+            config_path=Path("runtime.cfg"),
+            host_compensation_profile=Path("profile.cfg"),
+        )
+        self.assertIn("--host-compensation-profile", angular_command)
+        self.assertIn("profile.cfg", angular_command)
+        with self.assertRaisesRegex(ValueError, "host compensation"):
+            run.build_capture_command(
+                args,
+                "azimuth-calibration",
+                None,
+                config_path=Path("runtime.cfg"),
+            )
+
     def test_processed_output_is_default_and_raw_output_is_opt_in(self) -> None:
         args = SimpleNamespace(
             display_update_every=1,
