@@ -1,5 +1,7 @@
 import argparse
+import queue
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -141,6 +143,24 @@ class PromptTests(unittest.TestCase):
                 with patch("builtins.input", return_value=menu_value):
                     self.assertEqual(run.choose_display(None), display)
 
+    def test_menu_displays_friendly_calibration_names(self) -> None:
+        with (
+            patch("builtins.input", return_value="6"),
+            patch("builtins.print") as print_mock,
+        ):
+            self.assertEqual(run.choose_display(None), "calibration")
+
+        rendered_lines = [
+            str(call.args[0]) for call in print_mock.call_args_list if call.args
+        ]
+        self.assertIn("  6. range calibration", rendered_lines)
+        self.assertIn("  7. azimuth calibration", rendered_lines)
+        self.assertIn("  8. elevation calibration", rendered_lines)
+
+    def test_friendly_range_calibration_name_is_accepted(self) -> None:
+        with patch("builtins.input", return_value="range calibration"):
+            self.assertEqual(run.choose_display(None), "calibration")
+
     def test_negative_duration_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             run.choose_duration_minutes(-1.0)
@@ -161,6 +181,25 @@ class CaptureReadinessTests(unittest.TestCase):
             run.relay_capture_output(process, ready)
 
         self.assertTrue(ready.is_set())
+
+    def test_waits_for_calibration_result_relayed_during_shutdown(self) -> None:
+        result_queue: queue.SimpleQueue = queue.SimpleQueue()
+
+        def relay_delayed_result() -> None:
+            time.sleep(0.02)
+            result_queue.put({"calibration_type": "range"})
+
+        relay_thread = threading.Thread(target=relay_delayed_result)
+        relay_thread.start()
+
+        payload = run._wait_for_calibration_payload(
+            result_queue,
+            relay_thread,
+            timeout_seconds=1.0,
+        )
+
+        relay_thread.join(timeout=1.0)
+        self.assertEqual(payload, {"calibration_type": "range"})
 
 
 if __name__ == "__main__":

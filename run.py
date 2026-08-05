@@ -46,6 +46,11 @@ DISPLAY_CHOICES = (
     radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE,
     radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE,
 )
+DISPLAY_LABELS = {
+    radar_calibration.CALIBRATION_DISPLAY_MODE: "range calibration",
+    radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE: "azimuth calibration",
+    radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE: "elevation calibration",
+}
 CAPTURE_READY_PREFIX = "Listening for live radar stream "
 CAPTURE_STARTUP_TIMEOUT_SECONDS = 30.0
 DEFAULT_RADAR_UART_DESCRIPTION = (
@@ -149,13 +154,17 @@ def choose_display(display: Optional[str]) -> str:
         return display
     print("Display type:")
     for index, name in enumerate(DISPLAY_CHOICES, start=1):
-        print(f"  {index}. {name}")
+        print(f"  {index}. {DISPLAY_LABELS.get(name, name)}")
     while True:
         value = input("Select display type [5]: ").strip()
         if not value:
             return "combined"
         if value in DISPLAY_CHOICES:
             return value
+        normalized_value = value.casefold().replace("-", " ").replace("_", " ")
+        for name, label in DISPLAY_LABELS.items():
+            if normalized_value == label:
+                return name
         if value.isdigit() and 1 <= int(value) <= len(DISPLAY_CHOICES):
             return DISPLAY_CHOICES[int(value) - 1]
         print("Choose a listed number or display name.")
@@ -502,6 +511,33 @@ def _calibration_result_from_payload(
     return radar_calibration.AngularCalibrationResult.from_dict(payload)
 
 
+def _wait_for_calibration_payload(
+    result_queue: queue.SimpleQueue,
+    relay_thread: threading.Thread,
+    timeout_seconds: float = 5.0,
+) -> Optional[dict]:
+    """Allow the stdout relay to deliver a result printed during shutdown."""
+
+    deadline = time.monotonic() + max(timeout_seconds, 0.0)
+    while True:
+        try:
+            payload = result_queue.get_nowait()
+        except queue.Empty:
+            payload = None
+        if isinstance(payload, dict):
+            return payload
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return None
+        relay_thread.join(timeout=min(0.1, remaining))
+        if not relay_thread.is_alive():
+            try:
+                payload = result_queue.get_nowait()
+            except queue.Empty:
+                return None
+            return payload if isinstance(payload, dict) else None
+
+
 def run_calibration_mode(
     args: argparse.Namespace,
     display: str,
@@ -632,13 +668,12 @@ def run_calibration_mode(
                     return startup.returncode or 1
                 if capture.poll() is not None:
                     # The result is printed immediately before the capture exits.
-                    # Let the relay consume the remaining pipe content before
-                    # deciding that an automatic, successful exit was a failure.
-                    relay_thread.join(timeout=1.0)
-                    try:
-                        payload = result_queue.get_nowait()
-                    except queue.Empty:
-                        payload = None
+                    # Give the relay enough time to consume the remaining pipe
+                    # content before treating an automatic exit as a failure.
+                    payload = _wait_for_calibration_payload(
+                        result_queue,
+                        relay_thread,
+                    )
                     if payload is not None:
                         result = _calibration_result_from_payload(payload)
                         break
@@ -649,6 +684,16 @@ def run_calibration_mode(
                     )
                     return capture.returncode or 1
                 time.sleep(0.1)
+            if result is None:
+                # A result emitted at the timeout boundary can still be waiting
+                # in the capture process's stdout pipe.
+                payload = _wait_for_calibration_payload(
+                    result_queue,
+                    relay_thread,
+                    timeout_seconds=1.0,
+                )
+                if payload is not None:
+                    result = _calibration_result_from_payload(payload)
             if result is None:
                 print(
                     "Calibration timed out without a stable result; profile unchanged.",
@@ -670,6 +715,7 @@ def run_calibration_mode(
             temporary_profiles.cleanup()
 
     assert result is not None
+    print("Calibration completed successfully.")
     try:
         radar_calibration.write_calibration_report(report_path, result)
     except OSError as exc:
