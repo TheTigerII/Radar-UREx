@@ -49,6 +49,7 @@ if __package__ in {None, ""}:
         static_target_protection_mask,
         validate_openradar_backend,
     )
+    from rawdatacapture import calibrate as radar_calibration
 else:
     from .dsp import (
         AdaptiveClutterMap,
@@ -78,6 +79,7 @@ else:
         static_target_protection_mask,
         validate_openradar_backend,
     )
+    from . import calibrate as radar_calibration
 
 from inference import (
     DroneBirdInference,
@@ -664,6 +666,8 @@ class RadarCaptureConfig:
     idle_time_us: Optional[float] = None
     ramp_end_time_us: Optional[float] = None
     frame_periodicity_ms: Optional[float] = None
+    range_bias_m: float = 0.0
+    rx_channel_compensation: Optional[tuple[complex, ...]] = None
 
     @classmethod
     def from_dimensions(
@@ -684,6 +688,8 @@ class RadarCaptureConfig:
         idle_time_us: Optional[float] = None,
         ramp_end_time_us: Optional[float] = None,
         frame_periodicity_ms: Optional[float] = None,
+        range_bias_m: float = 0.0,
+        rx_channel_compensation: Optional[Iterable[complex]] = None,
     ) -> "RadarCaptureConfig":
         bytes_per_complex_sample = 4  # int16 I + int16 Q
         bytes_per_frame = (
@@ -713,6 +719,12 @@ class RadarCaptureConfig:
             idle_time_us=idle_time_us,
             ramp_end_time_us=ramp_end_time_us,
             frame_periodicity_ms=frame_periodicity_ms,
+            range_bias_m=float(range_bias_m),
+            rx_channel_compensation=(
+                tuple(complex(value) for value in rx_channel_compensation)
+                if rx_channel_compensation is not None
+                else None
+            ),
         )
 
     @classmethod
@@ -749,6 +761,32 @@ class RadarCaptureConfig:
 
     def range_axis_m(self) -> Optional[np.ndarray]:
         return range_axis_m(self)
+
+    # Calibration terminology aliases.  Keeping these read-only avoids changing
+    # the existing capture/DSP API while making dimensional validation explicit.
+    @property
+    def adc_samples(self) -> int:
+        return self.num_adc_samples
+
+    @property
+    def rx_channels(self) -> int:
+        return self.num_rx_channels
+
+    @property
+    def chirps_per_frame(self) -> int:
+        return self.num_chirps_per_frame
+
+    @property
+    def loops_per_frame(self) -> int:
+        return self.num_loops or self.num_chirps_per_frame
+
+    @property
+    def chirps_per_loop(self) -> int:
+        return self.num_chirps_per_loop or 1
+
+    @property
+    def chirp_tx_masks(self) -> tuple[int, ...]:
+        return self.tx_channel_masks or ()
 
     @property
     def chirp_period_s(self) -> Optional[float]:
@@ -1195,6 +1233,15 @@ class ProcessedOutputWriter:
                 "slow_time_rate_hz": config.slow_time_rate_hz,
                 "frame_duty_cycle": config.frame_duty_cycle,
                 "range_resolution_m": config.range_resolution_m,
+                "range_bias_m": config.range_bias_m,
+                "rx_channel_compensation": (
+                    [
+                        [value.real, value.imag]
+                        for value in config.rx_channel_compensation
+                    ]
+                    if config.rx_channel_compensation is not None
+                    else None
+                ),
             },
         }
         self.file.write(json.dumps(metadata, separators=(",", ":")) + "\n")
@@ -1424,6 +1471,9 @@ class DisplayPayloadSink:
         rotor_post_queue: Optional[mp.Queue] = None,
         rotor_post_failure_event: Optional[Any] = None,
         rotor_post_queue_high_water: Optional[Any] = None,
+        calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
+        calibration_complete_event: Optional[Any] = None,
+        calibration_emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
@@ -1438,6 +1488,14 @@ class DisplayPayloadSink:
         self.rotor_post_queue = rotor_post_queue
         self.rotor_post_failure_event = rotor_post_failure_event
         self.rotor_post_queue_high_water = rotor_post_queue_high_water
+        self.calibration_accumulator = (
+            radar_calibration.CalibrationAccumulator(config, calibration_settings)
+            if calibration_settings is not None
+            else None
+        )
+        self.calibration_complete_event = calibration_complete_event
+        self.calibration_emit = calibration_emit_func
+        self._calibration_result_emitted = False
         self.clutter_map = (
             AdaptiveClutterMap(
                 update_rate=clutter_map_update_rate,
@@ -1524,6 +1582,25 @@ class DisplayPayloadSink:
         *,
         captured_at_s: Optional[float] = None,
     ) -> None:
+        if self.calibration_accumulator is not None:
+            payload = self.calibration_accumulator.update(range_fft)
+            if self.payload_queue is not None:
+                _increment_shared_counter(
+                    self.display_skipped_counter,
+                    _put_latest_queue_payload(self.payload_queue, payload),
+                )
+            result = self.calibration_accumulator.result
+            if result is not None and not self._calibration_result_emitted:
+                self._calibration_result_emitted = True
+                if self.calibration_emit is not None:
+                    self.calibration_emit(
+                        radar_calibration.CALIBRATION_RESULT_PREFIX
+                        + json.dumps(result.to_dict(), separators=(",", ":"))
+                    )
+                if self.calibration_complete_event is not None:
+                    self.calibration_complete_event.set()
+            return
+
         save_processed = bool(
             self.processed_writer is not None and self.processed_writer.enabled
         )
@@ -2527,6 +2604,15 @@ class RawFrameWriter:
                 "sample_rate_ksps": self.config.sample_rate_ksps,
                 "frequency_slope_mhz_per_us": self.config.frequency_slope_mhz_per_us,
                 "range_resolution_m": self.config.range_resolution_m,
+                "range_bias_m": self.config.range_bias_m,
+                "rx_channel_compensation": (
+                    [
+                        [value.real, value.imag]
+                        for value in self.config.rx_channel_compensation
+                    ]
+                    if self.config.rx_channel_compensation is not None
+                    else None
+                ),
             },
             "slow_time_processing": {
                 "start_frequency_ghz": self.config.start_frequency_ghz,
@@ -2981,6 +3067,14 @@ def _run_display_process(
         signal.signal(signal.SIGINT, signal.SIG_IGN)
     except Exception:
         pass
+
+    if mode == radar_calibration.CALIBRATION_DISPLAY_MODE:
+        radar_calibration.run_calibration_display(
+            payload_queue,
+            stop_event,
+            startup_status_queue,
+        )
+        return
 
     if mode == ROTOR_DISPLAY_MODE:
         _run_rotor_pyqtgraph_display(
@@ -4236,6 +4330,8 @@ def _run_frame_processor_impl(
     rotor_post_failure_event: Optional[Any] = None,
     rotor_post_queue_high_water: Optional[Any] = None,
     startup_status_queue: Optional[mp.Queue] = None,
+    calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
+    calibration_complete_event: Optional[Any] = None,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -4341,6 +4437,9 @@ def _run_frame_processor_impl(
         rotor_post_queue_high_water=(
             rotor_post_queue_high_water if use_rotor_postprocess else None
         ),
+        calibration_settings=calibration_settings,
+        calibration_complete_event=calibration_complete_event,
+        calibration_emit_func=worker_emit,
     )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
@@ -4477,6 +4576,7 @@ def listen_for_frames(
     display: LiveDisplay,
     pipeline_failure_event: Optional[Any] = None,
     pipeline_process: Optional[Any] = None,
+    pipeline_complete_event: Optional[Any] = None,
 ) -> CaptureStats:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
@@ -4557,6 +4657,10 @@ def listen_for_frames(
     receiver.start()
     try:
         while True:
+            if pipeline_complete_event is not None and pipeline_complete_event.is_set():
+                _drain_log_queue(log_queue)
+                emit("Calibration completed; stopping capture.")
+                break
             if pipeline_process is not None and not pipeline_process.is_alive():
                 if pipeline_failure_event is not None:
                     pipeline_failure_event.set()
@@ -4764,9 +4868,35 @@ def parse_args() -> argparse.Namespace:
             "point-cloud",
             ROTOR_DISPLAY_MODE,
             COMBINED_DISPLAY_MODE,
+            radar_calibration.CALIBRATION_DISPLAY_MODE,
         ),
         default="none",
         help="Optional live display mode.",
+    )
+    parser.add_argument(
+        "--calibration-distance-m",
+        type=float,
+        default=radar_calibration.DEFAULT_TARGET_DISTANCE_M,
+    )
+    parser.add_argument(
+        "--calibration-search-window-m",
+        type=float,
+        default=radar_calibration.DEFAULT_SEARCH_WINDOW_M,
+    )
+    parser.add_argument(
+        "--calibration-warmup-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_WARMUP_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_ACCEPTED_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-timeout-seconds",
+        type=float,
+        default=radar_calibration.DEFAULT_TIMEOUT_SECONDS,
     )
     parser.add_argument(
         "--display-update-every",
@@ -5294,6 +5424,9 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
     ramp_end_time_us: Optional[float] = None
     frame_periodicity_ms: Optional[float] = None
     chirp_tx_masks: dict[int, int] = {}
+    range_bias_m = 0.0
+    rx_channel_compensation: Optional[tuple[complex, ...]] = None
+    compensation_command_count = 0
 
     for raw_line in lines:
         line = raw_line.split("%", 1)[0].split("#", 1)[0].strip()
@@ -5329,6 +5462,26 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
             channel_interleave = int(tokens[4]) == 0
         elif command in {"lvdsLaneCfg", "laneCfg"} and len(tokens) > 1:
             lvds_lanes = _bit_count(int(tokens[1], 0))
+        elif command == "compRangeBiasAndRxChanPhase":
+            compensation_command_count += 1
+            if compensation_command_count > 1:
+                raise ValueError(
+                    "Radar profile contains duplicate "
+                    "compRangeBiasAndRxChanPhase commands"
+                )
+            if len(tokens) != 26:
+                raise ValueError(
+                    "compRangeBiasAndRxChanPhase must contain one range bias "
+                    "and 12 complex coefficients"
+                )
+            range_bias_m = float(tokens[1])
+            coefficient_values = tuple(float(value) for value in tokens[2:])
+            if not all(np.isfinite(value) for value in (range_bias_m, *coefficient_values)):
+                raise ValueError("Calibration compensation values must be finite")
+            rx_channel_compensation = tuple(
+                complex(coefficient_values[index], coefficient_values[index + 1])
+                for index in range(0, len(coefficient_values), 2)
+            )
 
     missing = []
     if profile_adc_samples is None:
@@ -5359,6 +5512,8 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         idle_time_us=idle_time_us,
         ramp_end_time_us=ramp_end_time_us,
         frame_periodicity_ms=frame_periodicity_ms,
+        range_bias_m=range_bias_m,
+        rx_channel_compensation=rx_channel_compensation,
     )
 
 
@@ -5370,6 +5525,7 @@ def _iter_json_command_lines(value: Any) -> Iterable[str]:
         "adcbufCfg",
         "lvdsLaneCfg",
         "laneCfg",
+        "compRangeBiasAndRxChanPhase",
     }
     if isinstance(value, str):
         stripped = value.strip()
@@ -5526,7 +5682,20 @@ def main() -> None:
     display: Optional[LiveDisplay] = None
     capture_stats: Optional[CaptureStats] = None
     processed_frames_counter: Optional[Any] = None
+    calibration_settings: Optional[radar_calibration.CalibrationSettings] = None
+    calibration_complete_event: Optional[Any] = None
     try:
+        if args.display == radar_calibration.CALIBRATION_DISPLAY_MODE:
+            args.classification = False
+            args.static_detection = False
+            args.processed_output = None
+            calibration_settings = radar_calibration.CalibrationSettings(
+                target_distance_m=args.calibration_distance_m,
+                search_window_m=args.calibration_search_window_m,
+                warmup_frames=args.calibration_warmup_frames,
+                accepted_frames=args.calibration_frames,
+                timeout_seconds=args.calibration_timeout_seconds,
+            )
         if args.classification and importlib.util.find_spec("torch") is None:
             raise CaptureStartupError(
                 "CNN classification requires PyTorch 2.6 or newer; install "
@@ -5558,6 +5727,14 @@ def main() -> None:
             args.static_detection = False
         resolved_config_path = _resolve_config_path(args.config)
         config = RadarCaptureConfig.from_file(resolved_config_path)
+        if calibration_settings is not None:
+            radar_calibration.validate_calibration_profile_text(
+                resolved_config_path.read_text(encoding="utf-8"),
+                config,
+                calibration_settings,
+                require_raw_lvds=True,
+            )
+            calibration_complete_event = process_context.Event()
         classification_artifact_dir = _resolve_output_path(
             args.classification_artifacts
         )
@@ -5746,6 +5923,8 @@ def main() -> None:
                 rotor_post_failure_event,
                 rotor_post_queue_high_water,
                 processor_status_queue,
+                calibration_settings,
+                calibration_complete_event,
             ),
             name="RadarFrameProcessor",
         )
@@ -5785,6 +5964,7 @@ def main() -> None:
             display=display,
             pipeline_failure_event=rotor_post_failure_event,
             pipeline_process=rotor_postprocessor,
+            pipeline_complete_event=calibration_complete_event,
         )
     except CaptureStartupError as exc:
         emit(f"Capture startup failed: {exc}")

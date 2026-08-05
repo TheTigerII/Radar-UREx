@@ -488,6 +488,8 @@ class RadarDspConfig(Protocol):
     idle_time_us: Optional[float]
     ramp_end_time_us: Optional[float]
     frame_periodicity_ms: Optional[float]
+    range_bias_m: float
+    rx_channel_compensation: Optional[tuple[complex, ...]]
 
 
 def range_resolution_m(config: RadarDspConfig) -> Optional[float]:
@@ -505,7 +507,11 @@ def range_axis_m(config: RadarDspConfig) -> Optional[np.ndarray]:
     resolution = range_resolution_m(config)
     if resolution is None:
         return None
-    return np.arange(config.num_adc_samples, dtype=np.float32) * resolution
+    range_bias_m = float(getattr(config, "range_bias_m", 0.0))
+    return (
+        np.arange(config.num_adc_samples, dtype=np.float32) * resolution
+        - range_bias_m
+    )
 
 
 def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
@@ -1896,6 +1902,7 @@ def build_virtual_antenna_grids(
         virtual_samples,
         tx_indices,
         rx_count,
+        config,
     )
     if ods_grids is not None:
         return ods_grids
@@ -1940,6 +1947,7 @@ def _build_iwr6843isk_ods_virtual_antenna_grids(
     virtual_samples: np.ndarray,
     tx_indices: list[int],
     rx_count: int,
+    config: Optional[RadarDspConfig] = None,
 ) -> Optional[np.ndarray]:
     if rx_count != 4:
         return None
@@ -1949,7 +1957,8 @@ def _build_iwr6843isk_ods_virtual_antenna_grids(
         return None
 
     # IWR6843ISK-ODS page-40 layout. Rows are bottom-to-top elevation; columns
-    # are left-to-right azimuth. RX2/RX3 require 180 degree phase inversion.
+    # are left-to-right azimuth. The board-layout polarity is the fallback for
+    # profiles which still contain the historical all-unity compensation line.
     positions = {
         (1, 1): (3, 0),
         (1, 2): (2, 0),
@@ -1970,15 +1979,25 @@ def _build_iwr6843isk_ods_virtual_antenna_grids(
         3: -1.0,
         4: 1.0,
     }
+    measured_coefficients: Optional[np.ndarray] = None
+    configured = getattr(config, "rx_channel_compensation", None)
+    if configured is not None and len(configured) == 12:
+        candidate = np.asarray(configured, dtype=np.complex64)
+        if np.all(np.isfinite(candidate)) and not np.allclose(candidate, 1.0 + 0.0j):
+            measured_coefficients = candidate
 
     grids = np.zeros((virtual_samples.shape[0], 4, 4), dtype=np.complex64)
     for chirp_index, tx_number in enumerate(tx_numbers[: virtual_samples.shape[1]]):
         for rx_number in range(1, rx_count + 1):
             row, col = positions[(tx_number, rx_number)]
-            grids[:, row, col] = (
-                rx_phase[rx_number]
-                * virtual_samples[:, chirp_index, rx_number - 1]
+            correction = (
+                measured_coefficients[(tx_number - 1) * 4 + (rx_number - 1)]
+                if measured_coefficients is not None
+                else rx_phase[rx_number]
             )
+            grids[:, row, col] = correction * virtual_samples[
+                :, chirp_index, rx_number - 1
+            ]
     return grids
 
 

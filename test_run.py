@@ -79,6 +79,11 @@ class ChooseDisplayTests(unittest.TestCase):
         with patch("builtins.input", return_value="6"):
             self.assertEqual(run.choose_display(None), "micro-doppler")
 
+    def test_calibration_is_menu_option_seven(self) -> None:
+        self.assertIn("calibration", run.DISPLAY_CHOICES)
+        with patch("builtins.input", return_value="7"):
+            self.assertEqual(run.choose_display(None), "calibration")
+
     def test_dedicated_rotor_defaults_match_current_drone(self) -> None:
         with patch("sys.argv", ("run.py",)):
             args = run.parse_args()
@@ -92,6 +97,47 @@ class ChooseDisplayTests(unittest.TestCase):
 
 
 class CaptureCommandTests(unittest.TestCase):
+    def test_calibration_command_disables_normal_processing(self) -> None:
+        args = SimpleNamespace(
+            display_update_every=1,
+            config=Path("profile.cfg"),
+            setup=Path("setup.json"),
+            host_ip="192.168.33.30",
+            data_port=4098,
+            socket_recv_buffer=1024,
+            packet_queue_size=8,
+            processing_queue_size=4,
+            max_range_m=10.0,
+            cluster_eps_m=0.4,
+            cluster_min_samples=2,
+            clutter_map_update_rate=0.02,
+            clutter_map_warmup_frames=30,
+            clutter_map_min_snr_db=3.0,
+            static_detection=True,
+            static_warmup_frames=30,
+            static_reference_frames=150,
+            static_min_change_db=3.0,
+            static_background_update_rate=0.0,
+            static_cluster_min_samples=1,
+            classification=True,
+            calibration_distance_m=1.0,
+            calibration_search_window_m=0.2,
+            calibration_warmup_frames=16,
+            calibration_frames=64,
+            calibration_timeout_seconds=90.0,
+        )
+        command = run.build_capture_command(
+            args,
+            "calibration",
+            None,
+            config_path=Path("runtime.cfg"),
+        )
+        self.assertIn("runtime.cfg", command)
+        self.assertIn("--no-classification", command)
+        self.assertIn("--no-static-detection", command)
+        self.assertNotIn("--processed-output", command)
+        self.assertIn("--calibration-frames", command)
+
     def test_processed_output_is_default_and_raw_output_is_opt_in(self) -> None:
         args = SimpleNamespace(
             display_update_every=1,

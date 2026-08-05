@@ -1,4 +1,5 @@
 import argparse
+from contextlib import nullcontext
 import json
 import math
 import os
@@ -6,16 +7,20 @@ import queue
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+from rawdatacapture import calibrate as radar_calibration
+
 
 ROOT = Path(__file__).resolve().parent
 RAW_DATA_DIR = ROOT / "rawdatacapture"
 DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile.cfg"
+DEFAULT_CALIBRATION_PROFILE_PATH = ROOT / "profiles" / "profile_calibration.cfg"
 DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
 DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
 DEFAULT_CLASSIFICATION_ARTIFACT_DIR = ROOT / "Radar-UREx-output" / "artifacts"
@@ -51,6 +56,7 @@ DISPLAY_CHOICES = (
     "point-cloud",
     "micro-doppler",
     "point-cloud-micro-doppler",
+    radar_calibration.CALIBRATION_DISPLAY_MODE,
 )
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
@@ -105,6 +111,42 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dca-timeout", type=float, default=DEFAULT_DCA_TIMEOUT)
     parser.add_argument("--dca-retries", type=int, default=DEFAULT_DCA_RETRIES)
     parser.add_argument("--display", choices=DISPLAY_CHOICES)
+    parser.add_argument(
+        "--calibration-profile",
+        type=Path,
+        default=DEFAULT_CALIBRATION_PROFILE_PATH,
+        help="Source profile used only to create the temporary calibration profile.",
+    )
+    parser.add_argument(
+        "--calibration-distance-m",
+        type=float,
+        help="Laser-measured corner-reflector distance in meters.",
+    )
+    parser.add_argument(
+        "--calibration-search-window-m",
+        type=float,
+        default=radar_calibration.DEFAULT_SEARCH_WINDOW_M,
+    )
+    parser.add_argument(
+        "--calibration-warmup-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_WARMUP_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_ACCEPTED_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-timeout-seconds",
+        type=float,
+        default=radar_calibration.DEFAULT_TIMEOUT_SECONDS,
+    )
+    parser.add_argument(
+        "--calibration-output",
+        type=Path,
+        help="JSON calibration report path (timestamped in --capture-dir by default).",
+    )
     parser.add_argument(
         "--micro-doppler-range-m",
         type=float,
@@ -293,6 +335,7 @@ def choose_display(display_arg: Optional[str]) -> str:
     print("  4. point-cloud")
     print("  5. point-cloud + micro-doppler")
     print("  6. dedicated rotor micro-doppler")
+    print("  7. calibration")
     while True:
         choice = input("Select display type [5]: ").strip()
         if not choice:
@@ -313,9 +356,11 @@ def choose_display(display_arg: Optional[str]) -> str:
             return "point-cloud-micro-doppler"
         if choice in {"6", "micro-doppler", "micro_doppler"}:
             return "micro-doppler"
+        if choice in {"7", "calibration"}:
+            return radar_calibration.CALIBRATION_DISPLAY_MODE
         print(
-            "Choose 1, 2, 3, 4, 5, 6, none, range, range-doppler, "
-            "point-cloud, micro-doppler, or point-cloud-micro-doppler."
+            "Choose 1, 2, 3, 4, 5, 6, 7, none, range, range-doppler, "
+            "point-cloud, micro-doppler, point-cloud-micro-doppler, or calibration."
         )
 
 
@@ -365,6 +410,29 @@ def choose_micro_doppler_range_m(range_arg: Optional[float]) -> float:
         if math.isfinite(target_range_m) and target_range_m > 0.0:
             return target_range_m
         print("Enter a finite positive range in meters.")
+
+
+def choose_calibration_distance_m(distance_arg: Optional[float]) -> float:
+    if distance_arg is not None:
+        if not math.isfinite(distance_arg) or distance_arg <= 0.0:
+            raise ValueError("Laser distance must be a finite positive number.")
+        return distance_arg
+
+    while True:
+        choice = input(
+            "Laser-measured reflector distance in meters "
+            f"[{radar_calibration.DEFAULT_TARGET_DISTANCE_M:g}]: "
+        ).strip()
+        if not choice:
+            return radar_calibration.DEFAULT_TARGET_DISTANCE_M
+        try:
+            distance_m = float(choice)
+        except ValueError:
+            print("Enter a finite positive distance in meters.")
+            continue
+        if math.isfinite(distance_m) and distance_m > 0.0:
+            return distance_m
+        print("Enter a finite positive distance in meters.")
 
 
 def resolve_radar_port(radar_port_arg: Optional[str]) -> str:
@@ -483,6 +551,7 @@ def relay_capture_output(
     process: subprocess.Popen,
     classification_queue: queue.SimpleQueue,
     capture_ready: Optional[threading.Event] = None,
+    calibration_queue: Optional[queue.SimpleQueue] = None,
 ) -> None:
     if process.stdout is None:
         return
@@ -490,6 +559,19 @@ def relay_capture_output(
         line = raw_line.rstrip("\r\n")
         if capture_ready is not None and line.startswith(CAPTURE_READY_PREFIX):
             capture_ready.set()
+        calibration_index = line.find(radar_calibration.CALIBRATION_RESULT_PREFIX)
+        if calibration_index >= 0:
+            payload = line[
+                calibration_index + len(radar_calibration.CALIBRATION_RESULT_PREFIX) :
+            ]
+            try:
+                result = json.loads(payload)
+            except (TypeError, ValueError):
+                print(line, flush=True)
+                continue
+            if isinstance(result, dict) and calibration_queue is not None:
+                calibration_queue.put(result)
+            continue
         marker_index = line.find(CLASSIFICATION_RESULT_PREFIX)
         if marker_index < 0:
             print(line, flush=True)
@@ -650,8 +732,9 @@ def kill_process(process: subprocess.Popen) -> None:
 def build_capture_command(
     args: argparse.Namespace,
     display: str,
-    processed_output: Path,
+    processed_output: Optional[Path],
     raw_output: Optional[Path] = None,
+    config_path: Optional[Path] = None,
 ) -> list[str]:
     display_update_every = args.display_update_every
     if display_update_every is None:
@@ -662,7 +745,7 @@ def build_capture_command(
         "-u",
         str(RAW_DATA_DIR / "livedatacapture.py"),
         "--config",
-        str(args.config),
+        str(config_path or args.config),
         "--setup",
         str(args.setup),
         "--host-ip",
@@ -693,7 +776,8 @@ def build_capture_command(
         str(max(args.clutter_map_min_snr_db, 0.0)),
         (
             "--static-detection"
-            if args.static_detection and display != "micro-doppler"
+            if args.static_detection
+            and display not in {"micro-doppler", radar_calibration.CALIBRATION_DISPLAY_MODE}
             else "--no-static-detection"
         ),
         "--static-warmup-frames",
@@ -706,10 +790,13 @@ def build_capture_command(
         str(min(max(args.static_background_update_rate, 0.0), 1.0)),
         "--static-cluster-min-samples",
         str(max(args.static_cluster_min_samples, 1)),
-        "--processed-output",
-        str(processed_output),
     ]
-    if getattr(args, "classification", True):
+    if processed_output is not None and display != radar_calibration.CALIBRATION_DISPLAY_MODE:
+        command.extend(("--processed-output", str(processed_output)))
+    if (
+        display != radar_calibration.CALIBRATION_DISPLAY_MODE
+        and getattr(args, "classification", True)
+    ):
         classification_artifacts = getattr(
             args,
             "classification_artifacts",
@@ -726,6 +813,21 @@ def build_capture_command(
         )
     else:
         command.append("--no-classification")
+    if display == radar_calibration.CALIBRATION_DISPLAY_MODE:
+        command.extend(
+            (
+                "--calibration-distance-m",
+                str(getattr(args, "calibration_distance_m", radar_calibration.DEFAULT_TARGET_DISTANCE_M)),
+                "--calibration-search-window-m",
+                str(getattr(args, "calibration_search_window_m", radar_calibration.DEFAULT_SEARCH_WINDOW_M)),
+                "--calibration-warmup-frames",
+                str(max(getattr(args, "calibration_warmup_frames", radar_calibration.DEFAULT_WARMUP_FRAMES), 0)),
+                "--calibration-frames",
+                str(max(getattr(args, "calibration_frames", radar_calibration.DEFAULT_ACCEPTED_FRAMES), 1)),
+                "--calibration-timeout-seconds",
+                str(getattr(args, "calibration_timeout_seconds", radar_calibration.DEFAULT_TIMEOUT_SECONDS)),
+            )
+        )
     if display == "micro-doppler":
         target_range_m = getattr(args, "micro_doppler_range_m", None)
         if target_range_m is None:
@@ -786,14 +888,19 @@ def build_capture_command(
     return command
 
 
-def build_startup_command(args: argparse.Namespace, radar_port: str) -> list[str]:
+def build_startup_command(
+    args: argparse.Namespace,
+    radar_port: str,
+    config_path: Optional[Path] = None,
+) -> list[str]:
+    effective_config = config_path or args.config
     return [
         sys.executable,
         str(RAW_DATA_DIR / "startup.py"),
         "--config",
-        str(args.config),
+        str(effective_config),
         "--sdk-profile",
-        str(args.config),
+        str(effective_config),
         "--setup",
         str(args.setup),
         "--host-ip",
@@ -818,6 +925,206 @@ def build_startup_command(args: argparse.Namespace, radar_port: str) -> list[str
     ]
 
 
+def default_calibration_output(capture_dir: Path) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return capture_dir / f"calibration_{timestamp}.json"
+
+
+def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
+    """Run calibration to completion, stop hardware, then optionally apply it."""
+
+    try:
+        settings = radar_calibration.CalibrationSettings(
+            target_distance_m=choose_calibration_distance_m(
+                args.calibration_distance_m
+            ),
+            search_window_m=args.calibration_search_window_m,
+            warmup_frames=args.calibration_warmup_frames,
+            accepted_frames=args.calibration_frames,
+            timeout_seconds=args.calibration_timeout_seconds,
+        )
+    except ValueError as exc:
+        print(f"Invalid calibration settings: {exc}", file=sys.stderr)
+        return 2
+    args.calibration_distance_m = settings.target_distance_m
+    args.classification = False
+    args.static_detection = False
+
+    source_profile = args.calibration_profile
+    if not source_profile.is_absolute():
+        source_profile = ROOT / source_profile
+    operational_profile = args.config
+    if not operational_profile.is_absolute():
+        operational_profile = ROOT / operational_profile
+    report_path = args.calibration_output or default_calibration_output(args.capture_dir)
+    if not report_path.is_absolute():
+        report_path = ROOT / report_path
+
+    try:
+        from rawdatacapture.livedatacapture import RadarCaptureConfig
+
+        source_config = RadarCaptureConfig.from_file(source_profile)
+    except (OSError, ValueError) as exc:
+        print(f"Calibration profile is invalid: {exc}", file=sys.stderr)
+        return 2
+
+    capture_process: Optional[subprocess.Popen] = None
+    startup_process: Optional[subprocess.Popen] = None
+    capture_output_thread: Optional[threading.Thread] = None
+    classification_queue: queue.SimpleQueue = queue.SimpleQueue()
+    calibration_queue: queue.SimpleQueue = queue.SimpleQueue()
+    capture_ready = threading.Event()
+    result: Optional[radar_calibration.CalibrationResult] = None
+    temporary_profile_directory: Optional[tempfile.TemporaryDirectory] = None
+
+    try:
+        temporary_profile_directory = tempfile.TemporaryDirectory(
+            prefix="radar_calibration_"
+        )
+        with nullcontext(temporary_profile_directory.name) as temporary_dir:
+            runtime_profile = Path(temporary_dir) / "profile_calibration_runtime.cfg"
+            try:
+                radar_calibration.create_runtime_profile(
+                    source_profile,
+                    runtime_profile,
+                    source_config,
+                    settings,
+                )
+            except (OSError, ValueError) as exc:
+                print(f"Could not create calibration runtime profile: {exc}", file=sys.stderr)
+                return 2
+
+            print(f"Display mode: {radar_calibration.CALIBRATION_DISPLAY_MODE}")
+            print(f"Laser distance: {settings.target_distance_m:g} m")
+            print(f"Search window: ±{settings.search_window_m:g} m")
+            print(
+                "Calibration frames: "
+                f"ignore {settings.warmup_frames}, accept {settings.accepted_frames}"
+            )
+            print(f"Calibration timeout: {settings.timeout_seconds:g} seconds")
+            print(f"Calibration source profile: {source_profile}")
+            print(f"Radar command UART: {radar_port}")
+
+            capture_process = start_process(
+                "calibration capture",
+                build_capture_command(
+                    args,
+                    radar_calibration.CALIBRATION_DISPLAY_MODE,
+                    None,
+                    None,
+                    runtime_profile,
+                ),
+                capture_output=True,
+            )
+            capture_output_thread = threading.Thread(
+                target=relay_capture_output,
+                args=(
+                    capture_process,
+                    classification_queue,
+                    capture_ready,
+                    calibration_queue,
+                ),
+                name="CalibrationCaptureOutputRelay",
+                daemon=True,
+            )
+            capture_output_thread.start()
+            if not wait_for_capture_ready(
+                capture_process,
+                capture_ready,
+                timeout_seconds=CAPTURE_STARTUP_TIMEOUT_SECONDS,
+            ):
+                print("Calibration capture did not become ready.", file=sys.stderr)
+                return capture_process.poll() or 1
+
+            startup_process = start_process(
+                "calibration startup",
+                build_startup_command(args, radar_port, runtime_profile),
+            )
+            deadline = time.monotonic() + settings.timeout_seconds
+            while time.monotonic() < deadline:
+                try:
+                    payload = calibration_queue.get_nowait()
+                except queue.Empty:
+                    payload = None
+                if payload is not None:
+                    try:
+                        result = radar_calibration.CalibrationResult.from_dict(payload)
+                    except (KeyError, TypeError, ValueError) as exc:
+                        print(f"Invalid calibration result: {exc}", file=sys.stderr)
+                        return 1
+                    break
+                if startup_process.poll() is not None:
+                    print(
+                        f"Calibration startup exited with code {startup_process.returncode}",
+                        file=sys.stderr,
+                    )
+                    return startup_process.returncode or 1
+                if capture_process.poll() is not None:
+                    capture_output_thread.join(timeout=1.0)
+                    try:
+                        payload = calibration_queue.get_nowait()
+                    except queue.Empty:
+                        payload = None
+                    if payload is not None:
+                        result = radar_calibration.CalibrationResult.from_dict(payload)
+                        break
+                    print(
+                        f"Calibration capture exited with code {capture_process.returncode}",
+                        file=sys.stderr,
+                    )
+                    return capture_process.returncode or 1
+                time.sleep(0.1)
+            if result is None:
+                print(
+                    "Calibration timed out before a stable result; operational profile unchanged.",
+                    file=sys.stderr,
+                )
+                return 1
+    except KeyboardInterrupt:
+        print("\nCalibration interrupted; operational profile unchanged.")
+        return 130
+    finally:
+        # Hardware is always stopped before a result is previewed or applied.
+        stop_process("calibration startup", startup_process)
+        stop_process("calibration capture", capture_process)
+        if capture_output_thread is not None:
+            capture_output_thread.join(timeout=2.0)
+        if temporary_profile_directory is not None:
+            temporary_profile_directory.cleanup()
+
+    if result is None:
+        return 1
+    try:
+        radar_calibration.write_calibration_report(report_path, result)
+    except OSError as exc:
+        print(f"Could not write calibration report: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Calibration report: {report_path}")
+    print("Calibration command preview:")
+    print(result.command)
+    try:
+        confirmation = input(
+            f"Apply this command to {operational_profile}? [y/N]: "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        confirmation = ""
+    if confirmation not in {"y", "yes"}:
+        print("Calibration was not applied; operational profile unchanged.")
+        return 0
+    try:
+        backup = radar_calibration.apply_calibration_to_profile(
+            operational_profile,
+            result,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Could not apply calibration: {exc}", file=sys.stderr)
+        return 1
+    print(f"Calibration applied to: {operational_profile}")
+    print(f"Profile backup: {backup}")
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
@@ -829,15 +1136,20 @@ def main() -> int:
         except ValueError as exc:
             print(f"Invalid micro-Doppler range: {exc}", file=sys.stderr)
             return 2
-    try:
-        duration_minutes = choose_duration_minutes(args.duration_minutes)
-    except ValueError as exc:
-        print(f"Invalid duration: {exc}", file=sys.stderr)
-        return 2
+    duration_minutes = 0.0
+    if display != radar_calibration.CALIBRATION_DISPLAY_MODE:
+        try:
+            duration_minutes = choose_duration_minutes(args.duration_minutes)
+        except ValueError as exc:
+            print(f"Invalid duration: {exc}", file=sys.stderr)
+            return 2
     radar_port = resolve_radar_port(args.radar_port)
     if not radar_port:
         print("No radar command UART port was provided.", file=sys.stderr)
         return 2
+
+    if display == radar_calibration.CALIBRATION_DISPLAY_MODE:
+        return run_calibration_mode(args, radar_port)
 
     processed_output = args.processed_output or default_processed_output(
         args.capture_dir
