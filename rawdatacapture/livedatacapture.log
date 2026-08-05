@@ -1356,3 +1356,71 @@
 [2026-08-04T14:15:37+08:00] Display summary: rendered_updates=3750, coalesced_updates=115, radar_frame_redraw_coverage=89.928%, radar_frames_without_dedicated_redraw=420/4170. This is GUI cadence, not capture or processing loss.
 [2026-08-04T14:15:37+08:00] Capture pipeline shutdown complete.
 [2026-08-04T14:15:37+08:00] --- Live capture log ended at 2026-08-04T14:15:37+08:00 ---
+[2026-08-05T14:13:22+08:00] 
+[2026-08-05T14:13:22+08:00] --- Live capture log started at 2026-08-05T14:13:22+08:00: /home/rgmtc/Desktop/Radar-UREx/rawdatacapture/livedatacapture.log ---
+[2026-08-05T14:13:22+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=96, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=32, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=12500.0, frequency_slope_mhz_per_us=166.0, start_frequency_ghz=60.0, idle_time_us=7.0, ramp_end_time_us=24.0, frame_periodicity_ms=500.0, range_bias_m=0.0, rx_channel_compensation=((1+0j), (1+0j), (1+0j), (1+0j), (1+0j), (1+0j), (1+0j), (1+0j), (1+0j), (1+0j), (1+0j), (1+0j)), azimuth_bias_deg=0.0, elevation_bias_deg=0.0)
+[2026-08-05T14:13:23+08:00] DSP backend: OpenRadar (/home/rgmtc/Desktop/Radar-UREx/.venv/lib/python3.12/site-packages/mmwave/dsp/__init__.py)
+[2026-08-05T14:13:23+08:00] Loaded capture setup: CaptureSetupConfig(packet_sequence_enable=True, packet_delay_us=50, capture_hardware='DCA1000', config_used='D:\\Library\\Documents\\GitHub\\Radar-UREx\\rawdatacapture\\exp2.mmwave.json')
+[2026-08-05T14:13:25+08:00] Live calibration display ready.
+[2026-08-05T14:13:26+08:00] Radar frame processor ready.
+[2026-08-05T14:13:26+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=393216
+[2026-08-05T14:13:26+08:00] DCA1000 setup: packet_sequence_enable=True, packet_delay_us=50
+[2026-08-05T14:13:26+08:00] UDP socket receive buffer: requested=4194304B, actual=425984B
+[2026-08-05T14:13:26+08:00] WARNING: The operating system granted less UDP receive buffering than requested. On Linux, raise the limit before capture with 'sudo sysctl -w net.core.rmem_max=4194304'.
+[2026-08-05T14:13:26+08:00] UDP packet queue capacity: 8192 datagrams
+[2026-08-05T14:13:26+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-08-05T14:13:48+08:00] stats: packets=10787, frames=39, invalid_frames=0, lost_packets=10, out_of_order=0, duplicates=0, byte_gaps=1/14560B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-08-05T14:13:49+08:00] stats: packets=10793, frames=40, invalid_frames=1, lost_packets=10, out_of_order=0, duplicates=0, byte_gaps=1/14560B, stream_resyncs=0, byte_overlaps=0/0B, malformed=0, receiver_queue_drops=0, processing_drops=0
+[2026-08-05T14:14:09+08:00] Calibration completed; stopping capture.
+[2026-08-05T14:14:09+08:00] Capture summary: packets=22117, frames=81, valid_frames=80, invalid_frames=1, queued_frames=80, lost_packets=10, receiver_queue_drops=0, processing_drops=0, stream_resyncs=0
+[2026-08-05T14:14:09+08:00] Shutting down capture pipeline...
+[2026-08-05T14:14:10+08:00] CALIBRATION_RESULT {"calibration_type":"range","target_distance_m":2.94,"search_window_m":0.2,"measured_range_m":3.046721586301222,"range_bias_m":0.10672158630122225,"accepted_frames":64,"range_std_m":0.00011354056302957,"max_phase_std_deg":2.755519201509594,"max_magnitude_cv":0.03684969982199726,"tx_order":[1,4,2],"coefficients":[{"real":0.9771987045378637,"imag":1.4533522203035594e-18},{"real":-0.65230683173927,"imag":0.2587553813273462},{"real":-0.8706344402754387,"imag":0.04261952466464437},{"real":0.8335143001600487,"imag":0.0837992469228082},{"real":0.8254835280958971,"imag":-0.3983629317854993},{"real":-0.47139479326106776,"imag":0.5230166651719709},{"real":-0.7206373288926339,"imag":0.41301435817808024},{"real":0.9193051676351617,"imag":-0.3935454341741083},{"real":0.6649589342991825,"imag":-0.7356657743613085},{"real":-0.3119702603530272,"imag":0.5890711735900305},{"real":-0.5514397372244337,"imag":0.6021040833925281},{"real":0.6950040072118401,"imag":-0.47310312573828356}],"command":"compRangeBiasAndRxChanPhase 0.1067216 0.9771987 1.453352e-18 -0.6523068 0.2587554 -0.8706344 0.04261952 0.8335143 0.08379925 0.8254835 -0.3983629 -0.4713948 0.5230167 -0.7206373 0.4130144 0.9193052 -0.3935454 0.6649589 -0.7356658 -0.3119703 0.5890712 -0.5514397 0.6021041 0.695004 -0.4731031"}
+[2026-08-05T14:14:10+08:00] Static detection summary: candidate_points=0, handoff_pending_updates=0, validated_updates=0
+[2026-08-05T14:14:10+08:00] Processing timing summary: range_fft=p50:2.30ms/p95:2.83ms/max:3.15ms, total=p50:11.64ms/p95:13.57ms/max:19.55ms
+[2026-08-05T14:14:10+08:00] Processing summary: valid_frames=80, queued_frames=80, processed_frames=80, processing_drops=0
+[2026-08-05T14:18:48+08:00] 
+[2026-08-05T14:18:48+08:00] --- Live capture log started at 2026-08-05T14:18:48+08:00: /home/rgmtc/Desktop/Radar-UREx/rawdatacapture/livedatacapture.log ---
+[2026-08-05T14:18:48+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=96, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=32, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=12500.0, frequency_slope_mhz_per_us=166.0, start_frequency_ghz=60.0, idle_time_us=7.0, ramp_end_time_us=24.0, frame_periodicity_ms=500.0, range_bias_m=0.1067216, rx_channel_compensation=((0.9771987+1.453352e-18j), (-0.6523068+0.2587554j), (-0.8706344+0.04261952j), (0.8335143+0.08379925j), (0.8254835-0.3983629j), (-0.4713948+0.5230167j), (-0.7206373+0.4130144j), (0.9193052-0.3935454j), (0.6649589-0.7356658j), (-0.3119703+0.5890712j), (-0.5514397+0.6021041j), (0.695004-0.4731031j)), azimuth_bias_deg=0.0, elevation_bias_deg=0.0)
+[2026-08-05T14:18:49+08:00] DSP backend: OpenRadar (/home/rgmtc/Desktop/Radar-UREx/.venv/lib/python3.12/site-packages/mmwave/dsp/__init__.py)
+[2026-08-05T14:18:49+08:00] Loaded capture setup: CaptureSetupConfig(packet_sequence_enable=True, packet_delay_us=50, capture_hardware='DCA1000', config_used='D:\\Library\\Documents\\GitHub\\Radar-UREx\\rawdatacapture\\exp2.mmwave.json')
+[2026-08-05T14:18:51+08:00] Live calibration display ready.
+[2026-08-05T14:18:52+08:00] Radar frame processor ready.
+[2026-08-05T14:18:52+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=393216
+[2026-08-05T14:18:52+08:00] DCA1000 setup: packet_sequence_enable=True, packet_delay_us=50
+[2026-08-05T14:18:52+08:00] UDP socket receive buffer: requested=4194304B, actual=425984B
+[2026-08-05T14:18:52+08:00] WARNING: The operating system granted less UDP receive buffering than requested. On Linux, raise the limit before capture with 'sudo sysctl -w net.core.rmem_max=4194304'.
+[2026-08-05T14:18:52+08:00] UDP packet queue capacity: 8192 datagrams
+[2026-08-05T14:18:52+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-08-05T14:19:48+08:00] Streaming stopped.
+[2026-08-05T14:19:49+08:00] Capture summary: packets=0, frames=0, valid_frames=0, invalid_frames=0, queued_frames=0, lost_packets=0, receiver_queue_drops=0, processing_drops=0, stream_resyncs=0
+[2026-08-05T14:19:49+08:00] Shutting down capture pipeline...
+[2026-08-05T14:19:49+08:00] Static detection summary: candidate_points=0, handoff_pending_updates=0, validated_updates=0
+[2026-08-05T14:19:49+08:00] Processing timing summary: 
+[2026-08-05T14:19:49+08:00] Processing summary: valid_frames=0, queued_frames=0, processed_frames=0, processing_drops=0
+[2026-08-05T14:19:49+08:00] Live display closed.
+[2026-08-05T14:19:49+08:00] Display summary: rendered_updates=0, coalesced_updates=0, radar_frame_redraw_coverage=100.000%, radar_frames_without_dedicated_redraw=0/0. This is GUI cadence, not capture or processing loss.
+[2026-08-05T14:19:49+08:00] Capture pipeline shutdown complete.
+[2026-08-05T14:19:49+08:00] --- Live capture log ended at 2026-08-05T14:19:49+08:00 ---
+[2026-08-05T14:21:39+08:00] 
+[2026-08-05T14:21:39+08:00] --- Live capture log started at 2026-08-05T14:21:39+08:00: /home/rgmtc/Desktop/Radar-UREx/rawdatacapture/livedatacapture.log ---
+[2026-08-05T14:21:39+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=96, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=32, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=12500.0, frequency_slope_mhz_per_us=166.0, start_frequency_ghz=60.0, idle_time_us=7.0, ramp_end_time_us=24.0, frame_periodicity_ms=500.0, range_bias_m=0.1067216, rx_channel_compensation=((0.9771987+1.453352e-18j), (-0.6523068+0.2587554j), (-0.8706344+0.04261952j), (0.8335143+0.08379925j), (0.8254835-0.3983629j), (-0.4713948+0.5230167j), (-0.7206373+0.4130144j), (0.9193052-0.3935454j), (0.6649589-0.7356658j), (-0.3119703+0.5890712j), (-0.5514397+0.6021041j), (0.695004-0.4731031j)), azimuth_bias_deg=0.0, elevation_bias_deg=0.0)
+[2026-08-05T14:21:40+08:00] DSP backend: OpenRadar (/home/rgmtc/Desktop/Radar-UREx/.venv/lib/python3.12/site-packages/mmwave/dsp/__init__.py)
+[2026-08-05T14:21:40+08:00] Loaded capture setup: CaptureSetupConfig(packet_sequence_enable=True, packet_delay_us=50, capture_hardware='DCA1000', config_used='D:\\Library\\Documents\\GitHub\\Radar-UREx\\rawdatacapture\\exp2.mmwave.json')
+[2026-08-05T14:21:42+08:00] Live calibration display ready.
+[2026-08-05T14:21:43+08:00] Radar frame processor ready.
+[2026-08-05T14:21:43+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=393216
+[2026-08-05T14:21:43+08:00] DCA1000 setup: packet_sequence_enable=True, packet_delay_us=50
+[2026-08-05T14:21:43+08:00] UDP socket receive buffer: requested=4194304B, actual=425984B
+[2026-08-05T14:21:43+08:00] WARNING: The operating system granted less UDP receive buffering than requested. On Linux, raise the limit before capture with 'sudo sysctl -w net.core.rmem_max=4194304'.
+[2026-08-05T14:21:43+08:00] UDP packet queue capacity: 8192 datagrams
+[2026-08-05T14:21:43+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-08-05T14:22:05+08:00] Streaming stopped.
+[2026-08-05T14:22:05+08:00] Capture summary: packets=0, frames=0, valid_frames=0, invalid_frames=0, queued_frames=0, lost_packets=0, receiver_queue_drops=0, processing_drops=0, stream_resyncs=0
+[2026-08-05T14:22:05+08:00] Shutting down capture pipeline...
+[2026-08-05T14:22:06+08:00] Static detection summary: candidate_points=0, handoff_pending_updates=0, validated_updates=0
+[2026-08-05T14:22:06+08:00] Processing timing summary: 
+[2026-08-05T14:22:06+08:00] Processing summary: valid_frames=0, queued_frames=0, processed_frames=0, processing_drops=0
+[2026-08-05T14:22:06+08:00] Live display closed.
+[2026-08-05T14:22:06+08:00] Display summary: rendered_updates=0, coalesced_updates=0, radar_frame_redraw_coverage=100.000%, radar_frames_without_dedicated_redraw=0/0. This is GUI cadence, not capture or processing loss.
+[2026-08-05T14:22:06+08:00] Capture pipeline shutdown complete.
+[2026-08-05T14:22:06+08:00] --- Live capture log ended at 2026-08-05T14:22:06+08:00 ---
