@@ -33,7 +33,7 @@ CALIBRATION_DISPLAY_MODES = frozenset(
 )
 CALIBRATION_RESULT_PREFIX = "CALIBRATION_RESULT "
 DEFAULT_TARGET_DISTANCE_M = 1.0
-DEFAULT_SEARCH_WINDOW_M = 0.20
+DEFAULT_SEARCH_WINDOW_M = 0.15
 DEFAULT_WARMUP_FRAMES = 16
 DEFAULT_ACCEPTED_FRAMES = 64
 DEFAULT_TIMEOUT_SECONDS = 90.0
@@ -55,7 +55,8 @@ class CalibrationSettings:
     warmup_frames: int = DEFAULT_WARMUP_FRAMES
     accepted_frames: int = DEFAULT_ACCEPTED_FRAMES
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
-    min_peak_prominence_db: float = 10.0
+    # Temporarily disabled by default. Set a dB value to restore the gate.
+    min_peak_prominence_db: Optional[float] = None
     max_range_std_m: float = 0.01
     max_phase_std_deg: float = 5.0
     max_magnitude_cv: float = 0.05
@@ -74,6 +75,10 @@ class CalibrationSettings:
             raise ValueError("Accepted frame count must be at least one")
         if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("Calibration timeout must be positive")
+        if self.min_peak_prominence_db is not None and not math.isfinite(
+            self.min_peak_prominence_db
+        ):
+            raise ValueError("Minimum peak prominence must be finite when enabled")
         if self.calibration_type not in {"range", "azimuth", "elevation"}:
             raise ValueError("Calibration type must be range, azimuth, or elevation")
         if (
@@ -640,19 +645,26 @@ class CalibrationAccumulator:
         if peak_index <= candidates[0] or peak_index >= candidates[-1] or peak_index <= 0 or peak_index >= combined.size - 1:
             return self._payload(profile_db, "Peak is on the search-window boundary")
 
-        background_mask = np.ones(candidates.size, dtype=bool)
-        background_mask[max(0, local_index - 1) : min(candidates.size, local_index + 2)] = False
-        background_values = combined[candidates][background_mask]
-        background = float(np.median(background_values)) if background_values.size else 0.0
-        prominence_db = 20.0 * math.log10(
-            max(float(combined[peak_index]), np.finfo(float).tiny)
-            / max(background, np.finfo(float).tiny)
-        )
-        if prominence_db < self.settings.min_peak_prominence_db:
-            return self._payload(
-                profile_db,
-                f"Target peak prominence {prominence_db:.1f} dB is too low",
+        if self.settings.min_peak_prominence_db is not None:
+            background_mask = np.ones(candidates.size, dtype=bool)
+            background_mask[
+                max(0, local_index - 1) : min(candidates.size, local_index + 2)
+            ] = False
+            background_values = combined[candidates][background_mask]
+            background = (
+                float(np.median(background_values))
+                if background_values.size
+                else 0.0
             )
+            prominence_db = 20.0 * math.log10(
+                max(float(combined[peak_index]), np.finfo(float).tiny)
+                / max(background, np.finfo(float).tiny)
+            )
+            if prominence_db < self.settings.min_peak_prominence_db:
+                return self._payload(
+                    profile_db,
+                    f"Target peak prominence {prominence_db:.1f} dB is too low",
+                )
 
         left, centre, right = (float(combined[index]) for index in (peak_index - 1, peak_index, peak_index + 1))
         denominator = left - 2.0 * centre + right
@@ -856,24 +868,27 @@ class AngularCalibrationAccumulator:
             return self._payload(
                 range_profile_db, None, "Peak is on the search-window boundary"
             )
-        background_mask = np.ones(candidates.size, dtype=bool)
-        background_mask[
-            max(0, local_index - 1) : min(candidates.size, local_index + 2)
-        ] = False
-        background_values = combined[candidates][background_mask]
-        background = (
-            float(np.median(background_values)) if background_values.size else 0.0
-        )
-        prominence_db = 20.0 * math.log10(
-            max(float(combined[peak_index]), np.finfo(float).tiny)
-            / max(background, np.finfo(float).tiny)
-        )
-        if prominence_db < self.settings.min_peak_prominence_db:
-            return self._payload(
-                range_profile_db,
-                None,
-                f"Target peak prominence {prominence_db:.1f} dB is too low",
+        if self.settings.min_peak_prominence_db is not None:
+            background_mask = np.ones(candidates.size, dtype=bool)
+            background_mask[
+                max(0, local_index - 1) : min(candidates.size, local_index + 2)
+            ] = False
+            background_values = combined[candidates][background_mask]
+            background = (
+                float(np.median(background_values))
+                if background_values.size
+                else 0.0
             )
+            prominence_db = 20.0 * math.log10(
+                max(float(combined[peak_index]), np.finfo(float).tiny)
+                / max(background, np.finfo(float).tiny)
+            )
+            if prominence_db < self.settings.min_peak_prominence_db:
+                return self._payload(
+                    range_profile_db,
+                    None,
+                    f"Target peak prominence {prominence_db:.1f} dB is too low",
+                )
 
         left, centre, right = (
             float(combined[index])

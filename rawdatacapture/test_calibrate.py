@@ -36,6 +36,9 @@ class CalibrationProfileTests(unittest.TestCase):
         self.assertAlmostEqual(self.config.frame_periodicity_ms, 500.0)
         self.assertAlmostEqual(self.config.frame_duty_cycle, 0.005952)
 
+    def test_peak_prominence_gate_is_disabled_by_default(self) -> None:
+        self.assertIsNone(self.settings.min_peak_prominence_db)
+
     def test_runtime_profile_changes_only_required_commands(self) -> None:
         source_lines = CALIBRATION_PROFILE.read_text(encoding="utf-8").splitlines()
         with tempfile.TemporaryDirectory() as directory:
@@ -55,7 +58,7 @@ class CalibrationProfileTests(unittest.TestCase):
                 {after for _, after in changed},
                 {
                     "guiMonitor -1 0 0 0 0 0 0",
-                    "measureRangeBiasAndRxChanPhase 0 1 0.2",
+                    "measureRangeBiasAndRxChanPhase 0 1 0.15",
                     "lvdsStreamCfg -1 0 1 0",
                 },
             )

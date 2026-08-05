@@ -129,7 +129,7 @@ class CaptureCommandTests(unittest.TestCase):
             static_cluster_min_samples=1,
             classification=True,
             calibration_distance_m=1.0,
-            calibration_search_window_m=0.2,
+            calibration_search_window_m=0.15,
             calibration_warmup_frames=16,
             calibration_frames=64,
             calibration_timeout_seconds=90.0,
