@@ -57,6 +57,8 @@ DISPLAY_CHOICES = (
     "micro-doppler",
     "point-cloud-micro-doppler",
     radar_calibration.CALIBRATION_DISPLAY_MODE,
+    radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE,
+    radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE,
 )
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
@@ -146,6 +148,11 @@ def parse_args() -> argparse.Namespace:
         "--calibration-output",
         type=Path,
         help="JSON calibration report path (timestamped in --capture-dir by default).",
+    )
+    parser.add_argument(
+        "--calibration-angle-deg",
+        type=float,
+        help="Known tripod angle for azimuth/elevation calibration.",
     )
     parser.add_argument(
         "--micro-doppler-range-m",
@@ -335,7 +342,9 @@ def choose_display(display_arg: Optional[str]) -> str:
     print("  4. point-cloud")
     print("  5. point-cloud + micro-doppler")
     print("  6. dedicated rotor micro-doppler")
-    print("  7. calibration")
+    print("  7. range + channel calibration")
+    print("  8. azimuth calibration")
+    print("  9. elevation calibration")
     while True:
         choice = input("Select display type [5]: ").strip()
         if not choice:
@@ -358,9 +367,14 @@ def choose_display(display_arg: Optional[str]) -> str:
             return "micro-doppler"
         if choice in {"7", "calibration"}:
             return radar_calibration.CALIBRATION_DISPLAY_MODE
+        if choice in {"8", "azimuth-calibration", "azimuth_calibration"}:
+            return radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE
+        if choice in {"9", "elevation-calibration", "elevation_calibration"}:
+            return radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE
         print(
-            "Choose 1, 2, 3, 4, 5, 6, 7, none, range, range-doppler, "
-            "point-cloud, micro-doppler, point-cloud-micro-doppler, or calibration."
+            "Choose 1 through 9, none, range, range-doppler, point-cloud, "
+            "micro-doppler, point-cloud-micro-doppler, calibration, "
+            "azimuth-calibration, or elevation-calibration."
         )
 
 
@@ -433,6 +447,32 @@ def choose_calibration_distance_m(distance_arg: Optional[float]) -> float:
         if math.isfinite(distance_m) and distance_m > 0.0:
             return distance_m
         print("Enter a finite positive distance in meters.")
+
+
+def choose_calibration_angle_deg(
+    angle_arg: Optional[float],
+    calibration_type: str,
+) -> float:
+    label = "Azimuth" if calibration_type == "azimuth" else "Elevation"
+    if angle_arg is not None:
+        if not math.isfinite(angle_arg) or abs(angle_arg) > 60.0:
+            raise ValueError("Calibration angle must be within -60 to +60 degrees.")
+        return angle_arg
+    while True:
+        choice = input(
+            f"Known tripod {label.lower()} angle in degrees "
+            f"[{radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG:g}]: "
+        ).strip()
+        if not choice:
+            return radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG
+        try:
+            angle_deg = float(choice)
+        except ValueError:
+            print("Enter an angle from -60 to +60 degrees.")
+            continue
+        if math.isfinite(angle_deg) and abs(angle_deg) <= 60.0:
+            return angle_deg
+        print("Enter an angle from -60 to +60 degrees.")
 
 
 def resolve_radar_port(radar_port_arg: Optional[str]) -> str:
@@ -777,7 +817,9 @@ def build_capture_command(
         (
             "--static-detection"
             if args.static_detection
-            and display not in {"micro-doppler", radar_calibration.CALIBRATION_DISPLAY_MODE}
+            and display not in (
+                {"micro-doppler"} | radar_calibration.CALIBRATION_DISPLAY_MODES
+            )
             else "--no-static-detection"
         ),
         "--static-warmup-frames",
@@ -791,10 +833,10 @@ def build_capture_command(
         "--static-cluster-min-samples",
         str(max(args.static_cluster_min_samples, 1)),
     ]
-    if processed_output is not None and display != radar_calibration.CALIBRATION_DISPLAY_MODE:
+    if processed_output is not None and display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
         command.extend(("--processed-output", str(processed_output)))
     if (
-        display != radar_calibration.CALIBRATION_DISPLAY_MODE
+        display not in radar_calibration.CALIBRATION_DISPLAY_MODES
         and getattr(args, "classification", True)
     ):
         classification_artifacts = getattr(
@@ -813,11 +855,17 @@ def build_capture_command(
         )
     else:
         command.append("--no-classification")
-    if display == radar_calibration.CALIBRATION_DISPLAY_MODE:
+    if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        calibration_distance_m = getattr(args, "calibration_distance_m", None)
+        if calibration_distance_m is None:
+            calibration_distance_m = radar_calibration.DEFAULT_TARGET_DISTANCE_M
+        calibration_angle_deg = getattr(args, "calibration_angle_deg", None)
+        if calibration_angle_deg is None:
+            calibration_angle_deg = radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG
         command.extend(
             (
                 "--calibration-distance-m",
-                str(getattr(args, "calibration_distance_m", radar_calibration.DEFAULT_TARGET_DISTANCE_M)),
+                str(calibration_distance_m),
                 "--calibration-search-window-m",
                 str(getattr(args, "calibration_search_window_m", radar_calibration.DEFAULT_SEARCH_WINDOW_M)),
                 "--calibration-warmup-frames",
@@ -826,6 +874,8 @@ def build_capture_command(
                 str(max(getattr(args, "calibration_frames", radar_calibration.DEFAULT_ACCEPTED_FRAMES), 1)),
                 "--calibration-timeout-seconds",
                 str(getattr(args, "calibration_timeout_seconds", radar_calibration.DEFAULT_TIMEOUT_SECONDS)),
+                "--calibration-angle-deg",
+                str(calibration_angle_deg),
             )
         )
     if display == "micro-doppler":
@@ -925,15 +975,38 @@ def build_startup_command(
     ]
 
 
-def default_calibration_output(capture_dir: Path) -> Path:
+def default_calibration_output(
+    capture_dir: Path,
+    calibration_type: str = "range",
+) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return capture_dir / f"calibration_{timestamp}.json"
+    prefix = "calibration" if calibration_type == "range" else f"{calibration_type}_calibration"
+    return capture_dir / f"{prefix}_{timestamp}.json"
 
 
-def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
+def run_calibration_mode(
+    args: argparse.Namespace,
+    radar_port: str,
+    display: str = radar_calibration.CALIBRATION_DISPLAY_MODE,
+) -> int:
     """Run calibration to completion, stop hardware, then optionally apply it."""
 
+    calibration_type = {
+        radar_calibration.CALIBRATION_DISPLAY_MODE: "range",
+        radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE: "azimuth",
+        radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE: "elevation",
+    }.get(display)
+    if calibration_type is None:
+        print(f"Unsupported calibration display mode: {display}", file=sys.stderr)
+        return 2
     try:
+        reference_angle_deg = (
+            choose_calibration_angle_deg(
+                getattr(args, "calibration_angle_deg", None), calibration_type
+            )
+            if calibration_type in {"azimuth", "elevation"}
+            else radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG
+        )
         settings = radar_calibration.CalibrationSettings(
             target_distance_m=choose_calibration_distance_m(
                 args.calibration_distance_m
@@ -942,11 +1015,14 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
             warmup_frames=args.calibration_warmup_frames,
             accepted_frames=args.calibration_frames,
             timeout_seconds=args.calibration_timeout_seconds,
+            calibration_type=calibration_type,
+            reference_angle_deg=reference_angle_deg,
         )
     except ValueError as exc:
         print(f"Invalid calibration settings: {exc}", file=sys.stderr)
         return 2
     args.calibration_distance_m = settings.target_distance_m
+    args.calibration_angle_deg = settings.reference_angle_deg
     args.classification = False
     args.static_detection = False
 
@@ -956,7 +1032,9 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
     operational_profile = args.config
     if not operational_profile.is_absolute():
         operational_profile = ROOT / operational_profile
-    report_path = args.calibration_output or default_calibration_output(args.capture_dir)
+    report_path = args.calibration_output or default_calibration_output(
+        args.capture_dir, calibration_type
+    )
     if not report_path.is_absolute():
         report_path = ROOT / report_path
 
@@ -974,7 +1052,10 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
     classification_queue: queue.SimpleQueue = queue.SimpleQueue()
     calibration_queue: queue.SimpleQueue = queue.SimpleQueue()
     capture_ready = threading.Event()
-    result: Optional[radar_calibration.CalibrationResult] = None
+    result: Optional[
+        radar_calibration.CalibrationResult
+        | radar_calibration.AngularCalibrationResult
+    ] = None
     temporary_profile_directory: Optional[tempfile.TemporaryDirectory] = None
 
     try:
@@ -989,14 +1070,24 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
                     runtime_profile,
                     source_config,
                     settings,
+                    (
+                        operational_profile
+                        if calibration_type in {"azimuth", "elevation"}
+                        else None
+                    ),
                 )
             except (OSError, ValueError) as exc:
                 print(f"Could not create calibration runtime profile: {exc}", file=sys.stderr)
                 return 2
 
-            print(f"Display mode: {radar_calibration.CALIBRATION_DISPLAY_MODE}")
+            print(f"Display mode: {display}")
             print(f"Laser distance: {settings.target_distance_m:g} m")
             print(f"Search window: ±{settings.search_window_m:g} m")
+            if calibration_type in {"azimuth", "elevation"}:
+                print(
+                    f"Known {calibration_type} angle: "
+                    f"{settings.reference_angle_deg:+g} degrees"
+                )
             print(
                 "Calibration frames: "
                 f"ignore {settings.warmup_frames}, accept {settings.accepted_frames}"
@@ -1009,7 +1100,7 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
                 "calibration capture",
                 build_capture_command(
                     args,
-                    radar_calibration.CALIBRATION_DISPLAY_MODE,
+                    display,
                     None,
                     None,
                     runtime_profile,
@@ -1048,7 +1139,12 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
                     payload = None
                 if payload is not None:
                     try:
-                        result = radar_calibration.CalibrationResult.from_dict(payload)
+                        if payload.get("calibration_type", "range") == "range":
+                            result = radar_calibration.CalibrationResult.from_dict(payload)
+                        else:
+                            result = radar_calibration.AngularCalibrationResult.from_dict(
+                                payload
+                            )
                     except (KeyError, TypeError, ValueError) as exc:
                         print(f"Invalid calibration result: {exc}", file=sys.stderr)
                         return 1
@@ -1066,7 +1162,12 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
                     except queue.Empty:
                         payload = None
                     if payload is not None:
-                        result = radar_calibration.CalibrationResult.from_dict(payload)
+                        if payload.get("calibration_type", "range") == "range":
+                            result = radar_calibration.CalibrationResult.from_dict(payload)
+                        else:
+                            result = radar_calibration.AngularCalibrationResult.from_dict(
+                                payload
+                            )
                         break
                     print(
                         f"Calibration capture exited with code {capture_process.returncode}",
@@ -1101,8 +1202,16 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
         return 1
 
     print(f"Calibration report: {report_path}")
-    print("Calibration command preview:")
-    print(result.command)
+    if isinstance(result, radar_calibration.CalibrationResult):
+        print("Calibration command preview:")
+        print(result.command)
+    else:
+        print("Host angle calibration preview:")
+        print(
+            f"{result.calibration_type}: reference={result.reference_angle_deg:+.3f} deg, "
+            f"measured={result.measured_angle_deg:+.3f} deg, "
+            f"bias={result.angle_bias_deg:+.3f} deg"
+        )
     try:
         confirmation = input(
             f"Apply this command to {operational_profile}? [y/N]: "
@@ -1113,10 +1222,16 @@ def run_calibration_mode(args: argparse.Namespace, radar_port: str) -> int:
         print("Calibration was not applied; operational profile unchanged.")
         return 0
     try:
-        backup = radar_calibration.apply_calibration_to_profile(
-            operational_profile,
-            result,
-        )
+        if isinstance(result, radar_calibration.CalibrationResult):
+            backup = radar_calibration.apply_calibration_to_profile(
+                operational_profile,
+                result,
+            )
+        else:
+            backup = radar_calibration.apply_angular_calibration_to_profile(
+                operational_profile,
+                result,
+            )
     except (OSError, ValueError) as exc:
         print(f"Could not apply calibration: {exc}", file=sys.stderr)
         return 1
@@ -1137,7 +1252,7 @@ def main() -> int:
             print(f"Invalid micro-Doppler range: {exc}", file=sys.stderr)
             return 2
     duration_minutes = 0.0
-    if display != radar_calibration.CALIBRATION_DISPLAY_MODE:
+    if display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
         try:
             duration_minutes = choose_duration_minutes(args.duration_minutes)
         except ValueError as exc:
@@ -1148,8 +1263,8 @@ def main() -> int:
         print("No radar command UART port was provided.", file=sys.stderr)
         return 2
 
-    if display == radar_calibration.CALIBRATION_DISPLAY_MODE:
-        return run_calibration_mode(args, radar_port)
+    if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        return run_calibration_mode(args, radar_port, display)
 
     processed_output = args.processed_output or default_processed_output(
         args.capture_dir

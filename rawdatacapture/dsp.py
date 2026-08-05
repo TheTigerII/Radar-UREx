@@ -490,6 +490,8 @@ class RadarDspConfig(Protocol):
     frame_periodicity_ms: Optional[float]
     range_bias_m: float
     rx_channel_compensation: Optional[tuple[complex, ...]]
+    azimuth_bias_deg: float
+    elevation_bias_deg: float
 
 
 def range_resolution_m(config: RadarDspConfig) -> Optional[float]:
@@ -766,6 +768,11 @@ def compute_static_point_cloud(
     selected_ranges = physical_range_axis[candidate_indices[:, 0]]
     selected_elevation_u = elevation_u[candidate_indices[:, 1]]
     selected_azimuth_u = azimuth_u[candidate_indices[:, 2]]
+    selected_azimuth_u, selected_elevation_u = _apply_host_angle_calibration(
+        selected_azimuth_u,
+        selected_elevation_u,
+        config,
+    )
     radial_scale = np.sqrt(
         np.maximum(
             0.0,
@@ -1866,6 +1873,13 @@ def estimate_xyz_from_virtual_arrays(
     elevation_u = _spatial_bins_to_direction_cosines(elevation_bins, angle_fft_size)
     azimuth_u = np.where(has_signal, azimuth_u, 0.0)
     elevation_u = np.where(has_signal, elevation_u, 0.0)
+    azimuth_u, elevation_u = _apply_host_angle_calibration(
+        azimuth_u,
+        elevation_u,
+        config,
+    )
+    azimuth_u = np.where(has_signal, azimuth_u, 0.0)
+    elevation_u = np.where(has_signal, elevation_u, 0.0)
 
     direction_norm_sq = azimuth_u**2 + elevation_u**2
     valid = direction_norm_sq <= 1.0
@@ -1941,6 +1955,33 @@ def _spatial_bins_to_direction_cosines(
         (bin_indices - (fft_size // 2)) / float(fft_size)
     )
     return np.clip(direction_cosines, -1.0, 1.0)
+
+
+def _apply_host_angle_calibration(
+    azimuth_u: np.ndarray,
+    elevation_u: np.ndarray,
+    config: RadarDspConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply stored physical azimuth/elevation offsets to direction cosines."""
+
+    azimuth_angles_deg = np.rad2deg(
+        np.arcsin(np.clip(np.asarray(azimuth_u, dtype=np.float64), -1.0, 1.0))
+    )
+    # Existing ODS coordinates use positive z for negative elevation direction
+    # cosine, so calibration is expressed in the physical positive-up angle.
+    elevation_angles_deg = -np.rad2deg(
+        np.arcsin(np.clip(np.asarray(elevation_u, dtype=np.float64), -1.0, 1.0))
+    )
+    corrected_azimuth_deg = azimuth_angles_deg - float(
+        getattr(config, "azimuth_bias_deg", 0.0)
+    )
+    corrected_elevation_deg = elevation_angles_deg - float(
+        getattr(config, "elevation_bias_deg", 0.0)
+    )
+    return (
+        np.sin(np.deg2rad(corrected_azimuth_deg)),
+        -np.sin(np.deg2rad(corrected_elevation_deg)),
+    )
 
 
 def _build_iwr6843isk_ods_virtual_antenna_grids(

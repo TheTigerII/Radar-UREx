@@ -5,7 +5,10 @@ from pathlib import Path
 import numpy as np
 
 from rawdatacapture import calibrate
-from rawdatacapture.dsp import build_virtual_antenna_grids
+from rawdatacapture.dsp import (
+    _apply_host_angle_calibration,
+    build_virtual_antenna_grids,
+)
 from rawdatacapture.livedatacapture import RadarCaptureConfig
 
 
@@ -60,6 +63,30 @@ class CalibrationProfileTests(unittest.TestCase):
                 self.settings,
                 require_raw_lvds=True,
             )
+
+    def test_angular_runtime_imports_operational_channel_compensation(self) -> None:
+        operational = ROOT / "rawdatacapture" / "profile.cfg"
+        operational_text = operational.read_text(encoding="utf-8")
+        operational_command = next(
+            line.strip()
+            for line in operational_text.splitlines()
+            if line.strip().startswith("compRangeBiasAndRxChanPhase")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.cfg"
+            calibrate.create_runtime_profile(
+                CALIBRATION_PROFILE,
+                runtime,
+                self.config,
+                calibrate.CalibrationSettings(calibration_type="azimuth"),
+                operational,
+            )
+            runtime_command = next(
+                line.strip()
+                for line in runtime.read_text(encoding="utf-8").splitlines()
+                if line.strip().startswith("compRangeBiasAndRxChanPhase")
+            )
+            self.assertEqual(runtime_command, operational_command)
 
     def test_duplicate_required_command_is_rejected(self) -> None:
         text = CALIBRATION_PROFILE.read_text(encoding="utf-8")
@@ -182,6 +209,74 @@ class CalibrationAlgorithmTests(unittest.TestCase):
         self.assertEqual(grid[2, 3], coefficients[6])
         self.assertEqual(grid[3, 3], coefficients[7])
 
+    def _synthetic_angular_range_fft(
+        self,
+        azimuth_deg: float,
+        elevation_deg: float,
+    ) -> np.ndarray:
+        positions = {
+            (1, 1): (3, 0), (1, 2): (2, 0), (1, 3): (2, 1), (1, 4): (3, 1),
+            (2, 1): (3, 2), (2, 2): (2, 2), (2, 3): (2, 3), (2, 4): (3, 3),
+            (3, 1): (1, 2), (3, 2): (0, 2), (3, 3): (0, 3), (3, 4): (1, 3),
+        }
+        rx_polarity = {1: 1.0, 2: -1.0, 3: -1.0, 4: 1.0}
+        bins = np.arange(self.config.num_adc_samples)
+        target_bin = 1.05 / self.config.range_resolution_m
+        shape = np.exp(-0.5 * ((bins - target_bin) / 0.55) ** 2)
+        azimuth_u = np.sin(np.deg2rad(azimuth_deg))
+        elevation_u = -np.sin(np.deg2rad(elevation_deg))
+        cube = np.zeros(
+            (self.config.num_chirps_per_frame, 4, self.config.num_adc_samples),
+            dtype=np.complex128,
+        )
+        for loop in range(self.config.num_loops):
+            for slot, tx_number in enumerate((1, 3, 2)):
+                for rx_number in range(1, 5):
+                    row, column = positions[(tx_number, rx_number)]
+                    grid_sample = np.exp(
+                        1j * np.pi * (elevation_u * row + azimuth_u * column)
+                    )
+                    cube[loop * 3 + slot, rx_number - 1] = (
+                        grid_sample / rx_polarity[rx_number] * shape
+                    )
+        return cube
+
+    def test_azimuth_calibration_recovers_known_offset(self) -> None:
+        settings = calibrate.CalibrationSettings(
+            calibration_type="azimuth",
+            reference_angle_deg=10.0,
+            warmup_frames=0,
+            accepted_frames=4,
+            min_peak_prominence_db=3.0,
+            max_angle_std_deg=0.1,
+        )
+        accumulator = calibrate.AngularCalibrationAccumulator(self.config, settings)
+        cube = self._synthetic_angular_range_fft(12.0, 0.0)
+        for _ in range(4):
+            accumulator.update(cube)
+        self.assertIsNotNone(accumulator.result)
+        assert accumulator.result is not None
+        self.assertAlmostEqual(accumulator.result.measured_angle_deg, 12.0, delta=0.1)
+        self.assertAlmostEqual(accumulator.result.angle_bias_deg, 2.0, delta=0.1)
+
+    def test_elevation_calibration_uses_positive_up_angle_convention(self) -> None:
+        settings = calibrate.CalibrationSettings(
+            calibration_type="elevation",
+            reference_angle_deg=-10.0,
+            warmup_frames=0,
+            accepted_frames=4,
+            min_peak_prominence_db=3.0,
+            max_angle_std_deg=0.1,
+        )
+        accumulator = calibrate.AngularCalibrationAccumulator(self.config, settings)
+        cube = self._synthetic_angular_range_fft(0.0, -15.0)
+        for _ in range(4):
+            accumulator.update(cube)
+        self.assertIsNotNone(accumulator.result)
+        assert accumulator.result is not None
+        self.assertAlmostEqual(accumulator.result.measured_angle_deg, -15.0, delta=0.1)
+        self.assertAlmostEqual(accumulator.result.angle_bias_deg, -5.0, delta=0.1)
+
 
 class CalibrationApplyTests(unittest.TestCase):
     def test_apply_creates_backup_and_replaces_one_line(self) -> None:
@@ -234,6 +329,62 @@ class CalibrationApplyTests(unittest.TestCase):
             self.assertAlmostEqual(parsed.range_axis_m()[0], -0.04, places=6)
             self.assertTrue(
                 np.allclose(parsed.rx_channel_compensation, coefficients, atol=1e-6)
+            )
+
+    def test_angular_apply_preserves_other_axis_and_is_parsed_by_normal_dsp(self) -> None:
+        operational = ROOT / "rawdatacapture" / "profile.cfg"
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory) / "profile.cfg"
+            profile.write_bytes(operational.read_bytes())
+            azimuth = calibrate.AngularCalibrationResult(
+                calibration_type="azimuth",
+                target_distance_m=1.0,
+                search_window_m=0.2,
+                reference_angle_deg=10.0,
+                measured_angle_deg=12.0,
+                angle_bias_deg=2.0,
+                accepted_frames=64,
+                angle_std_deg=0.2,
+                measured_range_m=1.0,
+                tx_order=(1, 4, 2),
+            )
+            elevation = calibrate.AngularCalibrationResult(
+                calibration_type="elevation",
+                target_distance_m=1.0,
+                search_window_m=0.2,
+                reference_angle_deg=-10.0,
+                measured_angle_deg=-13.0,
+                angle_bias_deg=-3.0,
+                accepted_frames=64,
+                angle_std_deg=0.2,
+                measured_range_m=1.0,
+                tx_order=(1, 4, 2),
+            )
+            first_backup = calibrate.apply_angular_calibration_to_profile(
+                profile, azimuth
+            )
+            second_backup = calibrate.apply_angular_calibration_to_profile(
+                profile, elevation
+            )
+            self.assertTrue(first_backup.exists())
+            self.assertTrue(second_backup.exists())
+            text = profile.read_text(encoding="utf-8")
+            self.assertEqual(text.count(calibrate.HOST_ANGLE_CALIBRATION_MARKER), 1)
+            parsed = RadarCaptureConfig.from_file(profile)
+            self.assertAlmostEqual(parsed.azimuth_bias_deg, 2.0)
+            self.assertAlmostEqual(parsed.elevation_bias_deg, -3.0)
+            corrected_azimuth_u, corrected_elevation_u = (
+                _apply_host_angle_calibration(
+                    np.asarray([np.sin(np.deg2rad(12.0))]),
+                    np.asarray([-np.sin(np.deg2rad(-13.0))]),
+                    parsed,
+                )
+            )
+            self.assertAlmostEqual(
+                np.rad2deg(np.arcsin(corrected_azimuth_u[0])), 10.0, places=5
+            )
+            self.assertAlmostEqual(
+                -np.rad2deg(np.arcsin(corrected_elevation_u[0])), -10.0, places=5
             )
 
 

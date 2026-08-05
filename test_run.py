@@ -84,6 +84,14 @@ class ChooseDisplayTests(unittest.TestCase):
         with patch("builtins.input", return_value="7"):
             self.assertEqual(run.choose_display(None), "calibration")
 
+    def test_angular_calibrations_are_menu_options_eight_and_nine(self) -> None:
+        with patch("builtins.input", return_value="8"):
+            self.assertEqual(run.choose_display(None), "azimuth-calibration")
+        with patch("builtins.input", return_value="9"):
+            self.assertEqual(run.choose_display(None), "elevation-calibration")
+        self.assertIn("azimuth-calibration", run.DISPLAY_CHOICES)
+        self.assertIn("elevation-calibration", run.DISPLAY_CHOICES)
+
     def test_dedicated_rotor_defaults_match_current_drone(self) -> None:
         with patch("sys.argv", ("run.py",)):
             args = run.parse_args()
