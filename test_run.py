@@ -32,6 +32,12 @@ def _args() -> argparse.Namespace:
         radar_command_timeout=10.0,
         dca_timeout=3.0,
         dca_retries=5,
+        calibration_distance_m=1.0,
+        calibration_search_window_m=0.2,
+        calibration_warmup_frames=16,
+        calibration_frames=64,
+        calibration_timeout_seconds=90.0,
+        calibration_angle_deg=0.0,
     )
 
 
@@ -60,6 +66,33 @@ class CaptureCommandTests(unittest.TestCase):
             config_values,
             [str(run.DEFAULT_CONFIG_PATH), str(run.DEFAULT_CONFIG_PATH)],
         )
+
+    def test_calibration_command_uses_runtime_profile_without_pmm_output(self) -> None:
+        command = run.build_capture_command(
+            _args(),
+            "calibration",
+            Path("pmm.jsonl"),
+            config_path=Path("runtime.cfg"),
+        )
+        self.assertIn("runtime.cfg", command)
+        self.assertNotIn("--processed-output", command)
+        self.assertIn("--calibration-frames", command)
+
+        angular = run.build_capture_command(
+            _args(),
+            "azimuth-calibration",
+            None,
+            config_path=Path("runtime.cfg"),
+            host_compensation_profile=Path("profile-mini4-20m.cfg"),
+        )
+        self.assertIn("--host-compensation-profile", angular)
+        with self.assertRaisesRegex(ValueError, "host compensation"):
+            run.build_capture_command(
+                _args(),
+                "elevation-calibration",
+                None,
+                config_path=Path("runtime.cfg"),
+            )
 
 
 class PromptTests(unittest.TestCase):
@@ -96,6 +129,17 @@ class PromptTests(unittest.TestCase):
     def test_blank_duration_uses_five_minutes(self) -> None:
         with patch("builtins.input", return_value=""):
             self.assertEqual(run.choose_duration_minutes(None), 5.0)
+
+    def test_calibration_modes_are_menu_options_six_through_eight(self) -> None:
+        expected = (
+            "calibration",
+            "azimuth-calibration",
+            "elevation-calibration",
+        )
+        for menu_value, display in zip(("6", "7", "8"), expected):
+            with self.subTest(menu_value=menu_value):
+                with patch("builtins.input", return_value=menu_value):
+                    self.assertEqual(run.choose_display(None), display)
 
     def test_negative_duration_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

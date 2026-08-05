@@ -24,6 +24,7 @@ class RadarDspConfig(Protocol):
     num_chirps_per_loop: Optional[int]
     sample_rate_ksps: Optional[float]
     frequency_slope_mhz_per_us: Optional[float]
+    range_bias_m: float
 
 
 @lru_cache(maxsize=8)
@@ -172,4 +173,7 @@ def range_axis_m(config: RadarDspConfig) -> Optional[np.ndarray]:
     resolution = range_resolution_m(config)
     if resolution is None:
         return None
-    return np.arange(config.num_adc_samples, dtype=np.float32) * resolution
+    return (
+        np.arange(config.num_adc_samples, dtype=np.float32) * resolution
+        - float(getattr(config, "range_bias_m", 0.0))
+    )

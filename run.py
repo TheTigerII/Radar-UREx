@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
+import json
+import math
 import os
+import queue
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -14,11 +19,13 @@ from pathlib import Path
 from typing import NamedTuple, Optional
 
 from rawdatacapture.pmm import MINI4_DEFAULT_DETECTION_THRESHOLD
+from rawdatacapture import calibrate as radar_calibration
 
 
 ROOT = Path(__file__).resolve().parent
 RAW_DATA_DIR = ROOT / "rawdatacapture"
 DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile-mini4-20m.cfg"
+DEFAULT_CALIBRATION_PROFILE_PATH = ROOT / "profiles" / "profile_calibration.cfg"
 DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
 DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
 DEFAULT_HOST_IP = "192.168.33.30"
@@ -35,6 +42,9 @@ DISPLAY_CHOICES = (
     "range-doppler",
     "point-cloud",
     "combined",
+    radar_calibration.CALIBRATION_DISPLAY_MODE,
+    radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE,
+    radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE,
 )
 CAPTURE_READY_PREFIX = "Listening for live radar stream "
 CAPTURE_STARTUP_TIMEOUT_SECONDS = 30.0
@@ -79,6 +89,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dca-timeout", type=float, default=3.0)
     parser.add_argument("--dca-retries", type=int, default=5)
     parser.add_argument("--display", choices=DISPLAY_CHOICES)
+    parser.add_argument(
+        "--calibration-profile",
+        type=Path,
+        default=DEFAULT_CALIBRATION_PROFILE_PATH,
+    )
+    parser.add_argument("--calibration-distance-m", type=float)
+    parser.add_argument(
+        "--calibration-search-window-m",
+        type=float,
+        default=radar_calibration.DEFAULT_SEARCH_WINDOW_M,
+    )
+    parser.add_argument(
+        "--calibration-warmup-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_WARMUP_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_ACCEPTED_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-timeout-seconds",
+        type=float,
+        default=radar_calibration.DEFAULT_TIMEOUT_SECONDS,
+    )
+    parser.add_argument("--calibration-angle-deg", type=float)
+    parser.add_argument("--calibration-output", type=Path)
     parser.add_argument("--display-update-every", type=int, default=1)
     parser.add_argument("--max-range-m", type=float, default=DEFAULT_MAX_RANGE_M)
     parser.add_argument("--duration-minutes", type=float)
@@ -131,6 +169,33 @@ def choose_duration_minutes(value: Optional[float]) -> float:
         value = DEFAULT_DURATION_MINUTES if not text else float(text)
     if not float("-inf") < float(value) < float("inf") or value < 0.0:
         raise ValueError("duration must be finite and non-negative")
+    return float(value)
+
+
+def choose_calibration_distance_m(value: Optional[float]) -> float:
+    if value is None:
+        text = input(
+            "Laser-measured reflector distance in meters "
+            f"[{radar_calibration.DEFAULT_TARGET_DISTANCE_M:g}]: "
+        ).strip()
+        value = radar_calibration.DEFAULT_TARGET_DISTANCE_M if not text else float(text)
+    if not math.isfinite(float(value)) or float(value) <= 0.0:
+        raise ValueError("calibration distance must be finite and positive")
+    return float(value)
+
+
+def choose_calibration_angle_deg(
+    value: Optional[float],
+    calibration_type: str,
+) -> float:
+    if value is None:
+        text = input(
+            f"Known tripod {calibration_type} angle in degrees "
+            f"[{radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG:g}]: "
+        ).strip()
+        value = radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG if not text else float(text)
+    if not math.isfinite(float(value)) or abs(float(value)) > 60.0:
+        raise ValueError("calibration angle must be within -60 to +60 degrees")
     return float(value)
 
 
@@ -192,15 +257,17 @@ def default_processed_output(capture_dir: Path) -> Path:
 def build_capture_command(
     args: argparse.Namespace,
     display: str,
-    processed_output: Path,
+    processed_output: Optional[Path],
     raw_output: Optional[Path] = None,
+    config_path: Optional[Path] = None,
+    host_compensation_profile: Optional[Path] = None,
 ) -> list[str]:
     command = [
         sys.executable,
         "-u",
         str(RAW_DATA_DIR / "livedatacapture.py"),
         "--config",
-        str(args.config),
+        str(config_path or args.config),
         "--setup",
         str(args.setup),
         "--host-ip",
@@ -219,8 +286,6 @@ def build_capture_command(
         str(max(args.display_update_every, 1)),
         "--max-range-m",
         str(min(max(args.max_range_m, 0.3), 20.0)),
-        "--processed-output",
-        str(processed_output),
         "--pmm-background-calibration-seconds",
         str(args.pmm_background_calibration_seconds),
         "--pmm-max-target-speed-m-s",
@@ -242,6 +307,44 @@ def build_capture_command(
         "--pmm-coast-frames",
         str(args.pmm_coast_frames),
     ]
+    if processed_output is not None and display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        command.extend(("--processed-output", str(processed_output)))
+    if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        distance_m = getattr(args, "calibration_distance_m", None)
+        angle_deg = getattr(args, "calibration_angle_deg", None)
+        command.extend(
+            (
+                "--calibration-distance-m",
+                str(
+                    radar_calibration.DEFAULT_TARGET_DISTANCE_M
+                    if distance_m is None
+                    else distance_m
+                ),
+                "--calibration-search-window-m",
+                str(args.calibration_search_window_m),
+                "--calibration-warmup-frames",
+                str(max(args.calibration_warmup_frames, 0)),
+                "--calibration-frames",
+                str(max(args.calibration_frames, 1)),
+                "--calibration-timeout-seconds",
+                str(args.calibration_timeout_seconds),
+                "--calibration-angle-deg",
+                str(
+                    radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG
+                    if angle_deg is None
+                    else angle_deg
+                ),
+            )
+        )
+    if display in {
+        radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE,
+        radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE,
+    }:
+        if host_compensation_profile is None:
+            raise ValueError("Angular calibration requires host compensation profile")
+        command.extend(
+            ("--host-compensation-profile", str(host_compensation_profile))
+        )
     if raw_output is not None:
         command.extend(("--raw-output", str(raw_output)))
     return command
@@ -250,14 +353,16 @@ def build_capture_command(
 def build_startup_command(
     args: argparse.Namespace,
     radar_port: str,
+    config_path: Optional[Path] = None,
 ) -> list[str]:
+    effective_config = config_path or args.config
     return [
         sys.executable,
         str(RAW_DATA_DIR / "startup.py"),
         "--config",
-        str(args.config),
+        str(effective_config),
         "--sdk-profile",
-        str(args.config),
+        str(effective_config),
         "--setup",
         str(args.setup),
         "--host-ip",
@@ -309,14 +414,30 @@ def start_process(
 def relay_capture_output(
     process: subprocess.Popen,
     capture_ready: threading.Event,
+    calibration_queue: Optional[queue.SimpleQueue] = None,
 ) -> None:
     if process.stdout is None:
         return
     for raw_line in process.stdout:
         line = raw_line.rstrip()
-        print(line, flush=True)
         if line.startswith(CAPTURE_READY_PREFIX):
             capture_ready.set()
+        marker_index = line.find(radar_calibration.CALIBRATION_RESULT_PREFIX)
+        if marker_index >= 0:
+            try:
+                payload = json.loads(
+                    line[
+                        marker_index
+                        + len(radar_calibration.CALIBRATION_RESULT_PREFIX) :
+                    ]
+                )
+            except ValueError:
+                print(line, flush=True)
+                continue
+            if calibration_queue is not None and isinstance(payload, dict):
+                calibration_queue.put(payload)
+            continue
+        print(line, flush=True)
 
 
 def wait_for_capture_ready(
@@ -362,18 +483,250 @@ def stop_process(process: Optional[subprocess.Popen], timeout: float = 10.0) -> 
         process.wait(timeout=2.0)
 
 
+def _default_calibration_output(
+    capture_dir: Path,
+    calibration_type: str,
+) -> Path:
+    timestamp = datetime.now().astimezone().strftime("%Y_%m_%dT%H_%M_%S")
+    prefix = "calibration" if calibration_type == "range" else f"{calibration_type}_calibration"
+    return capture_dir / f"{prefix}_{timestamp}.json"
+
+
+def _calibration_result_from_payload(
+    payload: object,
+) -> radar_calibration.CalibrationResult | radar_calibration.AngularCalibrationResult:
+    if not isinstance(payload, dict):
+        raise ValueError("calibration result is not a JSON object")
+    if payload.get("calibration_type", "range") == "range":
+        return radar_calibration.CalibrationResult.from_dict(payload)
+    return radar_calibration.AngularCalibrationResult.from_dict(payload)
+
+
+def run_calibration_mode(
+    args: argparse.Namespace,
+    display: str,
+    radar_port: str,
+) -> int:
+    calibration_type = {
+        radar_calibration.CALIBRATION_DISPLAY_MODE: "range",
+        radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE: "azimuth",
+        radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE: "elevation",
+    }[display]
+    try:
+        distance_m = choose_calibration_distance_m(args.calibration_distance_m)
+        reference_angle_deg = (
+            choose_calibration_angle_deg(
+                args.calibration_angle_deg, calibration_type
+            )
+            if calibration_type in {"azimuth", "elevation"}
+            else radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG
+        )
+        settings = radar_calibration.CalibrationSettings(
+            target_distance_m=distance_m,
+            search_window_m=args.calibration_search_window_m,
+            warmup_frames=args.calibration_warmup_frames,
+            accepted_frames=args.calibration_frames,
+            timeout_seconds=args.calibration_timeout_seconds,
+            calibration_type=calibration_type,
+            reference_angle_deg=reference_angle_deg,
+        )
+    except ValueError as exc:
+        print(f"Invalid calibration settings: {exc}", file=sys.stderr)
+        return 2
+    args.calibration_distance_m = settings.target_distance_m
+    args.calibration_angle_deg = settings.reference_angle_deg
+
+    source_profile = args.calibration_profile
+    if not source_profile.is_absolute():
+        source_profile = ROOT / source_profile
+    operational_profile = args.config
+    if not operational_profile.is_absolute():
+        operational_profile = ROOT / operational_profile
+    report_path = args.calibration_output or _default_calibration_output(
+        args.capture_dir, calibration_type
+    )
+    if not report_path.is_absolute():
+        report_path = ROOT / report_path
+
+    try:
+        from rawdatacapture.livedatacapture import RadarCaptureConfig
+
+        source_config = RadarCaptureConfig.from_file(source_profile)
+    except (OSError, ValueError) as exc:
+        print(f"Calibration profile is invalid: {exc}", file=sys.stderr)
+        return 2
+
+    capture: Optional[subprocess.Popen] = None
+    startup: Optional[subprocess.Popen] = None
+    relay_thread: Optional[threading.Thread] = None
+    result: Optional[
+        radar_calibration.CalibrationResult
+        | radar_calibration.AngularCalibrationResult
+    ] = None
+    ready = threading.Event()
+    result_queue: queue.SimpleQueue = queue.SimpleQueue()
+    temporary_profiles: Optional[tempfile.TemporaryDirectory] = None
+    try:
+        temporary_profiles = tempfile.TemporaryDirectory(
+            prefix="radar_calibration_"
+        )
+        with nullcontext(temporary_profiles.name) as temporary_directory:
+            runtime_profile = Path(temporary_directory) / "calibration_runtime.cfg"
+            radar_calibration.create_runtime_profile(
+                source_profile,
+                runtime_profile,
+                source_config,
+                settings,
+            )
+            print(f"Display mode: {display}")
+            print(f"Laser distance: {settings.target_distance_m:g} m")
+            if calibration_type != "range":
+                print(
+                    f"Known {calibration_type} angle: "
+                    f"{settings.reference_angle_deg:+g} degrees"
+                )
+            capture = start_process(
+                "calibration capture",
+                build_capture_command(
+                    args,
+                    display,
+                    None,
+                    None,
+                    runtime_profile,
+                    (
+                        operational_profile
+                        if calibration_type in {"azimuth", "elevation"}
+                        else None
+                    ),
+                ),
+                capture_output=True,
+            )
+            relay_thread = threading.Thread(
+                target=relay_capture_output,
+                args=(capture, ready, result_queue),
+                daemon=True,
+            )
+            relay_thread.start()
+            if not wait_for_capture_ready(capture, ready):
+                print("Calibration capture failed to become ready.", file=sys.stderr)
+                return 1
+            startup = start_process(
+                "calibration startup",
+                build_startup_command(args, radar_port, runtime_profile),
+            )
+            deadline = time.monotonic() + settings.timeout_seconds
+            while time.monotonic() < deadline:
+                try:
+                    payload = result_queue.get_nowait()
+                except queue.Empty:
+                    payload = None
+                if payload is not None:
+                    result = _calibration_result_from_payload(payload)
+                    break
+                if startup.poll() is not None:
+                    print(
+                        "Calibration startup exited early with code "
+                        f"{startup.returncode}.",
+                        file=sys.stderr,
+                    )
+                    return startup.returncode or 1
+                if capture.poll() is not None:
+                    # The result is printed immediately before the capture exits.
+                    # Let the relay consume the remaining pipe content before
+                    # deciding that an automatic, successful exit was a failure.
+                    relay_thread.join(timeout=1.0)
+                    try:
+                        payload = result_queue.get_nowait()
+                    except queue.Empty:
+                        payload = None
+                    if payload is not None:
+                        result = _calibration_result_from_payload(payload)
+                        break
+                    print(
+                        "Calibration capture exited early with code "
+                        f"{capture.returncode}.",
+                        file=sys.stderr,
+                    )
+                    return capture.returncode or 1
+                time.sleep(0.1)
+            if result is None:
+                print(
+                    "Calibration timed out without a stable result; profile unchanged.",
+                    file=sys.stderr,
+                )
+                return 1
+    except KeyboardInterrupt:
+        print("Calibration interrupted; profile unchanged.")
+        return 130
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        print(f"Calibration failed: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        stop_process(startup)
+        stop_process(capture)
+        if relay_thread is not None:
+            relay_thread.join(timeout=2.0)
+        if temporary_profiles is not None:
+            temporary_profiles.cleanup()
+
+    assert result is not None
+    try:
+        radar_calibration.write_calibration_report(report_path, result)
+    except OSError as exc:
+        print(f"Could not write calibration report: {exc}", file=sys.stderr)
+        return 1
+    print(f"Calibration report: {report_path}")
+    if isinstance(result, radar_calibration.CalibrationResult):
+        print(result.command)
+    else:
+        print(
+            f"{result.calibration_type}: expected "
+            f"{result.reference_angle_deg:+.3f}, measured "
+            f"{result.measured_angle_deg:+.3f}, bias "
+            f"{result.angle_bias_deg:+.3f} degrees"
+        )
+    try:
+        apply_result = input(
+            f"Apply this calibration to {operational_profile}? [y/N]: "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        apply_result = ""
+    if apply_result not in {"y", "yes"}:
+        print("Calibration not applied; operational profile unchanged.")
+        return 0
+    try:
+        backup = (
+            radar_calibration.apply_calibration_to_profile(
+                operational_profile, result
+            )
+            if isinstance(result, radar_calibration.CalibrationResult)
+            else radar_calibration.apply_angular_calibration_to_profile(
+                operational_profile, result
+            )
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Could not apply calibration: {exc}", file=sys.stderr)
+        return 1
+    print(f"Calibration applied. Backup: {backup}")
+    return 0
+
+
 def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
-    try:
-        duration_minutes = choose_duration_minutes(args.duration_minutes)
-    except ValueError as exc:
-        print(f"Invalid duration: {exc}", file=sys.stderr)
-        return 2
+    duration_minutes = 0.0
+    if display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        try:
+            duration_minutes = choose_duration_minutes(args.duration_minutes)
+        except ValueError as exc:
+            print(f"Invalid duration: {exc}", file=sys.stderr)
+            return 2
     radar_port = resolve_radar_port(args.radar_port)
     if not radar_port:
         print("No radar command UART was supplied.", file=sys.stderr)
         return 2
+    if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        return run_calibration_mode(args, display, radar_port)
 
     processed_output = args.processed_output or default_processed_output(
         args.capture_dir

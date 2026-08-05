@@ -38,6 +38,7 @@ if __package__ in {None, ""}:
         PmmTracker,
         validate_mini4_profile,
     )
+    from rawdatacapture import calibrate as radar_calibration
 else:
     from .dsp import (
         compute_range_doppler_fft,
@@ -55,6 +56,7 @@ else:
         PmmTracker,
         validate_mini4_profile,
     )
+    from . import calibrate as radar_calibration
 
 
 UDP_IP = "192.168.33.30"
@@ -78,10 +80,24 @@ DISPLAY_CHOICES = (
     "range-doppler",
     "point-cloud",
     COMBINED_DISPLAY_MODE,
+    radar_calibration.CALIBRATION_DISPLAY_MODE,
+    radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE,
+    radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE,
 )
 PROCESSED_OUTPUT_BUFFER_BYTES = 1024 * 1024
 _LOG_FILE: Optional[TextIO] = None
 EmitFunc = Callable[[str], None]
+
+
+def _radar_config_metadata(config: Any) -> dict[str, Any]:
+    metadata = asdict(config)
+    coefficients = metadata.get("rx_channel_compensation")
+    if coefficients is not None:
+        metadata["rx_channel_compensation"] = [
+            [complex(value).real, complex(value).imag]
+            for value in coefficients
+        ]
+    return metadata
 
 
 class CaptureStartupError(RuntimeError):
@@ -172,6 +188,10 @@ class RadarCaptureConfig:
     adc_start_time_us: Optional[float] = None
     ramp_end_time_us: Optional[float] = None
     frame_periodicity_ms: Optional[float] = None
+    range_bias_m: float = 0.0
+    rx_channel_compensation: Optional[tuple[complex, ...]] = None
+    azimuth_bias_deg: float = 0.0
+    elevation_bias_deg: float = 0.0
 
     @classmethod
     def from_dimensions(
@@ -193,6 +213,10 @@ class RadarCaptureConfig:
         adc_start_time_us: Optional[float] = None,
         ramp_end_time_us: Optional[float] = None,
         frame_periodicity_ms: Optional[float] = None,
+        range_bias_m: float = 0.0,
+        rx_channel_compensation: Optional[Iterable[complex]] = None,
+        azimuth_bias_deg: float = 0.0,
+        elevation_bias_deg: float = 0.0,
     ) -> "RadarCaptureConfig":
         bytes_per_frame = (
             int(num_adc_samples)
@@ -222,6 +246,14 @@ class RadarCaptureConfig:
             adc_start_time_us=adc_start_time_us,
             ramp_end_time_us=ramp_end_time_us,
             frame_periodicity_ms=frame_periodicity_ms,
+            range_bias_m=float(range_bias_m),
+            rx_channel_compensation=(
+                tuple(complex(value) for value in rx_channel_compensation)
+                if rx_channel_compensation is not None
+                else None
+            ),
+            azimuth_bias_deg=float(azimuth_bias_deg),
+            elevation_bias_deg=float(elevation_bias_deg),
         )
 
     @classmethod
@@ -239,6 +271,26 @@ class RadarCaptureConfig:
 
     def range_axis_m(self) -> Optional[np.ndarray]:
         return range_axis_m(self)
+
+    @property
+    def adc_samples(self) -> int:
+        return self.num_adc_samples
+
+    @property
+    def rx_channels(self) -> int:
+        return self.num_rx_channels
+
+    @property
+    def loops_per_frame(self) -> int:
+        return int(self.num_loops or self.num_chirps_per_frame)
+
+    @property
+    def chirps_per_loop(self) -> int:
+        return int(self.num_chirps_per_loop or 1)
+
+    @property
+    def chirp_tx_masks(self) -> tuple[int, ...]:
+        return tuple(self.tx_channel_masks or ())
 
     @property
     def chirp_period_s(self) -> Optional[float]:
@@ -266,6 +318,20 @@ class RadarCaptureConfig:
             * self.chirp_period_s
             / (self.frame_periodicity_ms * 1e-3)
         )
+
+
+def _with_host_compensation(
+    capture_config: RadarCaptureConfig,
+    compensation_config: RadarCaptureConfig,
+) -> RadarCaptureConfig:
+    coefficients = compensation_config.rx_channel_compensation
+    if coefficients is None or len(coefficients) != 12:
+        raise ValueError("Host compensation profile must contain 12 coefficients")
+    return replace(
+        capture_config,
+        range_bias_m=compensation_config.range_bias_m,
+        rx_channel_compensation=coefficients,
+    )
 
 
 @dataclass(frozen=True)
@@ -541,7 +607,7 @@ class RawFrameWriter:
                         "frames_saved": self.frames_saved,
                         "invalid_frames_skipped": self.invalid_frames_skipped,
                         "bytes_per_frame": self.config.bytes_per_frame,
-                        "radar_config": asdict(self.config),
+                        "radar_config": _radar_config_metadata(self.config),
                     },
                     indent=2,
                 )
@@ -582,7 +648,7 @@ class ProcessedOutputWriter:
             "created_at": _timestamp(),
             "label": "PMM target",
             "pmm_tracking": pmm_metadata,
-            "radar_config": asdict(config),
+            "radar_config": _radar_config_metadata(config),
         }
         self.file.write(json.dumps(metadata, separators=(",", ":")) + "\n")
         self.emit(f"Saving PMM output to {self.output_path}")
@@ -651,9 +717,12 @@ class DisplayPayloadSink:
         update_every: int,
         payload_queue: Optional[mp.Queue],
         config: RadarCaptureConfig,
-        tracker: PmmTracker,
-        processed_writer: ProcessedOutputWriter,
+        tracker: Optional[PmmTracker],
+        processed_writer: Optional[ProcessedOutputWriter],
         display_skipped_counter: Optional[Any] = None,
+        calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
+        calibration_complete_event: Optional[Any] = None,
+        calibration_emit_func: Optional[EmitFunc] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(int(update_every), 1)
@@ -666,6 +735,16 @@ class DisplayPayloadSink:
         self.capture_diagnostics: dict[str, int] = {}
         self.latest_range_fft_ms = 0.0
         self.timings = ProcessingTimingStats()
+        self.calibration_accumulator = (
+            radar_calibration.create_calibration_accumulator(
+                config, calibration_settings
+            )
+            if calibration_settings is not None
+            else None
+        )
+        self.calibration_complete_event = calibration_complete_event
+        self.calibration_emit = calibration_emit_func
+        self._calibration_result_emitted = False
 
     def update(
         self,
@@ -674,6 +753,25 @@ class DisplayPayloadSink:
         *,
         captured_at_s: Optional[float] = None,
     ) -> None:
+        if self.calibration_accumulator is not None:
+            payload = self.calibration_accumulator.update(range_fft)
+            if self.payload_queue is not None:
+                skipped = _put_latest_queue_payload(self.payload_queue, payload)
+                _increment_shared_counter(self.display_skipped_counter, skipped)
+            result = self.calibration_accumulator.result
+            if result is not None and not self._calibration_result_emitted:
+                self._calibration_result_emitted = True
+                if self.calibration_emit is not None:
+                    self.calibration_emit(
+                        radar_calibration.CALIBRATION_RESULT_PREFIX
+                        + json.dumps(result.to_dict(), separators=(",", ":"))
+                    )
+                if self.calibration_complete_event is not None:
+                    self.calibration_complete_event.set()
+            return
+
+        if self.tracker is None or self.processed_writer is None:
+            raise RuntimeError("Normal Mini4 processing requires tracker and writer")
         total_started = time.perf_counter()
         self.frame_count += 1
         started = time.perf_counter()
@@ -824,6 +922,8 @@ def _run_frame_processor(
     display_mode: str,
     display_update_every: int,
     startup_status_queue: mp.Queue,
+    calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
+    calibration_complete_event: Optional[Any] = None,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -835,8 +935,11 @@ def _run_frame_processor(
     display: Optional[DisplayPayloadSink] = None
     ready_reported = False
     try:
-        validate_mini4_profile(config)
-        tracker = PmmTracker(config, pmm_config)
+        if calibration_settings is None:
+            validate_mini4_profile(config)
+            tracker: Optional[PmmTracker] = PmmTracker(config, pmm_config)
+        else:
+            tracker = None
         raw_writer = RawFrameWriter(
             raw_output,
             raw_metadata,
@@ -847,7 +950,7 @@ def _run_frame_processor(
             processed_output,
             config,
             worker_emit,
-            pmm_metadata=tracker.metadata,
+            pmm_metadata=(tracker.metadata if tracker is not None else None),
         )
         display = DisplayPayloadSink(
             display_mode,
@@ -857,15 +960,19 @@ def _run_frame_processor(
             tracker,
             processed_writer,
             display_skipped_counter,
+            calibration_settings=calibration_settings,
+            calibration_complete_event=calibration_complete_event,
+            calibration_emit_func=worker_emit,
         )
-        worker_emit(
-            "PMM tracking enabled: "
-            f"calibration={pmm_config.background_calibration_seconds:g}s, "
-            f"threshold={pmm_config.detection_threshold:g}, "
-            f"folding={pmm_config.folding_size_min}-"
-            f"{pmm_config.folding_size_max}, "
-            f"history={pmm_config.history_seconds:g}s"
-        )
+        if tracker is not None:
+            worker_emit(
+                "PMM tracking enabled: "
+                f"calibration={pmm_config.background_calibration_seconds:g}s, "
+                f"threshold={pmm_config.detection_threshold:g}, "
+                f"folding={pmm_config.folding_size_min}-"
+                f"{pmm_config.folding_size_max}, "
+                f"history={pmm_config.history_seconds:g}s"
+            )
         startup_status_queue.put(
             {"state": "ready", "message": "Radar frame processor ready."},
             timeout=1.0,
@@ -1165,6 +1272,14 @@ def _run_display_process(
     rendered_updates: Any,
     startup_status_queue: mp.Queue,
 ) -> None:
+    if mode in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        radar_calibration.run_calibration_display(
+            payload_queue,
+            stop_event,
+            startup_status_queue,
+            mode,
+        )
+        return
     try:
         import pyqtgraph as pg
         import pyqtgraph.opengl as gl
@@ -1270,6 +1385,7 @@ def listen_for_frames(
     packet_queue_size: int,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
+    pipeline_complete_event: Optional[Any] = None,
 ) -> CaptureStats:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
@@ -1298,6 +1414,13 @@ def listen_for_frames(
     receiver.start()
     try:
         while True:
+            if (
+                pipeline_complete_event is not None
+                and pipeline_complete_event.is_set()
+            ):
+                _drain_log_queue(log_queue)
+                emit("Calibration completed; stopping capture.")
+                break
             try:
                 packet, received_at = packet_queue.get(
                     timeout=socket_timeout_seconds
@@ -1370,6 +1493,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument("--setup", type=Path, default=DEFAULT_SETUP_PATH)
+    parser.add_argument("--host-compensation-profile", type=Path)
     parser.add_argument("--host-ip", default=UDP_IP)
     parser.add_argument("--data-port", type=int, default=UDP_PORT)
     parser.add_argument("--buffer-size", type=int, default=BUFFER_SIZE)
@@ -1394,6 +1518,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-metadata", type=Path)
     parser.add_argument("--processed-output", type=Path)
     parser.add_argument("--display", choices=DISPLAY_CHOICES, default="none")
+    parser.add_argument(
+        "--calibration-distance-m",
+        type=float,
+        default=radar_calibration.DEFAULT_TARGET_DISTANCE_M,
+    )
+    parser.add_argument(
+        "--calibration-search-window-m",
+        type=float,
+        default=radar_calibration.DEFAULT_SEARCH_WINDOW_M,
+    )
+    parser.add_argument(
+        "--calibration-warmup-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_WARMUP_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-frames",
+        type=int,
+        default=radar_calibration.DEFAULT_ACCEPTED_FRAMES,
+    )
+    parser.add_argument(
+        "--calibration-timeout-seconds",
+        type=float,
+        default=radar_calibration.DEFAULT_TIMEOUT_SECONDS,
+    )
+    parser.add_argument(
+        "--calibration-angle-deg",
+        type=float,
+        default=radar_calibration.DEFAULT_REFERENCE_ANGLE_DEG,
+    )
     parser.add_argument("--display-update-every", type=int, default=1)
     parser.add_argument("--max-range-m", type=float, default=DEFAULT_MAX_RANGE_M)
     parser.add_argument(
@@ -1430,9 +1584,49 @@ def main() -> None:
     log_queue: Optional[mp.Queue] = None
     processor: Optional[mp.Process] = None
     display: Optional[LiveDisplay] = None
+    calibration_settings: Optional[radar_calibration.CalibrationSettings] = None
+    calibration_complete_event: Optional[Any] = None
     try:
+        if args.display in radar_calibration.CALIBRATION_DISPLAY_MODES:
+            calibration_type = {
+                radar_calibration.CALIBRATION_DISPLAY_MODE: "range",
+                radar_calibration.AZIMUTH_CALIBRATION_DISPLAY_MODE: "azimuth",
+                radar_calibration.ELEVATION_CALIBRATION_DISPLAY_MODE: "elevation",
+            }[args.display]
+            calibration_settings = radar_calibration.CalibrationSettings(
+                target_distance_m=args.calibration_distance_m,
+                search_window_m=args.calibration_search_window_m,
+                warmup_frames=args.calibration_warmup_frames,
+                accepted_frames=args.calibration_frames,
+                timeout_seconds=args.calibration_timeout_seconds,
+                calibration_type=calibration_type,
+                reference_angle_deg=args.calibration_angle_deg,
+            )
+            args.processed_output = None
         config = RadarCaptureConfig.from_file(args.config)
-        validate_mini4_profile(config)
+        if calibration_settings is None:
+            validate_mini4_profile(config)
+        else:
+            if calibration_settings.calibration_type in {"azimuth", "elevation"}:
+                if args.host_compensation_profile is None:
+                    raise CaptureStartupError(
+                        "Angular calibration requires --host-compensation-profile"
+                    )
+                compensation_config = RadarCaptureConfig.from_file(
+                    args.host_compensation_profile
+                )
+                config = _with_host_compensation(config, compensation_config)
+                emit(
+                    "Loaded host-only calibration corrections: "
+                    f"range_bias={config.range_bias_m:+.6f} m"
+                )
+            radar_calibration.validate_calibration_profile_text(
+                _resolve_config_path(args.config).read_text(encoding="utf-8"),
+                config,
+                calibration_settings,
+                require_raw_lvds=True,
+            )
+            calibration_complete_event = context.Event()
         setup = CaptureSetupConfig.from_file(args.setup)
         pmm_config = PmmConfig(
             background_calibration_seconds=(
@@ -1481,6 +1675,8 @@ def main() -> None:
                 "display_mode": args.display,
                 "display_update_every": args.display_update_every,
                 "startup_status_queue": status_queue,
+                "calibration_settings": calibration_settings,
+                "calibration_complete_event": calibration_complete_event,
             },
             name="RadarFrameProcessor",
         )
@@ -1504,6 +1700,7 @@ def main() -> None:
             packet_queue_size=max(args.packet_queue_size, 1),
             frame_queue=frame_queue,
             log_queue=log_queue,
+            pipeline_complete_event=calibration_complete_event,
         )
     except CaptureStartupError as exc:
         emit(f"Capture startup failed: {exc}")
@@ -1532,9 +1729,29 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         "iq_swap": False,
         "channel_interleave": False,
         "lvds_lanes": 2,
+        "range_bias_m": 0.0,
+        "rx_channel_compensation": None,
+        "azimuth_bias_deg": 0.0,
+        "elevation_bias_deg": 0.0,
     }
     chirp_masks: dict[int, int] = {}
+    compensation_count = 0
+    angle_marker_count = 0
     for raw_line in lines:
+        stripped_raw = raw_line.strip()
+        if stripped_raw.startswith(radar_calibration.HOST_ANGLE_CALIBRATION_MARKER):
+            angle_marker_count += 1
+            if angle_marker_count > 1:
+                raise ValueError("Radar profile has duplicate host angle calibration markers")
+            marker = stripped_raw.split()
+            if (
+                len(marker) != 6
+                or marker[2] != "azimuthBiasDeg"
+                or marker[4] != "elevationBiasDeg"
+            ):
+                raise ValueError("Malformed host angle calibration marker")
+            values["azimuth_bias_deg"] = float(marker[3])
+            values["elevation_bias_deg"] = float(marker[5])
         line = raw_line.split("%", 1)[0].split("#", 1)[0].strip()
         if not line:
             continue
@@ -1567,6 +1784,20 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
             values["channel_interleave"] = int(tokens[4]) == 0
         elif command in {"lvdsLaneCfg", "laneCfg"} and len(tokens) >= 2:
             values["lvds_lanes"] = int(tokens[1], 0).bit_count()
+        elif command == "compRangeBiasAndRxChanPhase":
+            compensation_count += 1
+            if compensation_count > 1:
+                raise ValueError("Radar profile has duplicate compensation commands")
+            if len(tokens) != 26:
+                raise ValueError(
+                    "compRangeBiasAndRxChanPhase requires a bias and 12 complex coefficients"
+                )
+            coefficient_values = tuple(float(value) for value in tokens[2:])
+            values["range_bias_m"] = float(tokens[1])
+            values["rx_channel_compensation"] = tuple(
+                complex(coefficient_values[index], coefficient_values[index + 1])
+                for index in range(0, 24, 2)
+            )
     required = (
         "num_adc_samples",
         "num_rx_channels",
@@ -1600,6 +1831,10 @@ def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
         adc_start_time_us=values.get("adc_start_time_us"),
         ramp_end_time_us=values.get("ramp_end_time_us"),
         frame_periodicity_ms=values.get("frame_periodicity_ms"),
+        range_bias_m=values["range_bias_m"],
+        rx_channel_compensation=values["rx_channel_compensation"],
+        azimuth_bias_deg=values["azimuth_bias_deg"],
+        elevation_bias_deg=values["elevation_bias_deg"],
     )
 
 

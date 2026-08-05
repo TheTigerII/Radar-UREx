@@ -53,6 +53,9 @@ class PmmRadarConfig(Protocol):
     adc_start_time_us: Optional[float]
     ramp_end_time_us: Optional[float]
     frame_periodicity_ms: Optional[float]
+    rx_channel_compensation: Optional[tuple[complex, ...]]
+    azimuth_bias_deg: float
+    elevation_bias_deg: float
 
 
 @dataclass(frozen=True)
@@ -424,7 +427,7 @@ class ParticleFilter1D:
 
 
 def _ods_virtual_coordinates(
-    tx_channel_masks: tuple[int, ...],
+    config: PmmRadarConfig,
 ) -> tuple[np.ndarray, np.ndarray]:
     # IWR6843ISK-ODS virtual-array layout (coordinates in half wavelengths).
     positions = {
@@ -442,19 +445,29 @@ def _ods_virtual_coordinates(
         (3, 4): (3.0, 1.0),
     }
     rx_phase_correction = (1.0, -1.0, -1.0, 1.0)
+    configured = getattr(config, "rx_channel_compensation", None)
+    measured = None
+    if configured is not None and len(configured) == 12:
+        candidate = np.asarray(configured, dtype=np.complex64)
+        if np.all(np.isfinite(candidate)) and not np.allclose(candidate, 1.0 + 0.0j):
+            measured = candidate
     coordinates: list[tuple[float, float]] = []
-    phase_corrections: list[float] = []
-    for mask in tx_channel_masks:
+    phase_corrections: list[complex] = []
+    for mask in tuple(config.tx_channel_masks or ()):
         enabled = [bit + 1 for bit in range(3) if mask & (1 << bit)]
         if len(enabled) != 1:
             raise ValueError("ODS PMM angle estimation requires one TX per chirp")
         tx_number = enabled[0]
         for rx_number in range(1, MINI4_NUM_RX_CHANNELS + 1):
             coordinates.append(positions[(tx_number, rx_number)])
-            phase_corrections.append(rx_phase_correction[rx_number - 1])
+            phase_corrections.append(
+                complex(measured[(tx_number - 1) * 4 + rx_number - 1])
+                if measured is not None
+                else complex(rx_phase_correction[rx_number - 1])
+            )
     return (
         np.asarray(coordinates, dtype=np.float64),
-        np.asarray(phase_corrections, dtype=np.float32),
+        np.asarray(phase_corrections, dtype=np.complex64),
     )
 
 
@@ -486,9 +499,7 @@ def capon_pmm_angle_scores(
         range_fft[..., target_range_bin],
         dtype=np.complex64,
     ).reshape(loops, tx_count * int(config.num_rx_channels))
-    coordinates, phase_corrections = _ods_virtual_coordinates(
-        tuple(config.tx_channel_masks or ())
-    )
+    coordinates, phase_corrections = _ods_virtual_coordinates(config)
     slow_time *= phase_corrections[np.newaxis, :]
     slow_time -= slow_time.mean(axis=0, keepdims=True)
     covariance = (slow_time.T @ slow_time.conj()) / max(loops, 1)
@@ -932,8 +943,14 @@ class PmmTracker:
                 tuple(self.angle_transition_history),
             )
             self.angle_elapsed_s = 0.0
-            measured_azimuth = float(angles[int(az_path[-1])])
-            measured_elevation = float(angles[int(el_path[-1])])
+            measured_azimuth = (
+                float(angles[int(az_path[-1])])
+                - float(getattr(self.radar_config, "azimuth_bias_deg", 0.0))
+            )
+            measured_elevation = (
+                float(angles[int(el_path[-1])])
+                - float(getattr(self.radar_config, "elevation_bias_deg", 0.0))
+            )
             self.azimuth_filter.predict(self.current_delta_time_s)
             self.elevation_filter.predict(self.current_delta_time_s)
             self.azimuth_filter.update(measured_azimuth)
