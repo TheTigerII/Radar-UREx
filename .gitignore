@@ -3,3 +3,5 @@ __pycache__/
 *.py[cod]
 rawdatacapture/*.log
 rawdatacapture/captures/
+/dataset/
+/training_output/
