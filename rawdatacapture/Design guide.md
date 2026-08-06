@@ -3,8 +3,9 @@
 This repository contains one live radar processing path: Phase 1 detection and
 tracking of a single periodic-micro-motion (PMM) target. The live path does not
 identify the reflector type, and every runtime target is labelled `PMM target`.
-The repository also contains an optional offline LSTM training notebook that
-uses labelled JSONL captures; it is not connected to live inference.
+The repository also contains an optional LSTM training notebook and a gated
+real-time inference path. Classification is disabled unless explicitly enabled
+and compatible weights are present.
 
 ## Signal path
 
@@ -32,6 +33,17 @@ labelled Mini4 PMM JSONL captures
   -> balanced 70/15/15 train/validation/test split
   -> two-layer LSTM training and locked-test evaluation
   -> PyTorch state, ONNX model, and manifest
+```
+
+When enabled, the live classifier consumes the same rolling Doppler-Time
+history after PMM tracking:
+
+```text
+36-frame target-gated Doppler-Time history
+  -> capture-threshold PMM quality gate
+  -> training-identical alignment and normalization
+  -> two-layer PyTorch LSTM
+  -> other/UAV probabilities in JSONL and display status
 ```
 
 `livedatacapture.py` owns UDP receive, frame assembly, bounded queues, loss
@@ -145,9 +157,11 @@ and feature fingerprints and PMM settings. Frame records contain:
 - target-gated Doppler–Time history;
 - stage latency, queue occupancy, and packet/frame-loss counters.
 
-No object-type label or probability is produced by the live path. The
-target-gated Doppler-Time history is the input to the optional offline training
-workflow.
+With classification disabled, no object-type label or probability is produced
+by the live path. When enabled, metadata includes the model contract and each
+update includes a `classification` object. Its status is `warming_up`,
+`below_pmm_threshold`, or `classified`; inadequate histories and low-PMM
+windows remain `unknown` rather than forcing an object label.
 
 ## Offline LSTM training
 
@@ -193,8 +207,18 @@ under `training_output/mmhawkeye_lstm/`. The manifest records preprocessing,
 labels, split membership, dataset hashes, radar/feature fingerprints,
 hyperparameters, software versions, test metrics, and PyTorch/ONNX parity.
 The ONNX interface is float32 `doppler_time` with shape `[batch, 36, 64]` and
-two output logits. Neither the notebook nor its exported model changes runtime
-labels or enables live classification.
+two output logits. A trained `model_state.pt` must be copied into the
+`model_weights/` directory before it can be enabled for live classification.
+
+`inference.py` loads the checkpoint with PyTorch's weights-only loader and
+rejects missing metadata, unexpected label order, architecture or input-shape
+changes, invalid normalization, and mismatched profile/feature fingerprints.
+It maintains the rolling PMM score window, returns `warming_up` until all 36
+frames are present, and returns `unknown` if the maximum score is below the
+runtime threshold. Otherwise it applies the notebook's dB-to-amplitude,
+strongest-bin alignment, `log1p`, and stored normalization operations before
+computing the two probabilities. Inference runs in the DSP worker rather than
+the UDP receiver, and its latency is included in processing diagnostics.
 
 All notebook cells are committed without execution counts or outputs. Training,
 evaluation, and permanent artifact creation occur only when an operator runs
@@ -202,10 +226,11 @@ the notebook.
 
 ## Process model
 
-The main process receives UDP packets. A worker process performs all DSP and
-serialization, and an optional PyQtGraph display process consumes a latest-only
-queue. Range and image modes use native PyQtGraph plot items; target and
-combined modes use `pyqtgraph.opengl` for the 3D PMM position.
+The main process receives UDP packets. A worker process performs all DSP,
+optional LSTM inference, and serialization, and an optional PyQtGraph display
+process consumes a latest-only queue. Range and image modes use native
+PyQtGraph plot items; target and combined modes use `pyqtgraph.opengl` for the
+3D PMM position.
 The processing queue is bounded and records drops rather than allowing
 unbounded memory growth. The display queue is also bounded and may discard
 superseded drawings without affecting processing.
@@ -227,4 +252,5 @@ python scripts/benchmark_pmm.py
 
 The deterministic suite covers folding, subtraction, path constraints,
 particles, state transitions, ODS Capon geometry, profile rejection, frame
-integrity, JSONL labels, replay, and launcher wiring.
+integrity, JSONL labels, replay, launcher prompts, model contract rejection,
+rolling inference warm-up and gating, and classification output serialization.

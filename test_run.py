@@ -56,6 +56,23 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--pmm-background-calibration-seconds", command)
         self.assertIn("--raw-output", command)
 
+    def test_forwards_model_weights_only_when_classification_is_enabled(self) -> None:
+        disabled = run.build_capture_command(
+            _args(),
+            "combined",
+            Path("/tmp/pmm.jsonl"),
+        )
+        enabled = run.build_capture_command(
+            _args(),
+            "combined",
+            Path("/tmp/pmm.jsonl"),
+            model_weights_dir=Path("/tmp/model_weights"),
+        )
+
+        self.assertNotIn("--model-weights-dir", disabled)
+        self.assertIn("--model-weights-dir", enabled)
+        self.assertIn("/tmp/model_weights", enabled)
+
     def test_startup_uses_same_mini4_profile(self) -> None:
         command = run.build_startup_command(_args(), "/dev/ttyUSB0")
 
@@ -131,6 +148,34 @@ class PromptTests(unittest.TestCase):
     def test_blank_duration_uses_five_minutes(self) -> None:
         with patch("builtins.input", return_value=""):
             self.assertEqual(run.choose_duration_minutes(None), 5.0)
+
+    def test_realtime_classification_defaults_off(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_realtime_classification(None))
+
+    def test_realtime_classification_accepts_yes(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_realtime_classification(None))
+
+    def test_dataset_destination_defaults_to_dataset_root(self) -> None:
+        with (
+            patch("builtins.input", return_value=""),
+            patch("builtins.print"),
+        ):
+            self.assertEqual(
+                run.choose_dataset_destination(None),
+                run.DEFAULT_DATASET_DIR,
+            )
+
+    def test_dataset_destination_accepts_uav_and_other(self) -> None:
+        self.assertEqual(
+            run.choose_dataset_destination("uav"),
+            run.DEFAULT_DATASET_DIR / "uav",
+        )
+        self.assertEqual(
+            run.choose_dataset_destination("other"),
+            run.DEFAULT_DATASET_DIR / "other",
+        )
 
     def test_calibration_modes_are_menu_options_six_through_eight(self) -> None:
         expected = (

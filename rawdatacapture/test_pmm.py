@@ -446,6 +446,46 @@ class PmmJsonlTests(unittest.TestCase):
         self.assertIn("feature_fingerprint", metadata["pmm_tracking"])
         self.assertEqual(update["pmm_tracking"]["label"], "PMM target")
 
+    def test_schema_includes_optional_classification_metadata_and_result(self) -> None:
+        from rawdatacapture.livedatacapture import (
+            ProcessedOutputWriter,
+            RadarCaptureConfig,
+        )
+
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).with_name("profile-mini4-20m.cfg")
+        )
+        tracker = PmmTracker(
+            config,
+            PmmConfig(background_calibration_seconds=0.1),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "classified.jsonl"
+            writer = ProcessedOutputWriter(
+                path,
+                config,
+                pmm_metadata=tracker.metadata,
+                classification_metadata={"enabled": True},
+            )
+            writer.write_update(
+                frame_index=1,
+                pmm_result=tracker.latest_result,
+                doppler_time_db=np.empty((64, 0), dtype=np.float32),
+                diagnostics={},
+                classification={
+                    "status": "warming_up",
+                    "label": "unknown",
+                },
+            )
+            writer.close()
+            metadata, update = (
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+            )
+
+        self.assertTrue(metadata["classification"]["enabled"])
+        self.assertEqual(update["classification"]["status"], "warming_up")
+
 
 class RawReplayTests(unittest.TestCase):
     def test_complete_raw_frames_replay_in_order(self) -> None:

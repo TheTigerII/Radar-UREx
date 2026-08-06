@@ -532,7 +532,14 @@ class UdpPacketReceiver:
 
 
 class ProcessingTimingStats:
-    STAGES = ("range_fft", "doppler_fft", "pmm_tracking", "serialization", "total")
+    STAGES = (
+        "range_fft",
+        "doppler_fft",
+        "pmm_tracking",
+        "classification",
+        "serialization",
+        "total",
+    )
 
     def __init__(self) -> None:
         self.samples: dict[str, list[float]] = {
@@ -628,6 +635,7 @@ class ProcessedOutputWriter:
         emit_func: Optional[EmitFunc] = None,
         *,
         pmm_metadata: Optional[dict[str, Any]] = None,
+        classification_metadata: Optional[dict[str, Any]] = None,
     ) -> None:
         self.emit = emit_func or emit
         self.output_path = _resolve_output_path(output_path) if output_path else None
@@ -650,6 +658,8 @@ class ProcessedOutputWriter:
             "pmm_tracking": pmm_metadata,
             "radar_config": _radar_config_metadata(config),
         }
+        if classification_metadata is not None:
+            metadata["classification"] = classification_metadata
         self.file.write(json.dumps(metadata, separators=(",", ":")) + "\n")
         self.emit(f"Saving PMM output to {self.output_path}")
 
@@ -664,6 +674,7 @@ class ProcessedOutputWriter:
         pmm_result: PmmTrackResult,
         doppler_time_db: np.ndarray,
         diagnostics: dict[str, Any],
+        classification: Optional[dict[str, Any]] = None,
     ) -> None:
         if self.file is None:
             return
@@ -681,6 +692,8 @@ class ProcessedOutputWriter:
             ).T.tolist(),
             "diagnostics": diagnostics,
         }
+        if classification is not None:
+            record["classification"] = classification
         self.file.write(json.dumps(record, separators=(",", ":")) + "\n")
         self.updates_saved += 1
 
@@ -710,6 +723,26 @@ def _target_track(result: PmmTrackResult) -> Optional[TargetTrack]:
     )
 
 
+def _classification_status_text(classification: Optional[dict[str, Any]]) -> str:
+    if classification is None:
+        return ""
+    status = classification.get("status")
+    if status == "classified":
+        label = str(classification.get("label", "unknown")).upper()
+        confidence = classification.get("confidence")
+        if isinstance(confidence, (float, int)):
+            return f" | class {label} {float(confidence):.1%}"
+        return f" | class {label}"
+    if status == "warming_up":
+        return (
+            " | class warming "
+            f"{int(classification.get('history_frames', 0))}/36"
+        )
+    if status == "below_pmm_threshold":
+        return " | class unknown (low PMM)"
+    return " | class unknown"
+
+
 class DisplayPayloadSink:
     def __init__(
         self,
@@ -719,6 +752,7 @@ class DisplayPayloadSink:
         config: RadarCaptureConfig,
         tracker: Optional[PmmTracker],
         processed_writer: Optional[ProcessedOutputWriter],
+        classifier: Optional[Any] = None,
         display_skipped_counter: Optional[Any] = None,
         calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
         calibration_complete_event: Optional[Any] = None,
@@ -730,6 +764,7 @@ class DisplayPayloadSink:
         self.config = config
         self.tracker = tracker
         self.processed_writer = processed_writer
+        self.classifier = classifier
         self.display_skipped_counter = display_skipped_counter
         self.frame_count = 0
         self.capture_diagnostics: dict[str, int] = {}
@@ -802,6 +837,31 @@ class DisplayPayloadSink:
         self.timings.add_ms("doppler_fft", doppler_ms)
         self.timings.add_ms("pmm_tracking", tracking_ms)
 
+        classification: Optional[dict[str, Any]] = None
+        classification_ms = 0.0
+        if self.classifier is not None:
+            started = time.perf_counter()
+            classification_result = self.classifier.classify(
+                self.tracker.spectrogram_db,
+                pmm_score=result.pmm_score,
+                threshold=result.threshold,
+            )
+            classification_ms = (time.perf_counter() - started) * 1_000.0
+            classification = classification_result.to_dict()
+            self.timings.add_ms("classification", classification_ms)
+            result = replace(
+                result,
+                processing_ms={
+                    **(result.processing_ms or {}),
+                    "classification": classification_ms,
+                    "total": (
+                        float((result.processing_ms or {}).get("total", 0.0))
+                        + classification_ms
+                    ),
+                },
+            )
+            self.tracker.latest_result = result
+
         serialization_started = time.perf_counter()
         self.processed_writer.write_update(
             frame_index=self.frame_count,
@@ -811,6 +871,7 @@ class DisplayPayloadSink:
                 "stage_latency_ms": result.processing_ms,
                 "capture": dict(self.capture_diagnostics),
             },
+            classification=classification,
         )
         self.timings.add_ms(
             "serialization",
@@ -855,6 +916,7 @@ class DisplayPayloadSink:
                         f"{result.calibration_frames_required} | score "
                         f"{score_text}/{result.threshold:,.0f} | range "
                         f"{range_text} | fold {folding_text}"
+                        + _classification_status_text(classification)
                     ),
                 )
                 payload = (
@@ -922,6 +984,7 @@ def _run_frame_processor(
     display_mode: str,
     display_update_every: int,
     startup_status_queue: mp.Queue,
+    model_weights_dir: Optional[Path] = None,
     calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
     calibration_complete_event: Optional[Any] = None,
 ) -> None:
@@ -933,6 +996,7 @@ def _run_frame_processor(
     raw_writer: Optional[RawFrameWriter] = None
     processed_writer: Optional[ProcessedOutputWriter] = None
     display: Optional[DisplayPayloadSink] = None
+    classifier: Optional[Any] = None
     ready_reported = False
     try:
         if calibration_settings is None:
@@ -940,6 +1004,17 @@ def _run_frame_processor(
             tracker: Optional[PmmTracker] = PmmTracker(config, pmm_config)
         else:
             tracker = None
+        if tracker is not None and model_weights_dir is not None:
+            from inference import RealtimeUavClassifier
+
+            classifier = RealtimeUavClassifier(
+                model_weights_dir,
+                tracker.metadata,
+            )
+            worker_emit(
+                "Real-time classification enabled: "
+                + json.dumps(classifier.metadata, separators=(",", ":"))
+            )
         raw_writer = RawFrameWriter(
             raw_output,
             raw_metadata,
@@ -951,6 +1026,9 @@ def _run_frame_processor(
             config,
             worker_emit,
             pmm_metadata=(tracker.metadata if tracker is not None else None),
+            classification_metadata=(
+                classifier.metadata if classifier is not None else None
+            ),
         )
         display = DisplayPayloadSink(
             display_mode,
@@ -959,6 +1037,7 @@ def _run_frame_processor(
             config,
             tracker,
             processed_writer,
+            classifier,
             display_skipped_counter,
             calibration_settings=calibration_settings,
             calibration_complete_event=calibration_complete_event,
@@ -1517,6 +1596,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-output", type=Path)
     parser.add_argument("--raw-metadata", type=Path)
     parser.add_argument("--processed-output", type=Path)
+    parser.add_argument("--model-weights-dir", type=Path)
     parser.add_argument("--display", choices=DISPLAY_CHOICES, default="none")
     parser.add_argument(
         "--calibration-distance-m",
@@ -1675,6 +1755,7 @@ def main() -> None:
                 "display_mode": args.display,
                 "display_update_every": args.display_update_every,
                 "startup_status_queue": status_queue,
+                "model_weights_dir": args.model_weights_dir,
                 "calibration_settings": calibration_settings,
                 "calibration_complete_event": calibration_complete_event,
             },

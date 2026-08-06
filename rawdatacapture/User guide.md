@@ -2,9 +2,9 @@
 
 This software operates an IWR6843ISK-ODS with a DCA1000EVM and tracks one PMM
 target from 0.3 to 20 m. The live application does not determine whether the
-target is a drone, bird, fan, foliage, or another periodic reflector. An
-optional offline notebook can train a UAV-versus-other classifier from labelled
-captures, but that model is not used by the live application.
+target is a drone, bird, fan, foliage, or another periodic reflector unless a
+compatible trained classifier is explicitly enabled. Real-time classification
+is off by default.
 
 ## Install
 
@@ -57,6 +57,20 @@ By default it selects the serial device whose USB description is
 `CP2105 Dual USB to UART Bridge Controller - Enhanced COM Port`. Use
 `--radar-port` only to override that selection.
 
+For normal capture modes the launcher asks whether to enable real-time UAV
+classification. Press Enter to keep it off. When combined display option 5 is
+selected and `--processed-output` was not supplied, it then asks where to save
+the processed JSONL:
+
+```text
+1. dataset/uav
+2. dataset/other
+3. dataset
+```
+
+Press Enter to select `dataset`. The class-specific destinations should be
+used only for controlled, independently labelled data collection.
+
 Useful examples:
 
 ```bash
@@ -69,6 +83,10 @@ python run.py --radar-port /dev/ttyUSB0 --display range-doppler \
 python run.py --radar-port /dev/ttyUSB0 \
   --pmm-detection-threshold 750 \
   --pmm-background-calibration-seconds 30
+
+python run.py --display combined --classification \
+  --model-weights-dir model_weights \
+  --dataset-destination dataset
 ```
 
 The display choices are `none`, `range`, `range-doppler`, `point-cloud`, and
@@ -91,6 +109,11 @@ Keep the monitored area target-free during the first 30 seconds. The status is
 - `--pmm-coast-frames`: missing observations allowed after confirmation.
 - `--display-update-every`: reduce drawing frequency without reducing DSP rate.
 - `--processing-queue-size` and `--packet-queue-size`: bounded queue capacities.
+- `--classification` and `--no-classification`: explicitly enable or disable
+  real-time classification without an interactive prompt.
+- `--model-weights-dir`: directory containing the compatible `model_state.pt`.
+- `--dataset-destination`: select `dataset`, `uav`, or `other` without the
+  combined-display save prompt.
 
 Show all options with:
 
@@ -114,6 +137,8 @@ metadata record, followed by frame records. Look for:
 - `pmm_tracking.pmm_score`
 - `pmm_tracking.folding_size`
 - `doppler_time_db`, the rolling target-gated Doppler-Time history
+- `classification`, when enabled, containing status, label, confidence,
+  probabilities, PMM gate values, history length, and inference latency
 - `diagnostics`
 
 States progress through `calibrating`, `searching`, `tentative`, `confirmed`,
@@ -181,7 +206,27 @@ training_output/mmhawkeye_lstm/manifest.json
 
 The ONNX model accepts float32 `doppler_time` tensors shaped `[batch, 36, 64]`
 and returns two logits ordered as `other`, then `uav`. Exporting the model does
-not install it into the live capture path.
+not install it into the live capture path. Install the PyTorch weights after a
+successful training and evaluation run:
+
+```bash
+mkdir -p model_weights
+cp training_output/mmhawkeye_lstm/model_state.pt model_weights/model_state.pt
+```
+
+Then select `yes` at the classification prompt, or use `--classification` for
+a non-interactive launch. Use `--no-classification` to explicitly disable it.
+The launcher expects `model_weights/model_state.pt` by default. It exits before
+hardware startup if classification is enabled and the file is missing. The
+worker also rejects weights whose profile fingerprint, feature fingerprint,
+feature version, input shape, label order, normalization, or architecture does
+not match the running pipeline.
+
+After 36 tracked frames pass the PMM gate, the point-cloud and combined status
+text includes `UAV` or `OTHER` with confidence. Before that it reports warm-up;
+low-PMM windows remain unknown. Classification metadata and per-frame results
+are also written to processed JSONL. This output is a model prediction, not
+independent ground truth.
 
 ## Replay
 
@@ -237,3 +282,8 @@ the notebook accept a dataset.
 If training rejects mixed fingerprints or thresholds, do not resize or merge
 the captures. Re-record them with the same profile and PMM settings, or train
 separate models for the incompatible capture contracts.
+
+If live classification fails during startup, confirm that
+`model_weights/model_state.pt` came from this repository's current notebook and
+capture contract. Do not bypass a fingerprint mismatch by editing checkpoint
+metadata.

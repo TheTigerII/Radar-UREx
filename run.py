@@ -28,6 +28,8 @@ DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile-mini4-20m.cfg"
 DEFAULT_CALIBRATION_PROFILE_PATH = ROOT / "profiles" / "profile_calibration.cfg"
 DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
 DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
+DEFAULT_DATASET_DIR = ROOT / "dataset"
+DEFAULT_MODEL_WEIGHTS_DIR = ROOT / "model_weights"
 DEFAULT_HOST_IP = "192.168.33.30"
 DEFAULT_DATA_PORT = 4098
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -129,6 +131,22 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--processed-output", type=Path)
     parser.add_argument("--raw-output", type=Path)
     parser.add_argument(
+        "--dataset-destination",
+        choices=("dataset", "uav", "other"),
+        help="default processed-output directory; combined display prompts if omitted",
+    )
+    parser.add_argument(
+        "--classification",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="enable or disable real-time UAV classification",
+    )
+    parser.add_argument(
+        "--model-weights-dir",
+        type=Path,
+        default=DEFAULT_MODEL_WEIGHTS_DIR,
+    )
+    parser.add_argument(
         "--pmm-background-calibration-seconds",
         type=float,
         default=30.0,
@@ -168,6 +186,52 @@ def choose_display(display: Optional[str]) -> str:
         if value.isdigit() and 1 <= int(value) <= len(DISPLAY_CHOICES):
             return DISPLAY_CHOICES[int(value) - 1]
         print("Choose a listed number or display name.")
+
+
+def choose_realtime_classification(value: Optional[bool]) -> bool:
+    if value is not None:
+        return bool(value)
+    while True:
+        try:
+            response = input(
+                "Enable real-time UAV classification? [y/N]: "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if not response or response in {"n", "no", "off", "0"}:
+            return False
+        if response in {"y", "yes", "on", "1"}:
+            return True
+        print("Choose yes or no.")
+
+
+def choose_dataset_destination(value: Optional[str]) -> Path:
+    choices = {
+        "1": DEFAULT_DATASET_DIR / "uav",
+        "uav": DEFAULT_DATASET_DIR / "uav",
+        "dataset/uav": DEFAULT_DATASET_DIR / "uav",
+        "2": DEFAULT_DATASET_DIR / "other",
+        "other": DEFAULT_DATASET_DIR / "other",
+        "dataset/other": DEFAULT_DATASET_DIR / "other",
+        "3": DEFAULT_DATASET_DIR,
+        "dataset": DEFAULT_DATASET_DIR,
+    }
+    if value is not None:
+        return choices[value]
+    print("Save processed data to:")
+    print("  1. dataset/uav")
+    print("  2. dataset/other")
+    print("  3. dataset")
+    while True:
+        try:
+            response = input("Select dataset destination [3]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return DEFAULT_DATASET_DIR
+        if not response:
+            return DEFAULT_DATASET_DIR
+        if response in choices:
+            return choices[response]
+        print("Choose 1, 2, or 3.")
 
 
 def choose_duration_minutes(value: Optional[float]) -> float:
@@ -270,6 +334,7 @@ def build_capture_command(
     raw_output: Optional[Path] = None,
     config_path: Optional[Path] = None,
     host_compensation_profile: Optional[Path] = None,
+    model_weights_dir: Optional[Path] = None,
 ) -> list[str]:
     command = [
         sys.executable,
@@ -356,6 +421,8 @@ def build_capture_command(
         )
     if raw_output is not None:
         command.extend(("--raw-output", str(raw_output)))
+    if model_weights_dir is not None:
+        command.extend(("--model-weights-dir", str(model_weights_dir)))
     return command
 
 
@@ -761,7 +828,18 @@ def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
     duration_minutes = 0.0
+    realtime_classification = False
+    default_output_directory = args.capture_dir
     if display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        realtime_classification = choose_realtime_classification(
+            args.classification
+        )
+        if args.processed_output is None and (
+            display == "combined" or args.dataset_destination is not None
+        ):
+            default_output_directory = choose_dataset_destination(
+                args.dataset_destination
+            )
         try:
             duration_minutes = choose_duration_minutes(args.duration_minutes)
         except ValueError as exc:
@@ -774,8 +852,22 @@ def main() -> int:
     if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
         return run_calibration_mode(args, display, radar_port)
 
+    model_weights_dir: Optional[Path] = None
+    if realtime_classification:
+        model_weights_dir = args.model_weights_dir
+        if not model_weights_dir.is_absolute():
+            model_weights_dir = ROOT / model_weights_dir
+        expected_model = model_weights_dir / "model_state.pt"
+        if not expected_model.is_file():
+            print(
+                "Real-time classification model is missing: "
+                f"expected {expected_model}",
+                file=sys.stderr,
+            )
+            return 2
+
     processed_output = args.processed_output or default_processed_output(
-        args.capture_dir
+        default_output_directory
     )
     if not processed_output.is_absolute():
         processed_output = ROOT / processed_output
@@ -790,6 +882,14 @@ def main() -> int:
     print(f"Processed output: {processed_output}")
     print(f"Raw output: {raw_output or 'disabled'}")
     print(
+        "Real-time classification: "
+        + (
+            f"enabled ({model_weights_dir})"
+            if model_weights_dir is not None
+            else "disabled"
+        )
+    )
+    print(
         "PMM tracking: "
         f"calibration={args.pmm_background_calibration_seconds:g}s, "
         f"threshold={args.pmm_detection_threshold:g}"
@@ -801,7 +901,13 @@ def main() -> int:
     try:
         capture = start_process(
             "live capture",
-            build_capture_command(args, display, processed_output, raw_output),
+            build_capture_command(
+                args,
+                display,
+                processed_output,
+                raw_output,
+                model_weights_dir=model_weights_dir,
+            ),
             capture_output=True,
         )
         ready = threading.Event()
