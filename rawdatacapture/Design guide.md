@@ -1,8 +1,10 @@
 # Mini4 PMM Tracking Design
 
-This repository contains one radar processing path: Phase 1 detection and
-tracking of a single periodic-micro-motion (PMM) target. It does not identify
-the reflector type. Every reported target is labelled `PMM target`.
+This repository contains one live radar processing path: Phase 1 detection and
+tracking of a single periodic-micro-motion (PMM) target. The live path does not
+identify the reflector type, and every runtime target is labelled `PMM target`.
+The repository also contains an optional offline LSTM training notebook that
+uses labelled JSONL captures; it is not connected to live inference.
 
 ## Signal path
 
@@ -19,6 +21,17 @@ DCA1000 raw ADC
   -> 12-element ODS Capon angle search
   -> angle continuity tracking and particle smoothing
   -> JSONL and display
+```
+
+The optional offline path is:
+
+```text
+labelled Mini4 PMM JSONL captures
+  -> validated, non-overlapping 36-frame Doppler-Time segments
+  -> PMM quality gate and strongest-bin alignment
+  -> balanced 70/15/15 train/validation/test split
+  -> two-layer LSTM training and locked-test evaluation
+  -> PyTorch state, ONNX model, and manifest
 ```
 
 `livedatacapture.py` owns UDP receive, frame assembly, bounded queues, loss
@@ -83,7 +96,10 @@ before treating 750 as a site-independent threshold.
 
 The paper's value of 30,000 is not used here: it gates complete 3.6-second
 Doppler-Time segments before the paper's identification stage, rather than
-individual tracking frames. Phase 1 has no identification stage.
+individual tracking frames. The live Phase 1 path has no identification stage.
+The offline notebook instead gates each segment using the compatible capture's
+recorded `detection_threshold`, because the paper's value is not portable to
+this acquisition profile or signal scale.
 
 ## Tracking
 
@@ -129,8 +145,60 @@ and feature fingerprints and PMM settings. Frame records contain:
 - target-gated Doppler–Time history;
 - stage latency, queue occupancy, and packet/frame-loss counters.
 
-No object-type label or probability is produced. The target-gated
-Doppler–Time history is recorded only as future research data.
+No object-type label or probability is produced by the live path. The
+target-gated Doppler-Time history is the input to the optional offline training
+workflow.
+
+## Offline LSTM training
+
+`training.ipynb` implements a repository-native adaptation of mmHawkeye's UAV
+identification network. The paper does not disclose its exact tensor shape, so
+the notebook uses the Mini4 contract: 36 frames at 10 Hz, with 64 centered
+Doppler bins per frame. Input captures are discovered recursively under
+`dataset/uav/` and `dataset/other/`; the parent directory supplies the binary
+label, and each JSONL file represents one capture.
+
+The notebook accepts only `mini4-pmm-jsonl` version 1 captures. It rejects
+non-finite histories, wrong Doppler dimensions, changing per-frame thresholds,
+and datasets that mix profile fingerprints, feature fingerprints, feature
+versions, or capture thresholds. Full rolling histories are selected at
+36-frame intervals so accepted examples do not overlap. A segment is retained
+only if the maximum corrected PMM score in its 36 frames reaches the capture's
+recorded threshold.
+
+Slow-time complex mean subtraction in `dsp.py` is treated as the DC-removal
+stage, so the notebook does not subtract DC again. Each spectrum is converted
+from dB to linear amplitude; if its strongest bin is more than one bin from the
+center, it is shifted to the center with linear interpolation and zero fill.
+The aligned amplitude is compressed with `log1p`.
+
+Before splitting, the majority class is deterministically undersampled to the
+minority count. A seed-42, stratified segment-level split assigns approximately
+70% to training, 15% to validation, and 15% to a locked test partition. Integer
+rounding is resolved independently per class. At least seven usable segments
+per class are required. Normalization mean and standard deviation are fitted
+from training segments only. This deliberately follows the selected
+segment-level policy; it does not prevent captures from contributing segments
+to more than one partition.
+
+The classifier has two stacked LSTM layers with input size 64 and hidden size
+128, followed by a two-class fully connected layer. It uses cross-entropy,
+Adam with a learning rate of 0.00005, batch size 10, and 100 fixed epochs. The
+lowest validation-loss state is retained, and the test partition is used only
+after model selection. Evaluation reports accuracy, precision, recall, F1,
+the confusion matrix, the ROC curve, and ROC AUC.
+
+The export cell writes `model_state.pt`, `model.onnx`, and `manifest.json`
+under `training_output/mmhawkeye_lstm/`. The manifest records preprocessing,
+labels, split membership, dataset hashes, radar/feature fingerprints,
+hyperparameters, software versions, test metrics, and PyTorch/ONNX parity.
+The ONNX interface is float32 `doppler_time` with shape `[batch, 36, 64]` and
+two output logits. Neither the notebook nor its exported model changes runtime
+labels or enables live classification.
+
+All notebook cells are committed without execution counts or outputs. Training,
+evaluation, and permanent artifact creation occur only when an operator runs
+the notebook.
 
 ## Process model
 
