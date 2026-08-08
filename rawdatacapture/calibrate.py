@@ -109,9 +109,9 @@ class CalibrationResult:
 
     @property
     def command(self) -> str:
-        values = [f"{self.range_bias_m:.7g}"]
+        values = [f"{self.range_bias_m:.7f}"]
         for coefficient in self.coefficients:
-            values.extend((f"{coefficient.real:.7g}", f"{coefficient.imag:.7g}"))
+            values.extend((f"{coefficient.real:.5f}", f"{coefficient.imag:.5f}"))
         return "compRangeBiasAndRxChanPhase " + " ".join(values)
 
     def to_dict(self) -> dict[str, Any]:

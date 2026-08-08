@@ -292,6 +292,65 @@ class CalibrationAlgorithmTests(unittest.TestCase):
         self.assertAlmostEqual(accumulator.result.angle_bias_deg, -5.0, delta=0.1)
 
 
+class CalibrationResultSerializationTests(unittest.TestCase):
+    def test_command_uses_ti_fixed_decimal_format_without_scientific_notation(
+        self,
+    ) -> None:
+        coefficient_values = (
+            0.8824776,
+            -4.209382e-18,
+            -0.6997676,
+            0.312786,
+            -0.8351456,
+            0.1228002,
+            0.8103891,
+            0.04118465,
+            0.6537936,
+            -0.5620742,
+            -0.3811256,
+            0.8054636,
+            -0.5437871,
+            0.7257938,
+            0.7176921,
+            -0.6019038,
+            0.3390693,
+            -0.9407614,
+            0.008614688,
+            0.8587477,
+            -0.1351867,
+            0.9454902,
+            0.4026296,
+            -0.7913112,
+        )
+        result = calibrate.CalibrationResult(
+            target_distance_m=1.0,
+            search_window_m=0.2,
+            measured_range_m=1.08009389,
+            range_bias_m=0.08009389,
+            coefficients=tuple(
+                complex(coefficient_values[index], coefficient_values[index + 1])
+                for index in range(0, len(coefficient_values), 2)
+            ),
+            accepted_frames=64,
+            range_std_m=0.001,
+            max_phase_std_deg=1.0,
+            max_magnitude_cv=0.01,
+            tx_order=(1, 4, 2),
+        )
+
+        self.assertEqual(
+            result.command,
+            "compRangeBiasAndRxChanPhase 0.0800939 "
+            "0.88248 -0.00000 -0.69977 0.31279 -0.83515 0.12280 "
+            "0.81039 0.04118 0.65379 -0.56207 -0.38113 0.80546 "
+            "-0.54379 0.72579 0.71769 -0.60190 0.33907 -0.94076 "
+            "0.00861 0.85875 -0.13519 0.94549 0.40263 -0.79131",
+        )
+        self.assertTrue(
+            all("e" not in value.lower() for value in result.command.split()[1:])
+        )
+
+
 class CalibrationApplyTests(unittest.TestCase):
     def test_apply_creates_backup_and_replaces_one_line(self) -> None:
         result = calibrate.CalibrationResult(
