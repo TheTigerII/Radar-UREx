@@ -32,5 +32,5 @@ cfarFovCfg -1 0 0 8.92
 cfarFovCfg -1 1 -1 1
 calibData 0 0 0
 hostAngleCalibration azimuthBiasDeg -0.01998374 elevationBiasDeg 0.002843203
-% hostAngleCalibration azimuthBiasDeg -2.972753 elevationBiasDeg 0.1000456
+% hostAngleCalibration azimuthBiasDeg -2.972753 elevationBiasDeg -1.553422
 sensorStart 

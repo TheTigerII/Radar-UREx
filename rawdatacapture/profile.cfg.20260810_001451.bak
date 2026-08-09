@@ -22,7 +22,7 @@ calibDcRangeSig -1 0 -5 8 256
 extendedMaxVelocity -1 0
 bpmCfg -1 0 0 1
 lvdsStreamCfg -1 0 1 0
-compRangeBiasAndRxChanPhase 0.0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0
+compRangeBiasAndRxChanPhase 0.1190787 0.87565 0.00000 -0.68629 0.13133 -0.68101 0.28645 0.77520 -0.03156 0.51658 -0.59936 -0.32232 0.66024 -0.23342 0.86559 0.39294 -0.76367 0.44868 -0.89369 -0.14162 0.77765 0.03450 0.84329 0.41645 -0.86571
 measureRangeBiasAndRxChanPhase 0 1.5 0.2
 CQRxSatMonitor 0 3 5 121 0
 CQSigImgMonitor 0 127 4
@@ -31,4 +31,6 @@ aoaFovCfg -1 -60 60 -60 60
 cfarFovCfg -1 0 0 8.92
 cfarFovCfg -1 1 -1 1
 calibData 0 0 0
+hostAngleCalibration azimuthBiasDeg -0.01998374 elevationBiasDeg 0.002843203
+% hostAngleCalibration azimuthBiasDeg -2.972753 elevationBiasDeg -0.9837827
 sensorStart 

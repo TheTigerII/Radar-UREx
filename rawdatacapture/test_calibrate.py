@@ -58,7 +58,7 @@ class CalibrationProfileTests(unittest.TestCase):
                 {after for _, after in changed},
                 {
                     "guiMonitor -1 0 0 0 0 0 0",
-                    "measureRangeBiasAndRxChanPhase 0 1 0.15",
+                    "measureRangeBiasAndRxChanPhase 0 1 0.2",
                     "lvdsStreamCfg -1 0 1 0",
                 },
             )
