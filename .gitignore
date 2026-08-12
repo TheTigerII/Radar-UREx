@@ -5,5 +5,4 @@ rawdatacapture/*.log
 rawdatacapture/captures/
 /dataset/
 /training_output/
-/model_weights/*
 !/model_weights/.gitkeep
