@@ -4,3 +4,6 @@ __pycache__/
 /tmp/classification_features*.npz
 Radar-UREx-output/artifacts/generated/
 *.engine
+dataset/*
+rawdatacapture/captures/*
+
