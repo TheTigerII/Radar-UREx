@@ -9,9 +9,11 @@ import numpy as np
 
 from rawdatacapture.livedatacapture import (
     CapturedFrame,
+    CaptureStartupError,
     CaptureStats,
     DCA1000PacketHeader,
     FrameBuffer,
+    LiveDisplay,
     RadarCaptureConfig,
     SequenceTracker,
     UdpPacketReceiver,
@@ -134,6 +136,51 @@ class QueueTests(unittest.TestCase):
 
         self.assertEqual(skipped, 1)
         self.assertEqual(payload_queue.get_nowait(), "new")
+
+
+class LiveDisplayStartupTests(unittest.TestCase):
+    def _context(self, startup_result):
+        payload_queue = Mock()
+        status_queue = Mock()
+        if isinstance(startup_result, BaseException):
+            status_queue.get.side_effect = startup_result
+        else:
+            status_queue.get.return_value = startup_result
+        process = Mock()
+        process.is_alive.return_value = True
+        context = Mock()
+        context.Queue.side_effect = (payload_queue, status_queue)
+        context.Process.return_value = process
+        return context, process
+
+    def test_timeout_terminates_display_process(self) -> None:
+        context, process = self._context(queue.Empty())
+
+        with self.assertRaisesRegex(
+            CaptureStartupError,
+            "Display did not become ready",
+        ):
+            LiveDisplay("range", 20.0, 60.0, context)
+
+        process.terminate.assert_called_once_with()
+
+    def test_interrupt_terminates_display_process(self) -> None:
+        context, process = self._context(KeyboardInterrupt())
+
+        with self.assertRaises(KeyboardInterrupt):
+            LiveDisplay("range", 20.0, 60.0, context)
+
+        process.terminate.assert_called_once_with()
+
+    def test_failed_startup_terminates_display_process(self) -> None:
+        context, process = self._context(
+            {"state": "failed", "message": "Display failed: import error"}
+        )
+
+        with self.assertRaisesRegex(CaptureStartupError, "import error"):
+            LiveDisplay("range", 20.0, 60.0, context)
+
+        process.terminate.assert_called_once_with()
 
 
 class AdcLayoutTests(unittest.TestCase):

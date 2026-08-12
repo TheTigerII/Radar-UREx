@@ -1351,16 +1351,35 @@ def _run_display_process(
     rendered_updates: Any,
     startup_status_queue: mp.Queue,
 ) -> None:
-    if mode in radar_calibration.CALIBRATION_DISPLAY_MODES:
-        radar_calibration.run_calibration_display(
-            payload_queue,
-            stop_event,
-            startup_status_queue,
-            mode,
-        )
-        return
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     try:
-        import pyqtgraph as pg
+        # PyQtGraph 0.14 imports CUDA Python for an optional raw-image widget.
+        # These displays do not use that widget, and CUDA initialization can
+        # block indefinitely on systems with an unavailable CUDA runtime.
+        cuda_runtime_module = "cuda.bindings.runtime"
+        missing_module = object()
+        previous_cuda_runtime = sys.modules.get(
+            cuda_runtime_module,
+            missing_module,
+        )
+        sys.modules[cuda_runtime_module] = None
+        try:
+            import pyqtgraph as pg
+        finally:
+            if previous_cuda_runtime is missing_module:
+                sys.modules.pop(cuda_runtime_module, None)
+            else:
+                sys.modules[cuda_runtime_module] = previous_cuda_runtime
+
+        if mode in radar_calibration.CALIBRATION_DISPLAY_MODES:
+            radar_calibration.run_calibration_display(
+                payload_queue,
+                stop_event,
+                startup_status_queue,
+                mode,
+            )
+            return
+
         import pyqtgraph.opengl as gl
         from PySide6 import QtCore, QtWidgets
 
@@ -1436,11 +1455,17 @@ class LiveDisplay:
         )
         self.process.start()
         try:
-            status = status_queue.get(timeout=30.0)
-        except queue.Empty as exc:
-            raise CaptureStartupError("Display did not become ready") from exc
-        if status.get("state") != "ready":
-            raise CaptureStartupError(status.get("message", "Display failed"))
+            try:
+                status = status_queue.get(timeout=30.0)
+            except queue.Empty as exc:
+                raise CaptureStartupError("Display did not become ready") from exc
+            if status.get("state") != "ready":
+                raise CaptureStartupError(
+                    status.get("message", "Display failed")
+                )
+        except BaseException:
+            self.close()
+            raise
 
     def close(self) -> None:
         if self.stop_event is not None:
