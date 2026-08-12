@@ -59,8 +59,9 @@ an empty desktop.
 
 ### Classification notebook and CNN dependencies
 
-Live drone/not-drone classification is enabled by default and requires
-PyTorch 2.6 or newer and below version 3. Install Jupyter as well when using
+Live drone/not-drone classification requires PyTorch 2.6 or newer and below
+version 3. Combined point-cloud + micro-Doppler mode asks whether to enable it,
+with **no** as the default. Install Jupyter as well when using
 `classification.ipynb`:
 
 ```bash
@@ -79,6 +80,15 @@ above. The CNN cells in `classification.ipynb` are unexecuted by default and
 training starts only when the training cell is run manually.
 Run `run.py --no-classification` when capture is needed in an environment
 without PyTorch.
+
+The notebook uses only native IWR6843 feature captures. Place UAV capture
+JSONL files under `dataset/uav/` and tracked non-UAV target captures under
+`dataset/others/`. Capture with `--display-update-every 1`; processed JSONL
+records save the exact two-channel, two-range-bin `classification_feature`
+consumed by live inference. A class needs at least three separate capture files
+for capture-grouped train, validation, and test partitions. Use
+`--no-classification` while collecting the initial training set so obsolete
+model artifacts do not block capture startup.
 
 On Jetson, `--classification-device auto` resolves to the required CUDA
 backend. Install the Jetson-native TensorRT packages and ONNX export support
@@ -121,11 +131,14 @@ micro-Doppler image in one window.
    or enter `0` for an unlimited run.
 3. Detects serial ports and asks which command UART to use when needed.
 4. Starts `livedatacapture.py` with `profile.cfg` and `setup.json` by default.
-5. Streams processed 3D point clouds and micro-Doppler spectra to a timestamped
-   `.jsonl` file under `rawdatacapture\captures`. Raw ADC recording is disabled
-   unless `--raw-output` is explicitly given.
-6. Runs the trained CNN after 48 consecutive valid tracked frames, reports
-   `DRONE`, `NOT_DRONE`, or `UNKNOWN`, and saves the calibrated probability.
+5. In combined point-cloud + micro-Doppler mode, asks whether to run live CNN
+   classification (default: no), then asks whether to save the timestamped
+   JSONL under `dataset/uav`, `dataset/others`, or `dataset` (default: dataset).
+   Other display modes retain the timestamped `rawdatacapture\captures` default.
+   Raw ADC recording is disabled unless `--raw-output` is explicitly given.
+6. When enabled, runs the trained CNN after 48 consecutive valid tracked
+   frames, reports `DRONE`, `NOT_DRONE`, or `UNKNOWN`, and saves the calibrated
+   probability.
 7. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
    control.
 8. Stops hardware control before capture when the duration expires or Ctrl+C
@@ -467,12 +480,14 @@ processed update with:
 - conventional-mode short-time micro-Doppler windows, laid out as
   `[window][centered_doppler_bin]`;
 - the selected micro-Doppler range gate.
+- the `[2, 64]` two-range-bin `classification_feature` used to build native
+  CNN training windows, or `null` when no valid target owns the frame;
 - `classification`: `label`, calibrated `p_drone`, threshold, status/reason,
   and valid history length.
 
-`not_drone` represents the model's bionic-bird training class, not a validated
-general non-drone detector. The deployed artifact remains archive-pretrained
-and unvalidated on labelled IWR6843 sessions. Classification stays `unknown`
+`not_drone` represents the native examples placed in `dataset/others/`; its
+coverage is therefore limited to the negative objects and conditions captured
+there. Classification stays `unknown`
 until 48 consecutive valid target frames are available and resets when target
 quality or identity is lost.
 

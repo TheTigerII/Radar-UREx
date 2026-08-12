@@ -646,6 +646,7 @@ class ProcessedOutputWriterTests(unittest.TestCase):
                     reason=None,
                     valid_steps=48,
                 ),
+                classification_feature=np.ones((2, 64), dtype=np.float32),
             )
             writer.close()
 
@@ -654,6 +655,10 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         self.assertEqual(records[0]["record_type"], "metadata")
         self.assertEqual(records[0]["version"], 5)
         self.assertTrue(records[0]["classification"]["enabled"])
+        self.assertEqual(
+            records[0]["classification_feature"]["target_gate_range_bins"],
+            2,
+        )
         self.assertEqual(records[0]["static_detection"]["warmup_frames"], 30)
         self.assertEqual(records[0]["static_detection"]["reference_frames"], 150)
         self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
@@ -682,6 +687,7 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         self.assertTrue(records[1]["target_track"]["confirmed"])
         self.assertEqual(records[1]["classification"]["label"], "drone")
         self.assertEqual(records[1]["classification"]["valid_steps"], 48)
+        self.assertEqual(np.asarray(records[1]["classification_feature"]).shape, (2, 64))
 
     def test_writes_structured_rotor_micro_doppler_result(self) -> None:
         config = RadarCaptureConfig.from_file(
@@ -1864,6 +1870,22 @@ class ClassificationIntegrationTests(unittest.TestCase):
 
         engine.update.assert_called_once_with(doppler_cube, 10)
         self.assertEqual(sink.latest_classification.label, "drone")
+
+    def test_native_feature_is_available_without_a_trained_classifier(self) -> None:
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            inference_engine=None,
+        )
+        doppler_cube = np.ones((128, 3, 4, 64), dtype=np.complex64)
+        range_axis = np.arange(64, dtype=np.float32) * 0.2
+
+        sink._classify_fixed_range(doppler_cube, range_axis, 2.05)
+
+        self.assertIsNotNone(sink.latest_classification_feature)
+        self.assertEqual(sink.latest_classification_feature.shape, (2, 64))
 
     def test_predicted_track_resets_classification_history(self) -> None:
         engine = Mock()

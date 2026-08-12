@@ -9,8 +9,11 @@ from types import SimpleNamespace
 import numpy as np
 
 from inference import (
+    CNN_CONFIG,
     DOPPLER_BINS,
     DroneBirdInference,
+    FEATURE_VERSION,
+    TARGET_GATE_BINS,
     WINDOW_STEPS,
     doppler_cube_to_feature_step,
     normalized_profile_sha256,
@@ -29,7 +32,7 @@ class FeatureExtractionTests(unittest.TestCase):
 
     def test_feature_step_matches_notebook_power_formula(self) -> None:
         cube = np.ones((128, 3, 4, 64), dtype=np.complex64)
-        cube[..., 14:19] *= 3.0
+        cube[..., 15:17] *= 3.0
 
         step = doppler_cube_to_feature_step(cube, 16)
 
@@ -196,14 +199,9 @@ class ArtifactContractTests(unittest.TestCase):
         self.checkpoint = {
             "architecture": "MicroDopplerCNN",
             "input_shape_chw": (2, 48, 64),
-            "feature_version": "archive-micro-doppler-v3",
-            "cnn_config": {
-                "input_channels": 2,
-                "stem_channels": 16,
-                "block_channels": [32, 64, 96],
-                "block_strides": [(1, 2), (2, 2), (2, 2)],
-                "dropout": 0.25,
-            },
+            "feature_version": FEATURE_VERSION,
+            "cnn_config": dict(CNN_CONFIG),
+            "target_gate_range_bins": TARGET_GATE_BINS,
             "state_dict": {},
         }
         self.calibration = {
@@ -217,7 +215,8 @@ class ArtifactContractTests(unittest.TestCase):
         }
         self.card = {
             "input_shape_chw": [2, 48, 64],
-            "feature_version": "archive-micro-doppler-v3",
+            "feature_version": FEATURE_VERSION,
+            "target_gate_range_bins": TARGET_GATE_BINS,
             "compatible_profile_sha256": self.profile_hash,
         }
 
@@ -233,6 +232,16 @@ class ArtifactContractTests(unittest.TestCase):
         self.card["compatible_profile_sha256"] = "0" * 64
 
         with self.assertRaisesRegex(ValueError, "configuration mismatch"):
+            self.engine._validate_artifacts(
+                self.checkpoint,
+                self.calibration,
+                self.card,
+            )
+
+    def test_rejects_old_target_gate_contract(self) -> None:
+        self.checkpoint["target_gate_range_bins"] = 5
+
+        with self.assertRaisesRegex(ValueError, "target range-bin contract"):
             self.engine._validate_artifacts(
                 self.checkpoint,
                 self.calibration,

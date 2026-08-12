@@ -82,6 +82,9 @@ else:
     from . import calibrate as radar_calibration
 
 from inference import (
+    DOPPLER_BINS,
+    FEATURE_VERSION,
+    TARGET_GATE_BINS,
     DroneBirdInference,
     InferenceResult,
     doppler_cube_to_feature_step,
@@ -1248,6 +1251,21 @@ class ProcessedOutputWriter:
                 if classification_metadata is not None
                 else {"enabled": False}
             ),
+            "classification_feature": {
+                "feature_version": FEATURE_VERSION,
+                "shape": [2, DOPPLER_BINS],
+                "target_gate_range_bins": TARGET_GATE_BINS,
+                **(
+                    {
+                        "compatible_profile_sha256": classification_metadata[
+                            "compatible_profile_sha256"
+                        ]
+                    }
+                    if classification_metadata is not None
+                    and classification_metadata.get("compatible_profile_sha256")
+                    else {}
+                ),
+            },
             "radar_config": {
                 "num_adc_samples": config.num_adc_samples,
                 "num_rx_channels": config.num_rx_channels,
@@ -1302,9 +1320,21 @@ class ProcessedOutputWriter:
         static_validation: str = "disabled",
         rotor_micro_doppler: Optional[MicroDopplerResult] = None,
         classification: Optional[InferenceResult] = None,
+        classification_feature: Optional[np.ndarray] = None,
     ) -> None:
         if self.file is None:
             return
+        serialized_classification_feature = None
+        if classification_feature is not None:
+            feature_values = np.asarray(classification_feature, dtype=np.float32)
+            if feature_values.shape != (2, DOPPLER_BINS):
+                raise ValueError(
+                    "Classification feature must have shape "
+                    f"[2, {DOPPLER_BINS}], received {feature_values.shape}"
+                )
+            if not np.isfinite(feature_values).all():
+                raise ValueError("Classification feature contains non-finite values")
+            serialized_classification_feature = feature_values.tolist()
 
         track = None
         if target_track is not None:
@@ -1450,6 +1480,9 @@ class ProcessedOutputWriter:
                 classification.to_dict()
                 if classification is not None
                 else None
+            ),
+            "classification_feature": (
+                serialized_classification_feature
             ),
         }
         self.file.write(json.dumps(record, separators=(",", ":")) + "\n")
@@ -1604,6 +1637,7 @@ class DisplayPayloadSink:
             if inference_engine is not None
             else None
         )
+        self.latest_classification_feature: Optional[np.ndarray] = None
         self._last_classification_emit_s = 0.0
         self._last_classification_signature: Optional[
             tuple[str, Optional[str]]
@@ -1757,6 +1791,7 @@ class DisplayPayloadSink:
                     selected_range_m=frame_result.selected_range_m,
                     rotor_micro_doppler=frame_result,
                     classification=self.latest_classification,
+                    classification_feature=self.latest_classification_feature,
                 )
                 self.timings.add(
                     "serialization",
@@ -1805,6 +1840,7 @@ class DisplayPayloadSink:
                     micro_doppler_windows_db=self.latest_micro_doppler_windows_db,
                     selected_range_m=combined_payload.selected_range_m,
                     classification=self.latest_classification,
+                    classification_feature=self.latest_classification_feature,
                 )
                 self.timings.add(
                     "serialization",
@@ -2159,19 +2195,21 @@ class DisplayPayloadSink:
         *,
         target_changed: bool,
     ) -> None:
-        if self.inference_engine is None:
-            return
         if target_track is None:
             self._classification_owner_position_m = None
-            self._set_classification(
-                self.inference_engine.reset("no_confirmed_target")
-            )
+            self.latest_classification_feature = None
+            if self.inference_engine is not None:
+                self._set_classification(
+                    self.inference_engine.reset("no_confirmed_target")
+                )
             return
         if target_track.is_predicted:
             self._classification_owner_position_m = None
-            self._set_classification(
-                self.inference_engine.reset("predicted_target")
-            )
+            self.latest_classification_feature = None
+            if self.inference_engine is not None:
+                self._set_classification(
+                    self.inference_engine.reset("predicted_target")
+                )
             return
         target_position_m = np.asarray(
             target_track.position_m,
@@ -2189,9 +2227,11 @@ class DisplayPayloadSink:
             )
         if target_changed:
             self._classification_owner_position_m = target_position_m.copy()
-            self._set_classification(
-                self.inference_engine.reset("target_changed")
-            )
+            self.latest_classification_feature = None
+            if self.inference_engine is not None:
+                self._set_classification(
+                    self.inference_engine.reset("target_changed")
+                )
             return
         self._classification_owner_position_m = target_position_m.copy()
         self._classify_fixed_range(
@@ -2206,8 +2246,7 @@ class DisplayPayloadSink:
         range_axis_m: Optional[np.ndarray],
         target_range_m: Optional[float],
     ) -> None:
-        if self.inference_engine is None:
-            return
+        self.latest_classification_feature = None
         range_axis = (
             np.asarray(range_axis_m, dtype=np.float64)
             if range_axis_m is not None
@@ -2219,19 +2258,30 @@ class DisplayPayloadSink:
             or range_axis.size != doppler_cube.shape[-1]
             or not np.isfinite(range_axis).all()
         ):
-            self._set_classification(
-                self.inference_engine.reset("invalid_target_range")
-            )
+            if self.inference_engine is not None:
+                self._set_classification(
+                    self.inference_engine.reset("invalid_target_range")
+                )
             return
         target_range_bin = int(
             np.argmin(np.abs(range_axis - float(target_range_m)))
         )
-        self._set_classification(
-            self.inference_engine.update(
+        try:
+            feature_step = doppler_cube_to_feature_step(
                 doppler_cube,
                 target_range_bin,
             )
-        )
+        except (TypeError, ValueError) as exc:
+            if self.inference_engine is not None:
+                self._set_classification(
+                    self.inference_engine.reset(f"invalid_feature_step:{exc}")
+                )
+            return
+        self.latest_classification_feature = feature_step
+        if self.inference_engine is not None:
+            self._set_classification(
+                self.inference_engine.update(doppler_cube, target_range_bin)
+            )
 
     def _set_classification(self, result: InferenceResult) -> None:
         self.latest_classification = result
@@ -4292,6 +4342,7 @@ def _run_rotor_postprocessor(
                     selected_range_m=result.selected_range_m,
                     rotor_micro_doppler=result,
                     classification=classification,
+                    classification_feature=item.feature_step,
                 )
                 timings.add(
                     "serialization",

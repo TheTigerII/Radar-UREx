@@ -104,6 +104,50 @@ class ChooseDisplayTests(unittest.TestCase):
         self.assertEqual(args.static_reference_frames, 150)
 
 
+class ChooseLiveClassificationTests(unittest.TestCase):
+    def test_blank_input_disables_classification_by_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_live_classification(None))
+
+    def test_yes_enables_classification(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_live_classification(None))
+
+    def test_explicit_cli_value_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(run.choose_live_classification(True))
+            self.assertFalse(run.choose_live_classification(False))
+            prompt.assert_not_called()
+
+
+class ChooseDatasetOutputDirectoryTests(unittest.TestCase):
+    def test_blank_input_uses_dataset_root(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.DEFAULT_DATASET_DIR,
+            )
+
+    def test_uav_and_others_choices(self) -> None:
+        with patch("builtins.input", return_value="1"):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.UAV_DATASET_DIR,
+            )
+        with patch("builtins.input", return_value="2"):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.OTHERS_DATASET_DIR,
+            )
+
+    def test_option_three_uses_dataset_root(self) -> None:
+        with patch("builtins.input", return_value="3"):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.DEFAULT_DATASET_DIR,
+            )
+
+
 class CaptureCommandTests(unittest.TestCase):
     def test_calibration_command_disables_normal_processing(self) -> None:
         args = SimpleNamespace(

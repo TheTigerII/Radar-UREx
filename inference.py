@@ -10,15 +10,22 @@ from typing import Any, Literal, Optional, Protocol
 import numpy as np
 
 
-FEATURE_VERSION = "archive-micro-doppler-v3"
+FEATURE_VERSION = "iwr6843-micro-doppler-v4-two-range-bin"
 WINDOW_STEPS = 48
 DOPPLER_BINS = 64
 INPUT_SHAPE_CHW = (2, WINDOW_STEPS, DOPPLER_BINS)
-TARGET_GATE_BINS = 5
+TARGET_GATE_BINS = 2
+CNN_CONFIG = {
+    "input_channels": 2,
+    "stem_channels": 48,
+    "block_channels": [96, 208, 416],
+    "block_strides": [(1, 2), (2, 2), (2, 2)],
+    "dropout": 0.25,
+}
 MODEL_STATE_NAME = "drone_bird_cnn_state.pt"
 CALIBRATION_NAME = "drone_bird_cnn_calibration.joblib"
 MODEL_CARD_NAME = "drone_bird_cnn.model_card.json"
-DEPLOYMENT_STATUS = "archive_pretrained_unvalidated_on_iwr6843"
+DEPLOYMENT_STATUS = "native_iwr6843_two_range_bin_cnn"
 
 ClassificationLabel = Literal["drone", "not_drone", "unknown"]
 
@@ -53,7 +60,9 @@ def normalized_profile_sha256(profile_path: Path) -> str:
 
 
 def _range_indices(center: int, count: int) -> tuple[np.ndarray, np.ndarray]:
-    target = np.arange(max(0, center - 2), min(count, center + 3))
+    # Use the selected bin and its immediately nearer neighbour. This must stay
+    # deterministic so offline feature generation and live inference agree.
+    target = np.arange(max(0, center - 1), min(count, center + 1))
     background = np.concatenate(
         (
             np.arange(max(0, center - 10), max(0, center - 4)),
@@ -293,9 +302,13 @@ class DroneBirdInference:
             "device": "cpu",
             "feature_version": FEATURE_VERSION,
             "input_shape_chw": list(INPUT_SHAPE_CHW),
+            "compatible_profile_sha256": normalized_profile_sha256(
+                self.profile_path
+            ),
             "threshold": self.threshold,
             "labels": ["drone", "not_drone", "unknown"],
-            "negative_training_class": "bionic_bird",
+            "negative_training_class": "others",
+            "target_gate_range_bins": TARGET_GATE_BINS,
             "deployment_status": self.model_card.get(
                 "deployment_status",
                 DEPLOYMENT_STATUS,
@@ -419,13 +432,7 @@ class DroneBirdInference:
         if not isinstance(checkpoint.get("cnn_config"), dict):
             raise ValueError("CNN checkpoint is missing cnn_config")
         cnn_config = checkpoint["cnn_config"]
-        expected_config = {
-            "input_channels": 2,
-            "stem_channels": 16,
-            "block_channels": [32, 64, 96],
-            "block_strides": [(1, 2), (2, 2), (2, 2)],
-            "dropout": 0.25,
-        }
+        expected_config = CNN_CONFIG
         observed_config = {
             "input_channels": cnn_config.get("input_channels"),
             "stem_channels": cnn_config.get("stem_channels"),
@@ -438,6 +445,8 @@ class DroneBirdInference:
         }
         if observed_config != expected_config:
             raise ValueError("CNN architecture configuration is incompatible")
+        if int(checkpoint.get("target_gate_range_bins", -1)) != TARGET_GATE_BINS:
+            raise ValueError("CNN target range-bin contract is incompatible")
         if not isinstance(checkpoint.get("state_dict"), dict):
             raise ValueError("CNN checkpoint is missing state_dict")
         if not isinstance(calibration, dict):
@@ -488,6 +497,8 @@ class DroneBirdInference:
             raise ValueError("CNN model card input shape is incompatible")
         if card.get("feature_version") != FEATURE_VERSION:
             raise ValueError("CNN model card feature version is incompatible")
+        if int(card.get("target_gate_range_bins", -1)) != TARGET_GATE_BINS:
+            raise ValueError("CNN model card target range-bin contract is incompatible")
         if (
             card.get("compatible_profile_sha256")
             != calibration["compatible_profile_sha256"]

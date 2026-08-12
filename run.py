@@ -23,6 +23,9 @@ DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile.cfg"
 DEFAULT_CALIBRATION_PROFILE_PATH = ROOT / "profiles" / "profile_calibration.cfg"
 DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
 DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
+DEFAULT_DATASET_DIR = ROOT / "dataset"
+UAV_DATASET_DIR = DEFAULT_DATASET_DIR / "uav"
+OTHERS_DATASET_DIR = DEFAULT_DATASET_DIR / "others"
 DEFAULT_CLASSIFICATION_ARTIFACT_DIR = ROOT / "Radar-UREx-output" / "artifacts"
 DEFAULT_HOST_IP = "192.168.33.30"
 DEFAULT_DATA_PORT = 4098
@@ -295,17 +298,19 @@ def parse_args() -> argparse.Namespace:
         "--processed-output",
         type=Path,
         help=(
-            "Processed point-cloud and micro-Doppler JSONL output. Defaults "
-            "to a timestamped file in --capture-dir."
+            "Processed point-cloud and micro-Doppler JSONL output. Combined "
+            "mode prompts for a dataset folder; other modes default to a "
+            "timestamped file in --capture-dir."
         ),
     )
     parser.add_argument(
         "--classification",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=None,
         help=(
-            "Run the trained drone/not-drone CNN. Enabled by default; use "
-            "--no-classification to run without PyTorch."
+            "Run the trained drone/not-drone CNN. Combined display mode "
+            "prompts when omitted; use --classification or "
+            "--no-classification to skip that prompt."
         ),
     )
     parser.add_argument(
@@ -376,6 +381,40 @@ def choose_display(display_arg: Optional[str]) -> str:
             "micro-doppler, point-cloud-micro-doppler, calibration, "
             "azimuth-calibration, or elevation-calibration."
         )
+
+
+def choose_live_classification(classification_arg: Optional[bool]) -> bool:
+    if classification_arg is not None:
+        return bool(classification_arg)
+
+    while True:
+        choice = input("Use live CNN classification? [y/N]: ").strip().lower()
+        if choice in {"", "n", "no"}:
+            return False
+        if choice in {"y", "yes"}:
+            return True
+        print("Enter y for yes or n for no.")
+
+
+def choose_dataset_output_directory() -> Path:
+    print("Processed-data location:")
+    print("  1. dataset/uav")
+    print("  2. dataset/others")
+    print("  3. dataset")
+    while True:
+        choice = input("Select data location [3]: ").strip().lower()
+        if choice in {"", "3", "dataset", "/dataset"}:
+            return DEFAULT_DATASET_DIR
+        if choice in {"1", "uav", "dataset/uav", "/dataset/uav"}:
+            return UAV_DATASET_DIR
+        if choice in {
+            "2",
+            "others",
+            "dataset/others",
+            "/dataset/others",
+        }:
+            return OTHERS_DATASET_DIR
+        print("Choose 1 for UAV, 2 for others, or 3 for the dataset root.")
 
 
 def choose_duration_minutes(duration_arg: Optional[float]) -> float:
@@ -1255,6 +1294,16 @@ def run_calibration_mode(
 def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
+    if display == "point-cloud-micro-doppler":
+        args.classification = choose_live_classification(args.classification)
+        if args.processed_output is None:
+            args.processed_output = default_processed_output(
+                choose_dataset_output_directory()
+            )
+    elif args.classification is None:
+        # Preserve the historical default outside the newly prompted combined
+        # data-collection workflow.
+        args.classification = True
     if display == "micro-doppler":
         try:
             args.micro_doppler_range_m = choose_micro_doppler_range_m(
