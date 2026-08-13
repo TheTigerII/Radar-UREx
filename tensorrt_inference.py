@@ -35,8 +35,8 @@ ENGINE_PRECISION_POLICY = "tensorrt_fp16_auto_tactics_v2"
 PARITY_PROBABILITY_TOLERANCE = 1e-3
 DEFAULT_WARMUP_RUNS = 20
 DEFAULT_BENCHMARK_RUNS = 200
-ONNX_MODEL_NAME = "drone_bird_cnn.onnx"
-PARITY_DATA_NAME = "drone_bird_cnn_parity.npz"
+ONNX_MODEL_NAME = "model.onnx"
+PARITY_DATA_NAME = "parity.npz"
 JETSON_MODEL_PATH = Path("/proc/device-tree/model")
 SYSTEM_DIST_PACKAGES = (
     Path("/usr/lib/python3/dist-packages"),
@@ -414,7 +414,7 @@ class TensorRTDroneBirdInference:
         )
         self.cache_dir = self.artifact_dir / "generated"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.engine_path = self.cache_dir / "drone_bird_cnn_sm87_fp16.engine"
+        self.engine_path = self.cache_dir / "model_sm87_fp16.engine"
         self.metadata_path = self.engine_path.with_suffix(".engine.json")
         self._load_deployment_artifacts()
         expected = self._expected_metadata()
@@ -565,8 +565,8 @@ class TensorRTDroneBirdInference:
                 "TensorRT classification requires joblib and scikit-learn"
             ) from exc
 
-        calibration_path = self.artifact_dir / "drone_bird_cnn_calibration.joblib"
-        card_path = self.artifact_dir / "drone_bird_cnn.model_card.json"
+        calibration_path = self.artifact_dir / "calibration.joblib"
+        card_path = self.artifact_dir / "manifest.json"
         for path in (
             self.onnx_path,
             self.parity_data_path,
@@ -647,8 +647,8 @@ class TensorRTDroneBirdInference:
             raise TensorRTInferenceError("Radar TX schedule is incompatible with the CNN")
 
     def _expected_metadata(self) -> dict[str, Any]:
-        calibration = self.artifact_dir / "drone_bird_cnn_calibration.joblib"
-        card = self.artifact_dir / "drone_bird_cnn.model_card.json"
+        calibration = self.artifact_dir / "calibration.joblib"
+        card = self.artifact_dir / "manifest.json"
         return {
             "format_version": ENGINE_FORMAT_VERSION,
             "precision": ENGINE_PRECISION,

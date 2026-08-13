@@ -22,9 +22,9 @@ CNN_CONFIG = {
     "block_strides": [(1, 2), (2, 2), (2, 2)],
     "dropout": 0.25,
 }
-MODEL_STATE_NAME = "drone_bird_cnn_state.pt"
-CALIBRATION_NAME = "drone_bird_cnn_calibration.joblib"
-MODEL_CARD_NAME = "drone_bird_cnn.model_card.json"
+MODEL_STATE_NAME = "model_state.pt"
+CALIBRATION_NAME = "calibration.joblib"
+MODEL_CARD_NAME = "manifest.json"
 DEPLOYMENT_STATUS = "native_iwr6843_two_range_bin_cnn"
 
 ClassificationLabel = Literal["drone", "not_drone", "unknown"]

@@ -3,7 +3,7 @@ __pycache__/
 *.py[cod]
 /tmp/classification_features*.npz
 Radar-UREx-output/artifacts/generated/
+/training_output/
 *.engine
 dataset/*
 rawdatacapture/captures/*
-

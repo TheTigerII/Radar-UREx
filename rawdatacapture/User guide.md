@@ -92,17 +92,20 @@ model artifacts do not block capture startup.
 
 On Jetson, `--classification-device auto` resolves to the required CUDA
 backend. Training and ONNX export happen in Colab or on the training
-workstation, not on the Jetson. Copy the complete exported artifact directory
-to the Jetson, then install the Jetson-native TensorRT runtime once:
+workstation, not on the Jetson. The notebook exports to
+`training_output/micro_doppler_cnn/`. Copy `model_state.pt`, `model.onnx`,
+`manifest.json`, `calibration.joblib`, and `parity.npz` into the repository's
+`model_weights/` directory on the Jetson, then install the Jetson-native
+TensorRT runtime once:
 
 ```bash
 ./scripts/setup_jetson_tensorrt.sh
 ```
 
 The launcher builds and caches a fixed-batch-one TensorRT FP16 engine from the
-training-exported `drone_bird_cnn.onnx` on first use. TensorRT selects optimized
+training-exported `model.onnx` on first use. TensorRT selects optimized
 Orin tactics, then the launcher validates the engine against the small
-training-exported `drone_bird_cnn_parity.npz` reference set. A label mismatch
+training-exported `parity.npz` reference set. A label mismatch
 or calibrated-probability error above `1e-3` aborts startup. Later runs verify
 the ONNX, parity data, calibration, model card, radar profile, TensorRT/CUDA,
 and GPU fingerprints before reusing the engine. PyTorch and ONNX Python

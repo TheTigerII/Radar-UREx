@@ -110,8 +110,7 @@ DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
 DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
 DEFAULT_CLASSIFICATION_ARTIFACT_DIR = (
     Path(__file__).resolve().parent.parent
-    / "Radar-UREx-output"
-    / "artifacts"
+    / "model_weights"
 )
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0

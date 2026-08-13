@@ -157,15 +157,21 @@ the `[TN, FP, FN, TP]` confusion matrix.
 
 ## Exported artifact bundle
 
-The notebook writes five files under `Radar-UREx-output/artifacts/`:
+Like the `mmHawkeye--` pipeline, training output and deployment weights are
+separate. The notebook writes five files under
+`training_output/micro_doppler_cnn/`:
 
 | Artifact | Contents |
 |---|---|
-| `drone_bird_cnn_state.pt` | State dict, architecture name, CNN config, input shape, feature version, and two-bin gate declaration |
-| `drone_bird_cnn_calibration.joblib` | Logistic calibrator, decision threshold, normalization vectors, profile hash, and dataset-manifest hash |
-| `drone_bird_cnn.model_card.json` | Architecture, parameter count, training selection, metrics, class mapping, split policy, hashes, and deployment status |
-| `drone_bird_cnn.onnx` | Frozen, fixed-batch-one `[1,2,48,64]` network exported during training for TensorRT |
-| `drone_bird_cnn_parity.npz` | Up to 128 normalized test windows and their calibrated PyTorch probabilities for on-device engine validation |
+| `model_state.pt` | State dict, architecture name, CNN config, input shape, feature version, and two-bin gate declaration |
+| `calibration.joblib` | Logistic calibrator, decision threshold, normalization vectors, profile hash, and dataset-manifest hash |
+| `manifest.json` | Architecture, parameter count, training selection, metrics, class mapping, split policy, hashes, and deployment status |
+| `model.onnx` | Frozen, fixed-batch-one `[1,2,48,64]` network exported during training for TensorRT |
+| `parity.npz` | Up to 128 normalized test windows and their calibrated PyTorch probabilities for on-device engine validation |
+
+Copy all five files into `model_weights/` before live classification. The
+launcher uses `model_weights/` by default; `--classification-artifacts` can
+override it.
 
 On Jetson Orin Nano, `tensorrt_inference.py` validates the deployment artifacts
 and live radar profile, builds a device-specific fixed-shape TensorRT FP16
