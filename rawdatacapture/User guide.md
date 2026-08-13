@@ -85,29 +85,31 @@ The notebook uses only native IWR6843 feature captures. Place UAV capture
 JSONL files under `dataset/uav/` and tracked non-UAV target captures under
 `dataset/others/`. Capture with `--display-update-every 1`; processed JSONL
 records save the exact two-channel, two-range-bin `classification_feature`
-consumed by live inference. A class needs at least three separate capture files
-for capture-grouped train, validation, and test partitions. Use
+consumed by live inference. Training creates non-overlapping 48-frame windows
+and uses a stratified 70%/15%/15% window-level split. Use
 `--no-classification` while collecting the initial training set so obsolete
 model artifacts do not block capture startup.
 
 On Jetson, `--classification-device auto` resolves to the required CUDA
-backend. Install the Jetson-native TensorRT packages and ONNX export support
-once:
+backend. Training and ONNX export happen in Colab or on the training
+workstation, not on the Jetson. Copy the complete exported artifact directory
+to the Jetson, then install the Jetson-native TensorRT runtime once:
 
 ```bash
 ./scripts/setup_jetson_tensorrt.sh
 ```
 
-The launcher builds and caches a fixed-shape TensorRT engine on first use,
-then checks its checkpoint, calibration, profile, precision policy,
-TensorRT/CUDA, and GPU fingerprints on later runs. Residual convolutions use
-FP16; the input stem and arithmetic stay FP32 to meet the calibrated
-probability parity limit on Orin. The first build can take several minutes and
-validates all cached feature windows against CPU PyTorch; a label mismatch or
-calibrated-probability error above `1e-3` aborts startup. The launcher allows
-five minutes for this one-time GPU startup. CUDA/TensorRT failure on Jetson
-never silently falls back to CPU. Use `--classification-device cpu` only as an
-explicit diagnostic override.
+The launcher builds and caches a fixed-batch-one TensorRT FP16 engine from the
+training-exported `drone_bird_cnn.onnx` on first use. TensorRT selects optimized
+Orin tactics, then the launcher validates the engine against the small
+training-exported `drone_bird_cnn_parity.npz` reference set. A label mismatch
+or calibrated-probability error above `1e-3` aborts startup. Later runs verify
+the ONNX, parity data, calibration, model card, radar profile, TensorRT/CUDA,
+and GPU fingerprints before reusing the engine. PyTorch and ONNX Python
+packages are not required on the Jetson. The launcher allows five minutes for
+this one-time GPU build. CUDA/TensorRT failure never silently falls back to
+CPU; use `--classification-device cpu` only as an explicit diagnostic override
+when PyTorch is installed.
 
 Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
 local implementation for real-time performance. The IWR6843ISK-ODS planar-array

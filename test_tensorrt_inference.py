@@ -98,35 +98,29 @@ class EngineCacheTests(unittest.TestCase):
             engine.write_bytes(b"changed")
             self.assertFalse(instance._cache_is_valid(expected))
 
-    def test_onnx_export_uses_static_model_shape(self):
-        class FakeOnnx:
-            observed = None
-
-            @classmethod
-            def export(cls, model, inputs, output_path, **kwargs):
-                cls.observed = (tuple(inputs[0].shape), kwargs)
-                Path(output_path).write_bytes(b"onnx")
-
-        class FakeTorch:
-            float32 = np.float32
-            onnx = FakeOnnx
-
-            @staticmethod
-            def zeros(shape, dtype):
-                return np.zeros(shape, dtype=dtype)
-
+    def test_parity_uses_training_export_without_pytorch(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             instance = TensorRTDroneBirdInference.__new__(
                 TensorRTDroneBirdInference
             )
-            instance.onnx_path = Path(temporary_directory) / "model.onnx"
-            reference = SimpleNamespace(_torch=FakeTorch, model=object())
+            instance.parity_data_path = (
+                Path(temporary_directory) / "model_parity.npz"
+            )
+            instance.calibrator = _Calibrator()
+            instance.threshold = 0.75
+            np.savez_compressed(
+                instance.parity_data_path,
+                normalized_windows=np.zeros(
+                    (1, *INPUT_SHAPE_CHW), dtype=np.float32
+                ),
+                probabilities=np.asarray([0.8], dtype=np.float64),
+            )
 
-            instance._export_onnx(reference)
+            parity = instance._validate_parity(_Runtime(0.8))
 
-            self.assertEqual(FakeOnnx.observed[0], (1, *INPUT_SHAPE_CHW))
-            self.assertEqual(FakeOnnx.observed[1]["opset_version"], 18)
-            self.assertTrue(instance.onnx_path.is_file())
+            self.assertEqual(parity["windows"], 1)
+            self.assertEqual(parity["label_mismatches"], 0)
+            self.assertEqual(parity["max_probability_error"], 0.0)
 
 
 class StatefulTensorRTTests(unittest.TestCase):

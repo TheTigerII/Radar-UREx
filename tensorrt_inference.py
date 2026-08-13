@@ -16,22 +16,27 @@ import numpy as np
 
 from inference import (
     DOPPLER_BINS,
+    FEATURE_VERSION,
     INPUT_SHAPE_CHW,
+    TARGET_GATE_BINS,
     WINDOW_STEPS,
     DroneBirdInference,
     InferenceResult,
     RadarInferenceConfig,
     doppler_cube_to_feature_step,
+    normalized_profile_sha256,
 )
 
 
-ENGINE_FORMAT_VERSION = 1
+ENGINE_FORMAT_VERSION = 2
 ENGINE_PRECISION = "fp16"
 ENGINE_WORKSPACE_BYTES = 256 * 1024 * 1024
-ENGINE_PRECISION_POLICY = "fp32_stem_fp16_residual_convolutions_v1"
+ENGINE_PRECISION_POLICY = "tensorrt_fp16_auto_tactics_v2"
 PARITY_PROBABILITY_TOLERANCE = 1e-3
 DEFAULT_WARMUP_RUNS = 20
 DEFAULT_BENCHMARK_RUNS = 200
+ONNX_MODEL_NAME = "drone_bird_cnn.onnx"
+PARITY_DATA_NAME = "drone_bird_cnn_parity.npz"
 JETSON_MODEL_PATH = Path("/proc/device-tree/model")
 SYSTEM_DIST_PACKAGES = (
     Path("/usr/lib/python3/dist-packages"),
@@ -81,7 +86,7 @@ def create_inference_engine(
     profile_path: Path,
     *,
     device: str = "auto",
-    feature_cache_path: Optional[Path] = None,
+    parity_data_path: Optional[Path] = None,
 ) -> DroneBirdInference | "TensorRTDroneBirdInference":
     """Create the requested backend; CUDA failures are deliberately fatal."""
     resolved = resolve_classification_device(device)
@@ -91,7 +96,7 @@ def create_inference_engine(
         artifact_dir,
         config,
         profile_path,
-        feature_cache_path=feature_cache_path,
+        parity_data_path=parity_data_path,
     )
 
 
@@ -384,7 +389,7 @@ class _TensorRTRuntime:
 
 
 class TensorRTDroneBirdInference:
-    """Stateful TensorRT FP16 inference with CPU-equivalent preprocessing."""
+    """Stateful TensorRT FP16 inference from training-exported ONNX artifacts."""
 
     def __init__(
         self,
@@ -392,7 +397,7 @@ class TensorRTDroneBirdInference:
         config: RadarInferenceConfig,
         profile_path: Path,
         *,
-        feature_cache_path: Optional[Path] = None,
+        parity_data_path: Optional[Path] = None,
     ) -> None:
         self.artifact_dir = Path(artifact_dir)
         self.profile_path = Path(profile_path)
@@ -401,32 +406,20 @@ class TensorRTDroneBirdInference:
         self._trt = _import_tensorrt()
         self._cudart = _import_cuda_runtime()
         self.gpu = _gpu_identity(self._cudart)
-        self.feature_cache_path = (
-            Path(feature_cache_path)
-            if feature_cache_path is not None
-            else self.artifact_dir.parent / "classification_features_v3.npz"
+        self.onnx_path = self.artifact_dir / ONNX_MODEL_NAME
+        self.parity_data_path = (
+            Path(parity_data_path)
+            if parity_data_path is not None
+            else self.artifact_dir / PARITY_DATA_NAME
         )
         self.cache_dir = self.artifact_dir / "generated"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.engine_path = self.cache_dir / "drone_bird_cnn_sm87_fp16.engine"
         self.metadata_path = self.engine_path.with_suffix(".engine.json")
-        self.onnx_path = self.engine_path.with_suffix(".onnx")
-
-        reference = DroneBirdInference(
-            self.artifact_dir,
-            self.config,
-            self.profile_path,
-        )
-        self.threshold = reference.threshold
-        self.clip_low = reference.clip_low.copy()
-        self.clip_high = reference.clip_high.copy()
-        self.channel_mean = reference.channel_mean.copy()
-        self.channel_std = reference.channel_std.copy()
-        self.calibrator = reference.calibrator
-        self.model_card = reference.model_card
+        self._load_deployment_artifacts()
         expected = self._expected_metadata()
         if not self._cache_is_valid(expected):
-            self._build_engine(reference, expected)
+            self._build_engine(expected)
         self.runtime = _TensorRTRuntime(
             self.engine_path,
             self._trt,
@@ -436,7 +429,6 @@ class TensorRTDroneBirdInference:
             self.close()
             raise TensorRTInferenceError("TensorRT engine cache validation failed")
         self.benchmark = self.runtime.benchmark()
-        del reference
 
     @property
     def valid_steps(self) -> int:
@@ -556,8 +548,105 @@ class TensorRTDroneBirdInference:
         if runtime is not None:
             runtime.close()
 
+    @staticmethod
+    def _channel_vector(calibration: dict[str, Any], key: str) -> np.ndarray:
+        value = np.asarray(calibration[key], dtype=np.float32)
+        if value.shape != (2,) or not np.isfinite(value).all():
+            raise TensorRTInferenceError(
+                f"Classification {key} must contain two finite values"
+            )
+        return value
+
+    def _load_deployment_artifacts(self) -> None:
+        try:
+            import joblib
+        except ModuleNotFoundError as exc:
+            raise TensorRTInferenceError(
+                "TensorRT classification requires joblib and scikit-learn"
+            ) from exc
+
+        calibration_path = self.artifact_dir / "drone_bird_cnn_calibration.joblib"
+        card_path = self.artifact_dir / "drone_bird_cnn.model_card.json"
+        for path in (
+            self.onnx_path,
+            self.parity_data_path,
+            calibration_path,
+            card_path,
+        ):
+            if not path.is_file():
+                raise TensorRTInferenceError(
+                    f"TensorRT classification artifact not found: {path}"
+                )
+        try:
+            calibration = joblib.load(calibration_path)
+            card = json.loads(card_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise TensorRTInferenceError(
+                f"Could not load TensorRT deployment artifacts: {type(exc).__name__}"
+            ) from exc
+        required = {
+            "calibrator",
+            "threshold",
+            "clip_low",
+            "clip_high",
+            "channel_mean",
+            "channel_std",
+            "compatible_profile_sha256",
+        }
+        if not isinstance(calibration, dict) or required.difference(calibration):
+            missing = required.difference(calibration) if isinstance(calibration, dict) else required
+            raise TensorRTInferenceError(
+                "CNN calibration artifact is missing: " + ", ".join(sorted(missing))
+            )
+        self.threshold = float(calibration["threshold"])
+        if not np.isfinite(self.threshold) or not 0.0 <= self.threshold <= 1.0:
+            raise TensorRTInferenceError("CNN threshold must be a finite probability")
+        self.clip_low = self._channel_vector(calibration, "clip_low")
+        self.clip_high = self._channel_vector(calibration, "clip_high")
+        self.channel_mean = self._channel_vector(calibration, "channel_mean")
+        self.channel_std = self._channel_vector(calibration, "channel_std")
+        if np.any(self.clip_low > self.clip_high) or np.any(self.channel_std <= 0.0):
+            raise TensorRTInferenceError("CNN normalization values are invalid")
+        self.calibrator = calibration["calibrator"]
+        self.model_card = card
+
+        profile_hash = normalized_profile_sha256(self.profile_path)
+        if calibration["compatible_profile_sha256"] != profile_hash:
+            raise TensorRTInferenceError("Radar configuration does not match the CNN")
+        if not isinstance(card, dict):
+            raise TensorRTInferenceError("CNN model card must be a mapping")
+        if tuple(card.get("input_shape_chw", ())) != INPUT_SHAPE_CHW:
+            raise TensorRTInferenceError("CNN model card input shape is incompatible")
+        if card.get("feature_version") != FEATURE_VERSION:
+            raise TensorRTInferenceError("CNN model card feature version is incompatible")
+        if int(card.get("target_gate_range_bins", -1)) != TARGET_GATE_BINS:
+            raise TensorRTInferenceError("CNN target range-bin contract is incompatible")
+        if card.get("compatible_profile_sha256") != profile_hash:
+            raise TensorRTInferenceError("CNN model card profile fingerprint is incompatible")
+        if card.get("onnx_sha256") != _sha256(self.onnx_path):
+            raise TensorRTInferenceError("CNN ONNX hash does not match the model card")
+        if card.get("parity_data_sha256") != _sha256(self.parity_data_path):
+            raise TensorRTInferenceError(
+                "CNN parity-data hash does not match the model card"
+            )
+
+        expected_dimensions = (64, 4, 384, 128, 3)
+        observed_dimensions = (
+            int(self.config.num_adc_samples),
+            int(self.config.num_rx_channels),
+            int(self.config.num_chirps_per_frame),
+            int(self.config.num_loops or 0),
+            int(self.config.num_chirps_per_loop or 0),
+        )
+        if observed_dimensions != expected_dimensions:
+            raise TensorRTInferenceError(
+                "Radar dimensions are incompatible with the CNN: "
+                f"expected={expected_dimensions}, observed={observed_dimensions}"
+            )
+        if tuple(self.config.tx_channel_masks or ()) != (1, 4, 2):
+            raise TensorRTInferenceError("Radar TX schedule is incompatible with the CNN")
+
     def _expected_metadata(self) -> dict[str, Any]:
-        checkpoint = self.artifact_dir / "drone_bird_cnn_state.pt"
         calibration = self.artifact_dir / "drone_bird_cnn_calibration.joblib"
         card = self.artifact_dir / "drone_bird_cnn.model_card.json"
         return {
@@ -566,15 +655,11 @@ class TensorRTDroneBirdInference:
             "input_shape": [1, *INPUT_SHAPE_CHW],
             "workspace_bytes": ENGINE_WORKSPACE_BYTES,
             "precision_policy": ENGINE_PRECISION_POLICY,
-            "checkpoint_sha256": _sha256(checkpoint),
+            "onnx_sha256": _sha256(self.onnx_path),
+            "parity_data_sha256": _sha256(self.parity_data_path),
             "calibration_sha256": _sha256(calibration),
             "model_card_sha256": _sha256(card),
             "profile_sha256": _sha256(self.profile_path),
-            "feature_cache_sha256": (
-                _sha256(self.feature_cache_path)
-                if self.feature_cache_path.is_file()
-                else None
-            ),
             "tensorrt_version": str(self._trt.__version__),
             "gpu": self.gpu,
         }
@@ -601,10 +686,8 @@ class TensorRTDroneBirdInference:
 
     def _build_engine(
         self,
-        reference: DroneBirdInference,
         expected: dict[str, Any],
     ) -> None:
-        self._export_onnx(reference)
         logger = self._trt.Logger(self._trt.Logger.WARNING)
         builder = self._trt.Builder(logger)
         network_flags = 1 << int(
@@ -630,27 +713,6 @@ class TensorRTDroneBirdInference:
             ENGINE_WORKSPACE_BYTES,
         )
         build_config.set_flag(self._trt.BuilderFlag.FP16)
-        build_config.set_flag(
-            self._trt.BuilderFlag.OBEY_PRECISION_CONSTRAINTS
-        )
-        fp32_layer_types = {
-            self._trt.LayerType.ACTIVATION,
-            self._trt.LayerType.ELEMENTWISE,
-            self._trt.LayerType.MATRIX_MULTIPLY,
-            self._trt.LayerType.REDUCE,
-        }
-        for index in range(int(network.num_layers)):
-            layer = network.get_layer(index)
-            if (
-                layer.type in fp32_layer_types
-                or (
-                    layer.type == self._trt.LayerType.CONVOLUTION
-                    and layer.name.startswith("/stem/")
-                )
-            ):
-                layer.precision = self._trt.float32
-                for output_index in range(int(layer.num_outputs)):
-                    layer.set_output_type(output_index, self._trt.float32)
         serialized = builder.build_serialized_network(network, build_config)
         if serialized is None:
             raise TensorRTInferenceError("TensorRT engine build returned no engine")
@@ -664,7 +726,7 @@ class TensorRTDroneBirdInference:
             self._cudart,
         )
         try:
-            parity = self._validate_parity(reference, runtime)
+            parity = self._validate_parity(runtime)
         finally:
             runtime.close()
         if (
@@ -689,76 +751,54 @@ class TensorRTDroneBirdInference:
         )
         os.replace(temporary_metadata, self.metadata_path)
 
-    def _export_onnx(self, reference: DroneBirdInference) -> None:
-        torch = reference._torch
-        sample = torch.zeros((1, *INPUT_SHAPE_CHW), dtype=torch.float32)
-        temporary_onnx = self.onnx_path.with_suffix(".onnx.tmp")
-        torch.onnx.export(
-            reference.model,
-            (sample,),
-            temporary_onnx,
-            input_names=["input"],
-            output_names=["logit"],
-            opset_version=18,
-            dynamo=False,
-        )
-        os.replace(temporary_onnx, self.onnx_path)
-
     def _validate_parity(
         self,
-        reference: DroneBirdInference,
         runtime: _TensorRTRuntime,
     ) -> dict[str, Any]:
-        if not self.feature_cache_path.is_file():
+        with np.load(self.parity_data_path, allow_pickle=False) as parity_data:
+            normalized = np.asarray(
+                parity_data["normalized_windows"], dtype=np.float32
+            )
+            expected_probabilities = np.asarray(
+                parity_data["probabilities"], dtype=np.float64
+            )
+        if (
+            normalized.ndim != 4
+            or len(normalized) == 0
+            or tuple(normalized.shape[1:]) != INPUT_SHAPE_CHW
+        ):
             raise TensorRTInferenceError(
-                f"Feature cache required for parity is missing: "
-                f"{self.feature_cache_path}"
+                f"Unexpected parity input shape: {normalized.shape}"
             )
-        with np.load(self.feature_cache_path, allow_pickle=False) as feature_cache:
-            windows = np.asarray(feature_cache["X"], dtype=np.float32)
-        if windows.ndim != 4 or tuple(windows.shape[1:]) != INPUT_SHAPE_CHW:
+        if expected_probabilities.shape != (len(normalized),):
             raise TensorRTInferenceError(
-                f"Unexpected parity feature shape: {windows.shape}"
+                "TensorRT parity probabilities do not match the input count"
             )
-        normalized = (
-            np.clip(
-                windows,
-                reference.clip_low[None, :, None, None],
-                reference.clip_high[None, :, None, None],
-            )
-            - reference.channel_mean[None, :, None, None]
-        ) / reference.channel_std[None, :, None, None]
+        if (
+            not np.isfinite(normalized).all()
+            or not np.isfinite(expected_probabilities).all()
+            or np.any((expected_probabilities < 0.0) | (expected_probabilities > 1.0))
+        ):
+            raise TensorRTInferenceError("TensorRT parity data contains non-finite values")
         normalized = np.ascontiguousarray(normalized, dtype=np.float32)
-        cpu_logits = np.empty((windows.shape[0],), dtype=np.float64)
-        batch_size = 64
-        for start in range(0, windows.shape[0], batch_size):
-            end = min(start + batch_size, windows.shape[0])
-            with reference._torch.inference_mode():
-                tensor = reference._torch.from_numpy(normalized[start:end])
-                cpu_logits[start:end] = (
-                    reference.model(tensor).cpu().numpy().astype(np.float64)
-                )
         gpu_logits = np.asarray(
             [runtime.infer_logit(window) for window in normalized],
             dtype=np.float64,
         )
-        cpu_probabilities = reference.calibrator.predict_proba(
-            cpu_logits[:, np.newaxis]
-        )[:, 1]
-        gpu_probabilities = reference.calibrator.predict_proba(
+        gpu_probabilities = self.calibrator.predict_proba(
             gpu_logits[:, np.newaxis]
         )[:, 1]
         maximum_error = float(
-            np.max(np.abs(cpu_probabilities - gpu_probabilities))
+            np.max(np.abs(expected_probabilities - gpu_probabilities))
         )
         label_mismatches = int(
             np.count_nonzero(
-                (cpu_probabilities >= reference.threshold)
-                != (gpu_probabilities >= reference.threshold)
+                (expected_probabilities >= self.threshold)
+                != (gpu_probabilities >= self.threshold)
             )
         )
         return {
-            "windows": int(windows.shape[0]),
+            "windows": int(normalized.shape[0]),
             "label_mismatches": int(label_mismatches),
             "max_probability_error": float(maximum_error),
             "tolerance": PARITY_PROBABILITY_TOLERANCE,

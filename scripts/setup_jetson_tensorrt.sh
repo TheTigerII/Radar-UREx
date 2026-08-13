@@ -12,7 +12,7 @@ fi
 
 sudo apt-get update
 sudo apt-get install -y python3-libnvinfer libnvinfer-bin
-"${venv_pip}" install onnx onnxscript
+"${venv_pip}" install 'cuda-python>=12.6,<13'
 
 site_packages="$("${venv_python}" -c 'import site; print(site.getsitepackages()[0])')"
 printf '%s\n' "/usr/lib/python3/dist-packages" \

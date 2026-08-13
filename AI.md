@@ -157,18 +157,27 @@ the `[TN, FP, FN, TP]` confusion matrix.
 
 ## Exported artifact bundle
 
-The notebook writes three files under `Radar-UREx-output/artifacts/`:
+The notebook writes five files under `Radar-UREx-output/artifacts/`:
 
 | Artifact | Contents |
 |---|---|
 | `drone_bird_cnn_state.pt` | State dict, architecture name, CNN config, input shape, feature version, and two-bin gate declaration |
 | `drone_bird_cnn_calibration.joblib` | Logistic calibrator, decision threshold, normalization vectors, profile hash, and dataset-manifest hash |
 | `drone_bird_cnn.model_card.json` | Architecture, parameter count, training selection, metrics, class mapping, split policy, hashes, and deployment status |
+| `drone_bird_cnn.onnx` | Frozen, fixed-batch-one `[1,2,48,64]` network exported during training for TensorRT |
+| `drone_bird_cnn_parity.npz` | Up to 128 normalized test windows and their calibrated PyTorch probabilities for on-device engine validation |
 
-`inference.py` loads all three, validates their agreement with one another and
-the live radar profile, reconstructs this same CNN, normalizes a rolling raw
-feature window, obtains a CPU logit, calibrates it, and applies the stored
-threshold.
+On Jetson Orin Nano, `tensorrt_inference.py` validates the deployment artifacts
+and live radar profile, builds a device-specific fixed-shape TensorRT FP16
+engine from ONNX once, verifies its probabilities and decisions against the
+parity artifact, then caches the engine. Live inference uses persistent pinned
+host memory, device buffers, and a CUDA stream. It applies the exported
+scikit-learn calibrator and threshold after the GPU logit. Training, PyTorch,
+and ONNX export do not run on the Jetson.
+
+Off Jetson, or when `--classification-device cpu` is explicitly selected,
+`inference.py` reconstructs the PyTorch CNN from the state file and applies the
+same normalization, calibration, and threshold on CPU.
 
 ## Dataset requirements and evaluation warning
 

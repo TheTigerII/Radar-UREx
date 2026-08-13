@@ -4935,7 +4935,7 @@ def parse_args() -> argparse.Namespace:
         default=True,
         help=(
             "Run the trained drone/not-drone CNN. Enabled by default; use "
-            "--no-classification to run without PyTorch."
+            "--no-classification to run without classifier artifacts or runtime dependencies."
         ),
     )
     parser.add_argument(
