@@ -1,0 +1,63 @@
+{
+  "architecture": "depthwise-separable residual 2D CNN",
+  "parameters": 230337,
+  "mmhawkeye_lstm_parameters": 231682,
+  "best_epoch": 10,
+  "validation_pr_auc": 1.0,
+  "threshold": 0.595035812735926,
+  "window_test_metrics": {
+    "samples": 52,
+    "threshold": 0.595035812735926,
+    "recall": 1.0,
+    "precision": 0.9333333333333333,
+    "f1": 0.9655172413793104,
+    "pr_auc": 1.0,
+    "roc_auc": 1.0,
+    "brier_score": 0.05583648880790289,
+    "confusion_matrix_tn_fp_fn_tp": [
+      7,
+      3,
+      0,
+      42
+    ]
+  },
+  "source_aggregated_test_window_metrics": {
+    "samples": 5,
+    "threshold": 0.595035812735926,
+    "recall": 1.0,
+    "precision": 1.0,
+    "f1": 1.0,
+    "pr_auc": 1.0,
+    "roc_auc": 1.0,
+    "brier_score": 0.022782887324399814,
+    "confusion_matrix_tn_fp_fn_tp": [
+      2,
+      0,
+      0,
+      3
+    ]
+  },
+  "feature_version": "iwr6843-micro-doppler-v4-two-range-bin",
+  "input_shape_chw": [
+    2,
+    48,
+    64
+  ],
+  "target_gate_range_bins": 2,
+  "classes": {
+    "positive": "dataset/uav",
+    "negative": "dataset/others"
+  },
+  "split_policy": "non-overlapping windows, stratified 70/15/15 by class",
+  "split_fractions": {
+    "train": 0.7,
+    "validation": 0.15,
+    "test": 0.15
+  },
+  "dataset_manifest_sha256": "70b51cbb7a9475c3298a6b3ecddef62c2c8f64b2aeaa4087f14c48f93efb431c",
+  "compatible_profile_sha256": "5f89423fbeb8717ea2595750d3f709ecae283021272b6ca7c99a63802192f470",
+  "onnx_sha256": "62574d756b74e87e81c4d89992a23d06d1683ced07feb98783edd6bbe387b886",
+  "parity_data_sha256": "1946b03371ef79b7c958920de80b3c5aca3c96609b2974952c59265f84e559c3",
+  "deployment_backend": "TensorRT FP16 on Jetson; PyTorch CPU fallback",
+  "deployment_status": "native_iwr6843_two_range_bin_cnn"
+}
