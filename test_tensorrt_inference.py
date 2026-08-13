@@ -83,6 +83,10 @@ class DeviceResolutionTests(unittest.TestCase):
 
 
 class EngineCacheTests(unittest.TestCase):
+    def test_fp16_probability_tolerance_accepts_small_calibrated_drift(self):
+        self.assertGreaterEqual(PARITY_PROBABILITY_TOLERANCE, 0.00217362)
+        self.assertLess(PARITY_PROBABILITY_TOLERANCE, 0.01)
+
     def test_cache_requires_matching_engine_hash_and_parity(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

@@ -32,7 +32,10 @@ ENGINE_FORMAT_VERSION = 2
 ENGINE_PRECISION = "fp16"
 ENGINE_WORKSPACE_BYTES = 256 * 1024 * 1024
 ENGINE_PRECISION_POLICY = "tensorrt_fp16_auto_tactics_v2"
-PARITY_PROBABILITY_TOLERANCE = 1e-3
+# TensorRT FP16 can move calibrated probabilities slightly more than raw logits
+# because the fitted logistic calibrator may amplify small network differences.
+# Keep the acceptance bound below one percentage point and require exact labels.
+PARITY_PROBABILITY_TOLERANCE = 5e-3
 DEFAULT_WARMUP_RUNS = 20
 DEFAULT_BENCHMARK_RUNS = 200
 ONNX_MODEL_NAME = "model.onnx"

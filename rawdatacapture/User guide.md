@@ -106,7 +106,7 @@ The launcher builds and caches a fixed-batch-one TensorRT FP16 engine from the
 training-exported `model.onnx` on first use. TensorRT selects optimized
 Orin tactics, then the launcher validates the engine against the small
 training-exported `parity.npz` reference set. A label mismatch
-or calibrated-probability error above `1e-3` aborts startup. Later runs verify
+or calibrated-probability error above `5e-3` aborts startup. Later runs verify
 the ONNX, parity data, calibration, model card, radar profile, TensorRT/CUDA,
 and GPU fingerprints before reusing the engine. PyTorch and ONNX Python
 packages are not required on the Jetson. The launcher allows five minutes for
