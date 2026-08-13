@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from collections import deque
@@ -10,8 +11,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 import numpy as np
-import torch
-from torch import nn
 
 
 SEGMENT_FRAMES = 36
@@ -19,43 +18,8 @@ DOPPLER_BINS = 64
 CENTER_BIN = DOPPLER_BINS // 2
 CENTER_TOLERANCE_BINS = 1
 LABEL_TO_INDEX = {"other": 0, "uav": 1}
-DEFAULT_MODEL_STATE_NAME = "model_state.pt"
-
-
-class MmHawkeyeLSTM(nn.Module):
-    """Two-layer LSTM architecture exported by training.ipynb."""
-
-    def __init__(
-        self,
-        input_size: int = DOPPLER_BINS,
-        hidden_size: int = 128,
-        num_layers: int = 2,
-        num_classes: int = 2,
-    ) -> None:
-        super().__init__()
-        self.input_size = int(input_size)
-        self.hidden_size = int(hidden_size)
-        self.num_layers = int(num_layers)
-        self.lstm = nn.LSTM(
-            input_size=self.input_size,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers,
-            batch_first=True,
-        )
-        self.classifier = nn.Linear(self.hidden_size, int(num_classes))
-
-    def forward(self, doppler_time: torch.Tensor) -> torch.Tensor:
-        if doppler_time.ndim != 3 or tuple(doppler_time.shape[1:]) != (
-            SEGMENT_FRAMES,
-            DOPPLER_BINS,
-        ):
-            raise ValueError(
-                "Expected Doppler-Time input with shape "
-                f"[batch, {SEGMENT_FRAMES}, {DOPPLER_BINS}], got "
-                f"{tuple(doppler_time.shape)}"
-            )
-        _, (hidden, _) = self.lstm(doppler_time)
-        return self.classifier(hidden[-1])
+DEFAULT_MODEL_NAME = "model.onnx"
+DEFAULT_MANIFEST_NAME = "manifest.json"
 
 
 def align_doppler_time(history_db: np.ndarray) -> np.ndarray:
@@ -86,16 +50,28 @@ def align_doppler_time(history_db: np.ndarray) -> np.ndarray:
     return np.log1p(aligned).astype(np.float32)
 
 
-def resolve_model_state_path(model_weights_dir: Path) -> Path:
+def resolve_model_artifact_paths(model_weights_dir: Path) -> tuple[Path, Path]:
     directory = Path(model_weights_dir).expanduser().resolve()
-    path = directory / DEFAULT_MODEL_STATE_NAME
     if not directory.is_dir():
         raise FileNotFoundError(f"Model weights directory does not exist: {directory}")
-    if not path.is_file():
-        raise FileNotFoundError(
-            f"Model weights are missing: expected {path}"
-        )
-    return path
+    model_path = directory / DEFAULT_MODEL_NAME
+    manifest_path = directory / DEFAULT_MANIFEST_NAME
+    missing = [path for path in (model_path, manifest_path) if not path.is_file()]
+    if missing:
+        expected = ", ".join(str(path) for path in missing)
+        raise FileNotFoundError(f"ONNX model artifacts are missing: expected {expected}")
+    return model_path, manifest_path
+
+
+def _load_onnxruntime() -> Any:
+    try:
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise RuntimeError(
+            "ONNX Runtime is required for classification; install onnxruntime "
+            "or an appropriate onnxruntime-gpu build"
+        ) from exc
+    return ort
 
 
 @dataclass(frozen=True)
@@ -121,58 +97,88 @@ class RealtimeUavClassifier:
         model_weights_dir: Path,
         runtime_contract: dict[str, Any],
         *,
-        device: Optional[str | torch.device] = None,
+        device: Optional[str] = None,
     ) -> None:
-        self.model_state_path = resolve_model_state_path(model_weights_dir)
-        checkpoint = torch.load(
-            self.model_state_path,
-            map_location="cpu",
-            weights_only=True,
+        self.model_path, self.manifest_path = resolve_model_artifact_paths(
+            model_weights_dir
         )
-        if not isinstance(checkpoint, dict):
-            raise ValueError("Model checkpoint must contain a metadata dictionary")
-        self._validate_checkpoint(checkpoint, runtime_contract)
-        architecture = checkpoint["architecture"]
-        self.model = MmHawkeyeLSTM(**architecture)
-        self.model.load_state_dict(checkpoint["state_dict"], strict=True)
-        selected_device = (
-            torch.device(device)
-            if device is not None
-            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"Model manifest is not valid JSON: {self.manifest_path}"
+            ) from exc
+        if not isinstance(manifest, dict):
+            raise ValueError("Model manifest must contain a metadata object")
+        self._validate_manifest(manifest, runtime_contract)
+        external_data_name = manifest["artifacts"].get("onnx_data")
+        self.external_data_path: Optional[Path] = None
+        if external_data_name is not None:
+            self.external_data_path = self.model_path.parent / external_data_name
+            if not self.external_data_path.is_file():
+                raise FileNotFoundError(
+                    "ONNX external data is missing: expected "
+                    f"{self.external_data_path}"
+                )
+
+        ort = _load_onnxruntime()
+        providers = self._select_providers(ort, device)
+        self.session = ort.InferenceSession(
+            str(self.model_path),
+            providers=providers,
         )
-        self.device = selected_device
-        self.model.to(self.device).eval()
-        self.mean = float(checkpoint["normalization"]["mean"])
-        self.std = float(checkpoint["normalization"]["std"])
-        self.profile_fingerprint = str(checkpoint["profile_fingerprint"])
-        self.feature_fingerprint = str(checkpoint["feature_fingerprint"])
-        self.feature_version = str(checkpoint["feature_version"])
+        self._validate_onnx_interface()
+        self.providers = list(self.session.get_providers())
+        self.device = "cuda" if "CUDAExecutionProvider" in self.providers else "cpu"
+
+        self.mean = float(manifest["normalization"]["mean"])
+        self.std = float(manifest["normalization"]["std"])
+        dataset = manifest["dataset"]
+        self.profile_fingerprint = str(dataset["profile_fingerprint"])
+        self.feature_fingerprint = str(dataset["feature_fingerprint"])
+        self.feature_version = str(dataset["feature_version"])
         self.score_history: deque[float] = deque(maxlen=SEGMENT_FRAMES)
         self.previous_history_frames = 0
 
     @staticmethod
-    def _validate_checkpoint(
-        checkpoint: dict[str, Any],
+    def _validate_manifest(
+        manifest: dict[str, Any],
         runtime_contract: dict[str, Any],
     ) -> None:
         required = {
-            "state_dict",
+            "artifacts",
             "architecture",
-            "input_shape",
+            "input_contract",
             "label_to_index",
             "normalization",
-            "profile_fingerprint",
-            "feature_fingerprint",
-            "feature_version",
+            "dataset",
         }
-        missing = sorted(required - checkpoint.keys())
+        missing = sorted(required - manifest.keys())
         if missing:
-            raise ValueError(f"Model checkpoint is missing fields: {missing}")
-        if list(checkpoint["input_shape"]) != [SEGMENT_FRAMES, DOPPLER_BINS]:
-            raise ValueError("Model input shape is not compatible with Mini4 live data")
-        if checkpoint["label_to_index"] != LABEL_TO_INDEX:
+            raise ValueError(f"Model manifest is missing fields: {missing}")
+        artifacts = manifest["artifacts"]
+        if (
+            not isinstance(artifacts, dict)
+            or artifacts.get("onnx") != DEFAULT_MODEL_NAME
+        ):
+            raise ValueError(f"Model manifest must reference {DEFAULT_MODEL_NAME}")
+        external_data_name = artifacts.get("onnx_data")
+        if external_data_name is not None and (
+            not isinstance(external_data_name, str)
+            or Path(external_data_name).name != external_data_name
+        ):
+            raise ValueError("Model manifest has an invalid ONNX external data name")
+        input_contract = manifest["input_contract"]
+        expected_shape = ["batch", SEGMENT_FRAMES, DOPPLER_BINS]
+        if (
+            not isinstance(input_contract, dict)
+            or input_contract.get("dtype") != "float32"
+            or input_contract.get("shape") != expected_shape
+        ):
+            raise ValueError("ONNX input contract is not compatible with Mini4 live data")
+        if manifest["label_to_index"] != LABEL_TO_INDEX:
             raise ValueError("Model label order must be other=0 and uav=1")
-        architecture = checkpoint["architecture"]
+        architecture = manifest["architecture"]
         expected_architecture = {
             "input_size": DOPPLER_BINS,
             "hidden_size": 128,
@@ -184,7 +190,7 @@ class RealtimeUavClassifier:
                 "Model architecture is incompatible: "
                 f"expected={expected_architecture}, observed={architecture}"
             )
-        normalization = checkpoint["normalization"]
+        normalization = manifest["normalization"]
         try:
             mean = float(normalization["mean"])
             std = float(normalization["std"])
@@ -192,29 +198,90 @@ class RealtimeUavClassifier:
             raise ValueError("Model normalization metadata is invalid") from exc
         if not math.isfinite(mean) or not math.isfinite(std) or std <= 0.0:
             raise ValueError("Model normalization values must be finite and non-zero")
+        dataset = manifest["dataset"]
+        if not isinstance(dataset, dict):
+            raise ValueError("Model dataset metadata must be an object")
         for field in (
             "profile_fingerprint",
             "feature_fingerprint",
             "feature_version",
         ):
             observed = runtime_contract.get(field)
-            expected = checkpoint.get(field)
+            expected = dataset.get(field)
             if observed != expected:
                 raise ValueError(
                     f"Model {field} mismatch: expected={expected}, observed={observed}"
                 )
 
+    @staticmethod
+    def _select_providers(ort: Any, device: Optional[str]) -> list[str]:
+        available = list(ort.get_available_providers())
+        requested = device.lower() if device is not None else None
+        if requested is not None and requested not in {"cpu", "cuda", "cuda:0"}:
+            raise ValueError("ONNX device must be 'cpu' or 'cuda'")
+        if requested in {"cuda", "cuda:0"}:
+            if "CUDAExecutionProvider" not in available:
+                raise RuntimeError("ONNX Runtime CUDAExecutionProvider is not available")
+            providers = ["CUDAExecutionProvider"]
+            if "CPUExecutionProvider" in available:
+                providers.append("CPUExecutionProvider")
+            return providers
+        if requested == "cpu":
+            if "CPUExecutionProvider" not in available:
+                raise RuntimeError("ONNX Runtime CPUExecutionProvider is not available")
+            return ["CPUExecutionProvider"]
+        if "CUDAExecutionProvider" in available:
+            providers = ["CUDAExecutionProvider"]
+            if "CPUExecutionProvider" in available:
+                providers.append("CPUExecutionProvider")
+            return providers
+        if "CPUExecutionProvider" in available:
+            return ["CPUExecutionProvider"]
+        raise RuntimeError("ONNX Runtime has no supported CPU or CUDA provider")
+
+    def _validate_onnx_interface(self) -> None:
+        inputs = self.session.get_inputs()
+        outputs = self.session.get_outputs()
+        if len(inputs) != 1:
+            raise ValueError("ONNX model must have exactly one input")
+        model_input = inputs[0]
+        if (
+            model_input.name != "doppler_time"
+            or model_input.type != "tensor(float)"
+            or list(model_input.shape[1:]) != [SEGMENT_FRAMES, DOPPLER_BINS]
+        ):
+            raise ValueError(
+                "ONNX input must be float32 doppler_time with shape [batch, 36, 64]"
+            )
+        if len(outputs) != 1:
+            raise ValueError("ONNX model must have exactly one output")
+        model_output = outputs[0]
+        if (
+            model_output.name != "logits"
+            or model_output.type != "tensor(float)"
+            or list(model_output.shape[1:]) != [len(LABEL_TO_INDEX)]
+        ):
+            raise ValueError("ONNX output must be float32 logits with shape [batch, 2]")
+
     @property
     def metadata(self) -> dict[str, Any]:
         return {
             "enabled": True,
-            "model_state_path": str(self.model_state_path),
+            "runtime": "onnxruntime",
+            "model_path": str(self.model_path),
+            "manifest_path": str(self.manifest_path),
+            "external_data_path": (
+                str(self.external_data_path)
+                if self.external_data_path is not None
+                else None
+            ),
             "input_shape": [SEGMENT_FRAMES, DOPPLER_BINS],
             "label_to_index": dict(LABEL_TO_INDEX),
             "profile_fingerprint": self.profile_fingerprint,
             "feature_fingerprint": self.feature_fingerprint,
             "feature_version": self.feature_version,
-            "device": str(self.device),
+            "device": self.device,
+            "providers": list(self.providers),
         }
 
     def reset(self) -> None:
@@ -270,11 +337,24 @@ class RealtimeUavClassifier:
         features = align_doppler_time(history)
         normalized = ((features - self.mean) / self.std).astype(np.float32)
         started = time.perf_counter()
-        with torch.inference_mode():
-            tensor = torch.from_numpy(normalized[None]).to(self.device)
-            logits = self.model(tensor)
-            probability_values = torch.softmax(logits, dim=1)[0].cpu().numpy()
+        logits = np.asarray(
+            self.session.run(
+                ["logits"],
+                {"doppler_time": normalized[None]},
+            )[0],
+            dtype=np.float32,
+        )
         inference_ms = (time.perf_counter() - started) * 1_000.0
+        if (
+            logits.shape != (1, len(LABEL_TO_INDEX))
+            or not np.isfinite(logits).all()
+        ):
+            raise RuntimeError(
+                "ONNX model returned invalid logits; expected one finite two-class row"
+            )
+        shifted_logits = logits[0] - np.max(logits[0])
+        exponentials = np.exp(shifted_logits)
+        probability_values = exponentials / np.sum(exponentials)
         probabilities = {
             label: float(probability_values[index])
             for label, index in LABEL_TO_INDEX.items()

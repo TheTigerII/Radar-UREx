@@ -42,7 +42,7 @@ history after PMM tracking:
 36-frame target-gated Doppler-Time history
   -> capture-threshold PMM quality gate
   -> training-identical alignment and normalization
-  -> two-layer PyTorch LSTM
+  -> two-layer LSTM through ONNX Runtime
   -> other/UAV probabilities in JSONL and display status
 ```
 
@@ -207,12 +207,14 @@ under `training_output/mmhawkeye_lstm/`. The manifest records preprocessing,
 labels, split membership, dataset hashes, radar/feature fingerprints,
 hyperparameters, software versions, test metrics, and PyTorch/ONNX parity.
 The ONNX interface is float32 `doppler_time` with shape `[batch, 36, 64]` and
-two output logits. A trained `model_state.pt` must be copied into the
-`model_weights/` directory before it can be enabled for live classification.
+two output logits. A trained `model.onnx`, its external tensor-data sidecar when
+declared, and `manifest.json` must be copied into the `model_weights/` directory
+before live classification can be enabled.
 
-`inference.py` loads the checkpoint with PyTorch's weights-only loader and
-rejects missing metadata, unexpected label order, architecture or input-shape
-changes, invalid normalization, and mismatched profile/feature fingerprints.
+`inference.py` loads `model.onnx` with ONNX Runtime and validates its manifest
+and graph interface. It rejects missing metadata, unexpected label order,
+architecture or input-shape changes, invalid normalization, and mismatched
+profile/feature fingerprints.
 It maintains the rolling PMM score window, returns `warming_up` until all 36
 frames are present, and returns `unknown` if the maximum score is below the
 runtime threshold. Otherwise it applies the notebook's dB-to-amplitude,

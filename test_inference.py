@@ -1,18 +1,18 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
-import torch
 
 from inference import (
     DOPPLER_BINS,
     LABEL_TO_INDEX,
     SEGMENT_FRAMES,
-    MmHawkeyeLSTM,
     RealtimeUavClassifier,
     align_doppler_time,
-    resolve_model_state_path,
+    resolve_model_artifact_paths,
 )
 
 
@@ -24,26 +24,74 @@ def _runtime_contract() -> dict:
     }
 
 
-def _write_checkpoint(directory: Path, **overrides) -> Path:
-    model = MmHawkeyeLSTM()
-    checkpoint = {
-        "state_dict": model.state_dict(),
+def _write_artifacts(directory: Path, **dataset_overrides) -> tuple[Path, Path]:
+    dataset = {**_runtime_contract(), **dataset_overrides}
+    manifest = {
+        "artifacts": {"pytorch": "model_state.pt", "onnx": "model.onnx"},
         "architecture": {
             "input_size": DOPPLER_BINS,
             "hidden_size": 128,
             "num_layers": 2,
             "num_classes": 2,
         },
-        "input_shape": [SEGMENT_FRAMES, DOPPLER_BINS],
+        "input_contract": {
+            "dtype": "float32",
+            "shape": ["batch", SEGMENT_FRAMES, DOPPLER_BINS],
+        },
         "label_to_index": dict(LABEL_TO_INDEX),
         "normalization": {"mean": 0.0, "std": 1.0},
-        **_runtime_contract(),
+        "dataset": dataset,
     }
-    checkpoint.update(overrides)
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / "model_state.pt"
-    torch.save(checkpoint, path)
-    return path
+    model_path = directory / "model.onnx"
+    manifest_path = directory / "manifest.json"
+    model_path.write_bytes(b"test ONNX model")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return model_path, manifest_path
+
+
+class _FakeNodeArg:
+    def __init__(self, name: str, shape: list) -> None:
+        self.name = name
+        self.shape = shape
+        self.type = "tensor(float)"
+
+
+class _FakeSession:
+    def __init__(self, model_path: str, *, providers: list[str]) -> None:
+        self.model_path = model_path
+        self.providers = providers
+
+    def get_inputs(self) -> list[_FakeNodeArg]:
+        return [_FakeNodeArg("doppler_time", ["batch", SEGMENT_FRAMES, DOPPLER_BINS])]
+
+    def get_outputs(self) -> list[_FakeNodeArg]:
+        return [_FakeNodeArg("logits", ["batch", len(LABEL_TO_INDEX)])]
+
+    def get_providers(self) -> list[str]:
+        return list(self.providers)
+
+    def run(
+        self,
+        output_names: list[str],
+        inputs: dict[str, np.ndarray],
+    ) -> list[np.ndarray]:
+        batch_size = inputs["doppler_time"].shape[0]
+        logits = np.array([[0.25, 0.75]], dtype=np.float32)
+        return [np.tile(logits, (batch_size, 1))]
+
+
+class _FakeOrt:
+    InferenceSession = _FakeSession
+
+    @staticmethod
+    def get_available_providers() -> list[str]:
+        return ["CPUExecutionProvider"]
+
+
+def _classifier(weights: Path) -> RealtimeUavClassifier:
+    with patch("inference._load_onnxruntime", return_value=_FakeOrt):
+        return RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
 
 
 def _history(frame_count: int, peak_bin: int = 20) -> np.ndarray:
@@ -69,28 +117,35 @@ class PreprocessingTests(unittest.TestCase):
 
 
 class RealtimeClassifierTests(unittest.TestCase):
-    def test_missing_model_state_is_reported(self) -> None:
+    def test_missing_onnx_artifacts_are_reported(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(FileNotFoundError, "model_state.pt"):
-                resolve_model_state_path(Path(directory))
+            with self.assertRaisesRegex(FileNotFoundError, "model.onnx"):
+                resolve_model_artifact_paths(Path(directory))
 
     def test_contract_mismatch_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             weights = Path(directory) / "model_weights"
-            _write_checkpoint(weights, feature_fingerprint="different")
+            _write_artifacts(weights, feature_fingerprint="different")
 
             with self.assertRaisesRegex(ValueError, "feature_fingerprint mismatch"):
+                RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
+
+    def test_declared_external_data_must_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            weights = Path(directory) / "model_weights"
+            _, manifest_path = _write_artifacts(weights)
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["artifacts"]["onnx_data"] = "model.onnx.data"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(FileNotFoundError, "external data"):
                 RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
 
     def test_warms_up_then_classifies_a_full_quality_gated_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             weights = Path(directory) / "model_weights"
-            _write_checkpoint(weights)
-            classifier = RealtimeUavClassifier(
-                weights,
-                _runtime_contract(),
-                device="cpu",
-            )
+            _write_artifacts(weights)
+            classifier = _classifier(weights)
 
             for frame_count in range(1, SEGMENT_FRAMES):
                 result = classifier.classify(
@@ -116,12 +171,8 @@ class RealtimeClassifierTests(unittest.TestCase):
     def test_full_low_score_history_stays_unknown(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             weights = Path(directory) / "model_weights"
-            _write_checkpoint(weights)
-            classifier = RealtimeUavClassifier(
-                weights,
-                _runtime_contract(),
-                device="cpu",
-            )
+            _write_artifacts(weights)
+            classifier = _classifier(weights)
             result = None
             for frame_count in range(1, SEGMENT_FRAMES + 1):
                 result = classifier.classify(

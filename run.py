@@ -857,11 +857,29 @@ def main() -> int:
         model_weights_dir = args.model_weights_dir
         if not model_weights_dir.is_absolute():
             model_weights_dir = ROOT / model_weights_dir
-        expected_model = model_weights_dir / "model_state.pt"
-        if not expected_model.is_file():
+        expected_artifacts = [
+            model_weights_dir / "model.onnx",
+            model_weights_dir / "manifest.json",
+        ]
+        manifest_path = model_weights_dir / "manifest.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                external_data_name = manifest.get("artifacts", {}).get("onnx_data")
+                if (
+                    isinstance(external_data_name, str)
+                    and Path(external_data_name).name == external_data_name
+                ):
+                    expected_artifacts.append(model_weights_dir / external_data_name)
+            except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+                pass
+        missing_artifacts = [
+            path for path in expected_artifacts if not path.is_file()
+        ]
+        if missing_artifacts:
             print(
-                "Real-time classification model is missing: "
-                f"expected {expected_model}",
+                "Real-time classification ONNX artifacts are missing: expected "
+                + ", ".join(str(path) for path in missing_artifacts),
                 file=sys.stderr,
             )
             return 2

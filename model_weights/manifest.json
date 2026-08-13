@@ -1,0 +1,53 @@
+{
+  "model": "mmHawkeye paper-inspired two-layer LSTM",
+  "artifacts": {
+    "pytorch": "model_state.pt",
+    "onnx": "model.onnx",
+    "onnx_data": "model.onnx.data"
+  },
+  "label_to_index": {
+    "other": 0,
+    "uav": 1
+  },
+  "input_contract": {
+    "dtype": "float32",
+    "shape": [
+      "batch",
+      36,
+      64
+    ],
+    "axis_order": [
+      "batch",
+      "time",
+      "centered_doppler_bin"
+    ]
+  },
+  "architecture": {
+    "input_size": 64,
+    "hidden_size": 128,
+    "num_layers": 2,
+    "num_classes": 2
+  },
+  "normalization": {
+    "mean": 5.65794093057701,
+    "std": 2.6453634706641043
+  },
+  "dataset": {
+    "profile_fingerprint": "9fb8c5db1aed60f2012c3d1acd329cf3044fae62353e29c9ee573719ff5af700",
+    "feature_fingerprint": "4e6967785d327cb342e08f3bde0e8c05dcd7547dbec5e909693ee7ee63885ddc",
+    "feature_version": "mini4-pmm-tracking-v4"
+  },
+  "training": {
+    "seed": 42,
+    "best_epoch": 51,
+    "best_validation_loss": 0.13489340458597457
+  },
+  "test_metrics": {
+    "samples": 42,
+    "accuracy": 0.8809523809523809,
+    "precision": 0.8636363636363636,
+    "recall": 0.9047619047619048,
+    "f1": 0.8837209302325582,
+    "roc_auc": 0.9501133786848072
+  }
+}

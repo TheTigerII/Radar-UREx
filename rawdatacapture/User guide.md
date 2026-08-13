@@ -16,7 +16,7 @@ source .venv/bin/activate
 python -m pip install \
   "numpy<3" "scipy<2" \
   "pyqtgraph>=0.14,<0.15" "PySide6>=6.8,<7" "PyOpenGL>=3.1,<4" \
-  pyserial
+  pyserial onnxruntime
 ```
 
 The radar must run SDK CLI-compatible firmware. Connect the IWR6843 command
@@ -111,7 +111,9 @@ Keep the monitored area target-free during the first 30 seconds. The status is
 - `--processing-queue-size` and `--packet-queue-size`: bounded queue capacities.
 - `--classification` and `--no-classification`: explicitly enable or disable
   real-time classification without an interactive prompt.
-- `--model-weights-dir`: directory containing the compatible `model_state.pt`.
+- `--model-weights-dir`: directory containing compatible `model.onnx` and
+  `manifest.json` artifacts, plus `model.onnx.data` when declared by the
+  manifest.
 - `--dataset-destination`: select `dataset`, `uav`, or `other` without the
   combined-display save prompt.
 
@@ -206,21 +208,24 @@ training_output/mmhawkeye_lstm/manifest.json
 
 The ONNX model accepts float32 `doppler_time` tensors shaped `[batch, 36, 64]`
 and returns two logits ordered as `other`, then `uav`. Exporting the model does
-not install it into the live capture path. Install the PyTorch weights after a
-successful training and evaluation run:
+not install it into the live capture path. Install the ONNX model and its
+manifest after a successful training and evaluation run:
 
 ```bash
 mkdir -p model_weights
-cp training_output/mmhawkeye_lstm/model_state.pt model_weights/model_state.pt
+cp training_output/mmhawkeye_lstm/model.onnx* model_weights/
+cp training_output/mmhawkeye_lstm/manifest.json model_weights/manifest.json
 ```
 
 Then select `yes` at the classification prompt, or use `--classification` for
 a non-interactive launch. Use `--no-classification` to explicitly disable it.
-The launcher expects `model_weights/model_state.pt` by default. It exits before
-hardware startup if classification is enabled and the file is missing. The
-worker also rejects weights whose profile fingerprint, feature fingerprint,
-feature version, input shape, label order, normalization, or architecture does
-not match the running pipeline.
+The launcher expects `model_weights/model.onnx`,
+`model_weights/manifest.json`, and any external tensor-data file declared in
+the manifest. It exits before hardware startup if classification is enabled
+and an artifact is missing. The worker also rejects artifacts whose profile
+fingerprint, feature fingerprint, feature version, input shape, label order,
+normalization, architecture, or ONNX interface does not match the running
+pipeline.
 
 After 36 tracked frames pass the PMM gate, the point-cloud and combined status
 text includes `UAV` or `OTHER` with confidence. Before that it reports warm-up;
@@ -284,6 +289,7 @@ the captures. Re-record them with the same profile and PMM settings, or train
 separate models for the incompatible capture contracts.
 
 If live classification fails during startup, confirm that
-`model_weights/model_state.pt` came from this repository's current notebook and
+`model_weights/model.onnx`, its external data when present, and
+`model_weights/manifest.json` came from this repository's current notebook and
 capture contract. Do not bypass a fingerprint mismatch by editing checkpoint
 metadata.
