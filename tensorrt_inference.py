@@ -10,7 +10,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -87,6 +87,7 @@ def create_inference_engine(
     *,
     device: str = "auto",
     parity_data_path: Optional[Path] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> DroneBirdInference | "TensorRTDroneBirdInference":
     """Create the requested backend; CUDA failures are deliberately fatal."""
     resolved = resolve_classification_device(device)
@@ -97,6 +98,7 @@ def create_inference_engine(
         config,
         profile_path,
         parity_data_path=parity_data_path,
+        progress_callback=progress_callback,
     )
 
 
@@ -398,10 +400,12 @@ class TensorRTDroneBirdInference:
         profile_path: Path,
         *,
         parity_data_path: Optional[Path] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
         self.artifact_dir = Path(artifact_dir)
         self.profile_path = Path(profile_path)
         self.config = config
+        self._report_progress = progress_callback or (lambda _message: None)
         self._history: deque[np.ndarray] = deque(maxlen=WINDOW_STEPS)
         self._trt = _import_tensorrt()
         self._cudart = _import_cuda_runtime()
@@ -419,7 +423,15 @@ class TensorRTDroneBirdInference:
         self._load_deployment_artifacts()
         expected = self._expected_metadata()
         if not self._cache_is_valid(expected):
+            self._report_progress(
+                "TensorRT engine cache is missing or stale; compiling FP16 "
+                f"engine from {self.onnx_path}. This can take several minutes."
+            )
             self._build_engine(expected)
+        else:
+            self._report_progress(
+                f"Using cached TensorRT FP16 engine: {self.engine_path}"
+            )
         self.runtime = _TensorRTRuntime(
             self.engine_path,
             self._trt,
@@ -713,13 +725,22 @@ class TensorRTDroneBirdInference:
             ENGINE_WORKSPACE_BYTES,
         )
         build_config.set_flag(self._trt.BuilderFlag.FP16)
+        self._report_progress(
+            "TensorRT ONNX parsing complete; compiling optimized FP16 engine..."
+        )
         serialized = builder.build_serialized_network(network, build_config)
         if serialized is None:
             raise TensorRTInferenceError("TensorRT engine build returned no engine")
         temporary_engine = self.engine_path.with_suffix(".engine.tmp")
         temporary_engine.write_bytes(bytes(serialized))
         os.replace(temporary_engine, self.engine_path)
+        self._report_progress(
+            f"TensorRT engine compiled: {self.engine_path}"
+        )
 
+        self._report_progress(
+            f"Validating TensorRT engine with parity data: {self.parity_data_path}"
+        )
         runtime = _TensorRTRuntime(
             self.engine_path,
             self._trt,
@@ -750,6 +771,12 @@ class TensorRTDroneBirdInference:
             encoding="utf-8",
         )
         os.replace(temporary_metadata, self.metadata_path)
+        self._report_progress(
+            "TensorRT parity validation passed: "
+            f"windows={parity['windows']}, "
+            f"max_probability_error={parity['max_probability_error']:.6g}. "
+            f"Engine cache ready: {self.engine_path}"
+        )
 
     def _validate_parity(
         self,

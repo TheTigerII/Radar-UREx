@@ -4,7 +4,7 @@ import unittest
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import numpy as np
 
@@ -60,6 +60,26 @@ class DeviceResolutionTests(unittest.TestCase):
                     Path("profile.cfg"),
                     device="cuda",
                 )
+
+    def test_cuda_creation_forwards_progress_callback(self):
+        progress_messages = []
+        with patch(
+            "tensorrt_inference.TensorRTDroneBirdInference"
+        ) as inference_class:
+            create_inference_engine(
+                Path("model_weights"),
+                SimpleNamespace(),
+                Path("profile.cfg"),
+                device="cuda",
+                progress_callback=progress_messages.append,
+            )
+        inference_class.assert_called_once_with(
+            Path("model_weights"),
+            ANY,
+            Path("profile.cfg"),
+            parity_data_path=None,
+            progress_callback=progress_messages.append,
+        )
 
 
 class EngineCacheTests(unittest.TestCase):

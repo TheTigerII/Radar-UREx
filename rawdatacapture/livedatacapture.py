@@ -4143,6 +4143,31 @@ def _drain_log_queue(log_queue: mp.Queue) -> None:
             return
 
 
+def _wait_for_worker_status(
+    status_queue: mp.Queue,
+    log_queue: mp.Queue,
+    timeout_seconds: float,
+    worker_label: str,
+) -> dict[str, Any]:
+    """Wait for worker startup while streaming queued progress to the terminal."""
+    deadline = time.monotonic() + float(timeout_seconds)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            _drain_log_queue(log_queue)
+            raise CaptureStartupError(
+                f"{worker_label} did not report readiness within "
+                f"{timeout_seconds:g} seconds"
+            )
+        try:
+            status = status_queue.get(timeout=min(0.5, remaining))
+        except queue.Empty:
+            _drain_log_queue(log_queue)
+            continue
+        _drain_log_queue(log_queue)
+        return status
+
+
 def _request_processor_stop(
     frame_queue: mp.Queue,
     timeout_seconds: float = 5.0,
@@ -4244,6 +4269,7 @@ def _run_rotor_postprocessor(
             config,
             classification_profile_path,
             device=classification_device,
+            progress_callback=worker_emit,
         )
         processed_writer = ProcessedOutputWriter(
             processed_output,
@@ -4445,6 +4471,7 @@ def _run_frame_processor_impl(
             config,
             classification_profile_path,
             device=classification_device,
+            progress_callback=worker_emit,
         )
         worker_emit(
             "CNN classification enabled: "
@@ -6003,14 +6030,12 @@ def main() -> None:
                 name="RotorPostProcessor",
             )
             rotor_postprocessor.start()
-            try:
-                rotor_post_status = rotor_post_status_queue.get(timeout=180.0)
-            except queue.Empty as exc:
-                raise CaptureStartupError(
-                    "Rotor GPU post-processor did not report readiness within "
-                    "180 seconds"
-                ) from exc
-            _drain_log_queue(log_queue)
+            rotor_post_status = _wait_for_worker_status(
+                rotor_post_status_queue,
+                log_queue,
+                180.0,
+                "Rotor GPU post-processor",
+            )
             if rotor_post_status.get("state") != "ready":
                 raise CaptureStartupError(
                     rotor_post_status.get(
@@ -6092,16 +6117,12 @@ def main() -> None:
         processor_startup_timeout_s = (
             180.0 if resolved_classification_device == "cuda" else 30.0
         )
-        try:
-            processor_status = processor_status_queue.get(
-                timeout=processor_startup_timeout_s
-            )
-        except queue.Empty as exc:
-            raise CaptureStartupError(
-                "Radar frame processor did not report readiness within "
-                f"{processor_startup_timeout_s:g} seconds"
-            ) from exc
-        _drain_log_queue(log_queue)
+        processor_status = _wait_for_worker_status(
+            processor_status_queue,
+            log_queue,
+            processor_startup_timeout_s,
+            "Radar frame processor",
+        )
         if processor_status.get("state") != "ready":
             raise CaptureStartupError(
                 processor_status.get(
