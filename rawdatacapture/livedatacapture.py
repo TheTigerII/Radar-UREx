@@ -85,6 +85,7 @@ from inference import (
     DOPPLER_BINS,
     FEATURE_VERSION,
     TARGET_GATE_BINS,
+    WINDOW_STEPS,
     DroneBirdInference,
     InferenceResult,
     doppler_cube_to_feature_step,
@@ -348,6 +349,7 @@ class PointCloudDisplayPayload:
     static_reference: StaticReferenceStatus
     static_candidate_count: int = 0
     static_validation: str = "disabled"
+    classification: Optional[InferenceResult] = None
 
 
 @dataclass(frozen=True)
@@ -2121,6 +2123,10 @@ class DisplayPayloadSink:
             range_axis_m,
             target_track,
             target_changed=target_changed,
+        )
+        point_cloud = replace(
+            point_cloud,
+            classification=self.latest_classification,
         )
         if not build_micro_doppler:
             return CombinedDisplayPayload(
@@ -4068,6 +4074,29 @@ def _draw_point_cloud_pyqtgraph(
     )
     if reference_text:
         status += f"\n{reference_text}"
+    classification = point_cloud.classification
+    if classification is not None:
+        if classification.status == "ready":
+            probability_text = (
+                f" · p_drone {classification.p_drone:.1%}"
+                if classification.p_drone is not None
+                else ""
+            )
+            threshold_text = (
+                f" · threshold {classification.threshold:.1%}"
+                if classification.threshold is not None
+                else ""
+            )
+            status += (
+                f"\nClassification: {classification.label.upper()}"
+                f"{probability_text}{threshold_text}"
+            )
+        else:
+            reason = classification.reason or classification.status
+            status += (
+                f"\nClassification: UNKNOWN · {reason} · "
+                f"history {classification.valid_steps}/{WINDOW_STEPS}"
+            )
     status_label.setText(status)
 
 
@@ -4261,8 +4290,6 @@ def _run_rotor_postprocessor(
     inference_engine: Optional[Any] = None
     processed_writer: Optional[ProcessedOutputWriter] = None
     timings = ProcessingTimingStats()
-    last_classification_emit_s = 0.0
-    last_classification_signature: Optional[tuple[str, Optional[str]]] = None
     try:
         inference_engine = create_inference_engine(
             classification_artifact_dir,
@@ -4330,22 +4357,6 @@ def _run_rotor_postprocessor(
                 "classification",
                 time.perf_counter() - inference_started,
             )
-            signature = (classification.label, classification.reason)
-            now = time.monotonic()
-            if (
-                signature != last_classification_signature
-                or now - last_classification_emit_s >= 1.0
-            ):
-                worker_emit(
-                    CLASSIFICATION_RESULT_PREFIX
-                    + json.dumps(
-                        classification.to_dict(),
-                        separators=(",", ":"),
-                    )
-                )
-                last_classification_signature = signature
-                last_classification_emit_s = now
-
             if item.save_update and processed_writer.enabled:
                 result = item.rotor_result
                 serialization_started = time.perf_counter()
@@ -4544,7 +4555,6 @@ def _run_frame_processor_impl(
         rotor_rpm_min=rotor_rpm_min,
         rotor_rpm_max=rotor_rpm_max,
         inference_engine=inference_engine,
-        classification_emit_func=worker_emit,
         rotor_post_queue=(rotor_post_queue if use_rotor_postprocess else None),
         rotor_post_failure_event=(
             rotor_post_failure_event if use_rotor_postprocess else None

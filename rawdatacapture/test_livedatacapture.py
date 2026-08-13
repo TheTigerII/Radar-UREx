@@ -822,6 +822,7 @@ class PointCloudBoundsTests(unittest.TestCase):
         target_track: TargetTrack | None = None,
         target_source: str | None = None,
         static_reference: StaticReferenceStatus | None = None,
+        classification: InferenceResult | None = None,
     ) -> PointCloudDisplayPayload:
         return PointCloudDisplayPayload(
             points=(
@@ -851,6 +852,7 @@ class PointCloudBoundsTests(unittest.TestCase):
                 if static_reference is not None
                 else StaticReferenceStatus(False, False, 0, 0)
             ),
+            classification=classification,
         )
 
     def test_draw_updates_points_and_cluster_centers(self) -> None:
@@ -943,6 +945,58 @@ class PointCloudBoundsTests(unittest.TestCase):
             "Calibrating static reference 12/30",
             status.setText.call_args.args[0],
         )
+
+    def test_draw_shows_ready_classification(self) -> None:
+        status = Mock()
+        _draw_point_cloud_pyqtgraph(
+            self._scatter_items(),
+            status,
+            self._payload(
+                classification=InferenceResult(
+                    label="drone",
+                    p_drone=0.91,
+                    threshold=0.60,
+                    status="ready",
+                    reason=None,
+                    valid_steps=48,
+                )
+            ),
+            10.0,
+            60.0,
+            30.0,
+            np.zeros((256, 3), dtype=np.uint8),
+        )
+
+        classification_text = status.setText.call_args.args[0]
+        self.assertIn("Classification: DRONE", classification_text)
+        self.assertIn("p_drone 91.0%", classification_text)
+        self.assertIn("threshold 60.0%", classification_text)
+
+    def test_draw_shows_classification_warmup(self) -> None:
+        status = Mock()
+        _draw_point_cloud_pyqtgraph(
+            self._scatter_items(),
+            status,
+            self._payload(
+                classification=InferenceResult(
+                    label="unknown",
+                    p_drone=None,
+                    threshold=0.60,
+                    status="waiting",
+                    reason="warming_up",
+                    valid_steps=17,
+                )
+            ),
+            10.0,
+            60.0,
+            30.0,
+            np.zeros((256, 3), dtype=np.uint8),
+        )
+
+        classification_text = status.setText.call_args.args[0]
+        self.assertIn("Classification: UNKNOWN", classification_text)
+        self.assertIn("warming_up", classification_text)
+        self.assertIn("history 17/48", classification_text)
 
 
 class SingleTargetTrackerTests(unittest.TestCase):

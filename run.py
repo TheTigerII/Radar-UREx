@@ -710,30 +710,16 @@ def report_pending_classifications(
     classification_queue: queue.SimpleQueue,
     latest: Optional[dict] = None,
 ) -> Optional[dict]:
+    """Drain live classification messages without printing them.
+
+    Classification is rendered in the PyQt display by the capture process.
+    The channel remains for compatibility with existing capture subprocesses.
+    """
     while True:
         try:
             latest = classification_queue.get_nowait()
         except queue.Empty:
             break
-        label = latest.get("label", "unknown")
-        if label in {"drone", "not_drone"}:
-            probability = latest.get("p_drone")
-            probability_text = (
-                f", p_drone={float(probability):.3f}"
-                if probability is not None
-                else ""
-            )
-            print(
-                f"Classification: {label.upper()}{probability_text}",
-                flush=True,
-            )
-        else:
-            print(
-                "Classification: UNKNOWN "
-                f"({latest.get('reason') or latest.get('status', 'waiting')}, "
-                f"valid_steps={int(latest.get('valid_steps', 0))}/48)",
-                flush=True,
-            )
     return latest
 
 

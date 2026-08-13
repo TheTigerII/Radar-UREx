@@ -459,7 +459,7 @@ class ClassificationResultChannelTests(unittest.TestCase):
 
         self.assertEqual(timeout, run.CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS)
 
-    def test_report_formats_ready_classification(self) -> None:
+    def test_report_drains_ready_classification_without_printing(self) -> None:
         result_queue = queue.SimpleQueue()
         result_queue.put(
             {
@@ -475,10 +475,7 @@ class ClassificationResultChannelTests(unittest.TestCase):
             latest = run.report_pending_classifications(result_queue)
 
         self.assertEqual(latest["label"], "not_drone")
-        output.assert_called_once_with(
-            "Classification: NOT_DRONE, p_drone=0.125",
-            flush=True,
-        )
+        output.assert_not_called()
 
 
 if __name__ == "__main__":

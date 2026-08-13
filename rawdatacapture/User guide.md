@@ -496,6 +496,12 @@ there. Classification stays `unknown`
 until 48 consecutive valid target frames are available and resets when target
 quality or identity is lost.
 
+In point-cloud and combined point-cloud + micro-Doppler modes, live
+classification is shown in the PyQt point-cloud status panel. It reports the
+warm-up history while waiting, then the label, calibrated `p_drone`, and
+decision threshold. Per-update classifications are not printed to the
+terminal; startup, TensorRT build progress, and errors remain terminal output.
+
 Dedicated rotor records additionally populate `rotor_micro_doppler` with raw
 and enhanced per-frame spectra, physical window times, the velocity axis,
 noise floor, adaptive `noise_gate_db` for each window, blade-flash score, RPM
