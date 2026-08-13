@@ -141,6 +141,22 @@ class RealtimeClassifierTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "external data"):
                 RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
 
+    def test_tensorrt_engine_is_preferred_for_default_device(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            weights = Path(directory) / "model_weights"
+            _write_artifacts(weights)
+            engine_path = weights / "model.fp16.engine"
+            engine_path.write_bytes(b"test TensorRT engine")
+            fake_session = object()
+
+            with patch("inference._TensorRtSession", return_value=fake_session):
+                classifier = RealtimeUavClassifier(weights, _runtime_contract())
+
+            self.assertIs(classifier.session, fake_session)
+            self.assertEqual(classifier.metadata["runtime"], "tensorrt")
+            self.assertEqual(classifier.metadata["device"], "cuda")
+            self.assertEqual(classifier.metadata["model_path"], str(engine_path))
+
     def test_warms_up_then_classifies_a_full_quality_gated_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             weights = Path(directory) / "model_weights"

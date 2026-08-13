@@ -19,6 +19,7 @@ CENTER_BIN = DOPPLER_BINS // 2
 CENTER_TOLERANCE_BINS = 1
 LABEL_TO_INDEX = {"other": 0, "uav": 1}
 DEFAULT_MODEL_NAME = "model.onnx"
+DEFAULT_TENSORRT_ENGINE_NAME = "model.fp16.engine"
 DEFAULT_MANIFEST_NAME = "manifest.json"
 
 
@@ -74,6 +75,152 @@ def _load_onnxruntime() -> Any:
     return ort
 
 
+def _load_tensorrt() -> tuple[Any, Any]:
+    try:
+        import tensorrt as trt
+        from cuda.bindings import runtime as cudart
+    except ImportError as exc:
+        raise RuntimeError(
+            "TensorRT and CUDA Python bindings are required to use the "
+            f"{DEFAULT_TENSORRT_ENGINE_NAME} classifier engine"
+        ) from exc
+    return trt, cudart
+
+
+class _TensorRtSession:
+    """Small synchronous TensorRT adapter with persistent device buffers."""
+
+    def __init__(self, engine_path: Path) -> None:
+        self.trt, self.cudart = _load_tensorrt()
+        self.logger = self.trt.Logger(self.trt.Logger.WARNING)
+        self.runtime = self.trt.Runtime(self.logger)
+        engine_bytes = engine_path.read_bytes()
+        self.engine = self.runtime.deserialize_cuda_engine(engine_bytes)
+        if self.engine is None:
+            raise RuntimeError(f"Could not deserialize TensorRT engine: {engine_path}")
+        self.context = self.engine.create_execution_context()
+        if self.context is None:
+            raise RuntimeError("Could not create TensorRT execution context")
+        self._validate_interface()
+        self.input = np.empty(
+            (1, SEGMENT_FRAMES, DOPPLER_BINS),
+            dtype=np.float32,
+        )
+        self.output = np.empty((1, len(LABEL_TO_INDEX)), dtype=np.float32)
+        self.stream = self._cuda_value(
+            self.cudart.cudaStreamCreate(),
+            "create TensorRT CUDA stream",
+        )
+        self.input_device = self._cuda_value(
+            self.cudart.cudaMalloc(self.input.nbytes),
+            "allocate TensorRT input buffer",
+        )
+        try:
+            self.output_device = self._cuda_value(
+                self.cudart.cudaMalloc(self.output.nbytes),
+                "allocate TensorRT output buffer",
+            )
+        except Exception:
+            self.cudart.cudaFree(self.input_device)
+            raise
+        if not self.context.set_tensor_address(
+            "doppler_time", int(self.input_device)
+        ) or not self.context.set_tensor_address("logits", int(self.output_device)):
+            self.close()
+            raise RuntimeError("Could not bind TensorRT input/output buffers")
+
+    def _cuda_value(self, result: tuple[Any, ...], operation: str) -> Any:
+        error, *values = result
+        if error != self.cudart.cudaError_t.cudaSuccess:
+            raise RuntimeError(f"CUDA failed to {operation}: {error}")
+        return values[0] if values else None
+
+    def _validate_interface(self) -> None:
+        names = {
+            self.engine.get_tensor_name(index)
+            for index in range(self.engine.num_io_tensors)
+        }
+        if names != {"doppler_time", "logits"}:
+            raise ValueError(
+                "TensorRT engine must expose doppler_time and logits tensors"
+            )
+        expected = {
+            "doppler_time": (1, SEGMENT_FRAMES, DOPPLER_BINS),
+            "logits": (1, len(LABEL_TO_INDEX)),
+        }
+        for name, shape in expected.items():
+            if tuple(self.engine.get_tensor_shape(name)) != shape:
+                raise ValueError(
+                    f"TensorRT {name} shape must be {shape}, got "
+                    f"{tuple(self.engine.get_tensor_shape(name))}"
+                )
+            if self.engine.get_tensor_dtype(name) != self.trt.float32:
+                raise ValueError(f"TensorRT {name} tensor must use float32 I/O")
+
+    def run(
+        self,
+        output_names: list[str],
+        inputs: dict[str, np.ndarray],
+    ) -> list[np.ndarray]:
+        if output_names != ["logits"] or set(inputs) != {"doppler_time"}:
+            raise ValueError("Unexpected TensorRT input or output names")
+        values = np.asarray(inputs["doppler_time"], dtype=np.float32)
+        if values.shape != self.input.shape:
+            raise ValueError(
+                f"TensorRT input must have shape {self.input.shape}, got {values.shape}"
+            )
+        np.copyto(self.input, values)
+        self._cuda_value(
+            self.cudart.cudaMemcpyAsync(
+                int(self.input_device),
+                self.input.ctypes.data,
+                self.input.nbytes,
+                self.cudart.cudaMemcpyKind.cudaMemcpyHostToDevice,
+                self.stream,
+            ),
+            "copy classifier input to the GPU",
+        )
+        if not self.context.execute_async_v3(int(self.stream)):
+            raise RuntimeError("TensorRT inference execution failed")
+        self._cuda_value(
+            self.cudart.cudaMemcpyAsync(
+                self.output.ctypes.data,
+                int(self.output_device),
+                self.output.nbytes,
+                self.cudart.cudaMemcpyKind.cudaMemcpyDeviceToHost,
+                self.stream,
+            ),
+            "copy classifier output from the GPU",
+        )
+        self._cuda_value(
+            self.cudart.cudaStreamSynchronize(self.stream),
+            "synchronize classifier inference",
+        )
+        return [self.output.copy()]
+
+    def close(self) -> None:
+        output_device = getattr(self, "output_device", None)
+        input_device = getattr(self, "input_device", None)
+        stream = getattr(self, "stream", None)
+        if stream is not None:
+            self.cudart.cudaStreamSynchronize(stream)
+        if output_device is not None:
+            self.cudart.cudaFree(output_device)
+            self.output_device = None
+        if input_device is not None:
+            self.cudart.cudaFree(input_device)
+            self.input_device = None
+        if stream is not None:
+            self.cudart.cudaStreamDestroy(stream)
+            self.stream = None
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 @dataclass(frozen=True)
 class ClassificationResult:
     status: str
@@ -102,6 +249,7 @@ class RealtimeUavClassifier:
         self.model_path, self.manifest_path = resolve_model_artifact_paths(
             model_weights_dir
         )
+        self.engine_path = self.model_path.parent / DEFAULT_TENSORRT_ENGINE_NAME
         try:
             manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -121,15 +269,25 @@ class RealtimeUavClassifier:
                     f"{self.external_data_path}"
                 )
 
-        ort = _load_onnxruntime()
-        providers = self._select_providers(ort, device)
-        self.session = ort.InferenceSession(
-            str(self.model_path),
-            providers=providers,
-        )
-        self._validate_onnx_interface()
-        self.providers = list(self.session.get_providers())
-        self.device = "cuda" if "CUDAExecutionProvider" in self.providers else "cpu"
+        requested_device = device.lower() if device is not None else None
+        if self.engine_path.is_file() and requested_device != "cpu":
+            self.session = _TensorRtSession(self.engine_path)
+            self.runtime_name = "tensorrt"
+            self.providers = ["TensorRT"]
+            self.device = "cuda"
+        else:
+            ort = _load_onnxruntime()
+            providers = self._select_providers(ort, device)
+            self.session = ort.InferenceSession(
+                str(self.model_path),
+                providers=providers,
+            )
+            self._validate_onnx_interface()
+            self.runtime_name = "onnxruntime"
+            self.providers = list(self.session.get_providers())
+            self.device = (
+                "cuda" if "CUDAExecutionProvider" in self.providers else "cpu"
+            )
 
         self.mean = float(manifest["normalization"]["mean"])
         self.std = float(manifest["normalization"]["std"])
@@ -267,8 +425,13 @@ class RealtimeUavClassifier:
     def metadata(self) -> dict[str, Any]:
         return {
             "enabled": True,
-            "runtime": "onnxruntime",
-            "model_path": str(self.model_path),
+            "runtime": self.runtime_name,
+            "model_path": str(
+                self.engine_path
+                if self.runtime_name == "tensorrt"
+                else self.model_path
+            ),
+            "onnx_model_path": str(self.model_path),
             "manifest_path": str(self.manifest_path),
             "external_data_path": (
                 str(self.external_data_path)
@@ -350,7 +513,7 @@ class RealtimeUavClassifier:
             or not np.isfinite(logits).all()
         ):
             raise RuntimeError(
-                "ONNX model returned invalid logits; expected one finite two-class row"
+                "Classifier returned invalid logits; expected one finite two-class row"
             )
         shifted_logits = logits[0] - np.max(logits[0])
         exponentials = np.exp(shifted_logits)

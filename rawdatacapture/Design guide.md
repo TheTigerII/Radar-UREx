@@ -211,7 +211,8 @@ two output logits. A trained `model.onnx`, its external tensor-data sidecar when
 declared, and `manifest.json` must be copied into the `model_weights/` directory
 before live classification can be enabled.
 
-`inference.py` loads `model.onnx` with ONNX Runtime and validates its manifest
+`inference.py` prefers a device-built `model.fp16.engine` with TensorRT and
+falls back to loading `model.onnx` with ONNX Runtime. It validates the manifest
 and graph interface. It rejects missing metadata, unexpected label order,
 architecture or input-shape changes, invalid normalization, and mismatched
 profile/feature fingerprints.

@@ -19,6 +19,19 @@ python -m pip install \
   pyserial onnxruntime
 ```
 
+For GPU inference on Jetson, use JetPack's TensorRT installation and compile
+the exported model once on the target device:
+
+```bash
+trtexec --onnx=model_weights/model.onnx \
+  --saveEngine=model_weights/model.fp16.engine \
+  --fp16 --shapes=doppler_time:1x36x64 --skipInference
+```
+
+When `model.fp16.engine` is present, live classification automatically uses
+TensorRT on the Jetson GPU. TensorRT engines are device-specific and should be
+rebuilt after changing the Jetson, TensorRT version, or ONNX model.
+
 The radar must run SDK CLI-compatible firmware. Connect the IWR6843 command
 UART, connect the DCA1000 Ethernet interface, and configure that interface:
 
