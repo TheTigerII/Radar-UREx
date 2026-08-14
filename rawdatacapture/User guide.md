@@ -335,6 +335,9 @@ the last dynamic position and remains associated for three consecutive frames.
 When multiple clusters pass the gate, the one nearest that last position is
 tried. One point is sufficient in each frame by default because local-maximum
 filtering has already reduced a reflector to one candidate.
+While static confirmation is pending, a clearly visible predicted target marker
+is held at the last measured dynamic position. It is continuity state rather
+than a new radar point and remains marked as predicted in processed output.
 The validated target is protected by ±2 range, azimuth, and elevation cells
 and remains visible after stopping. The static tracker uses a zero-velocity
 model with stronger position smoothing and coasts through up to 60 consecutive

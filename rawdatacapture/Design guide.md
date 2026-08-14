@@ -312,6 +312,9 @@ measurements, clusters within 0.4 m of the last dynamic position become
 eligible, and the closest such cluster must remain associated for three
 consecutive frames. Deployments can restore stricter same-frame density with
 `--static-cluster-min-samples 3`. Handoff remains eligible for 60 frames. The
+last measured dynamic position remains as an explicit predicted target marker
+during this pending interval, including after the dynamic tracker expires; it
+is not serialized or displayed as a measured point. The
 selected target's range, azimuth, and elevation cells are protected by ±2 bins
 while validated. The static tracker uses a zero-velocity model with stronger
 position smoothing, and both motion-only protection and the static track

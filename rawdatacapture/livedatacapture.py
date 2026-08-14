@@ -2559,6 +2559,27 @@ class DisplayPayloadSink:
         elif static_track is not None and static_track.confirmed:
             target_track = static_track
             target_source = "static"
+        elif handoff_position is not None:
+            # Keep one explicit predicted target at the last measured dynamic
+            # position while static confirmation is pending. This bridges the
+            # interval even after the dynamic tracker itself has expired,
+            # without presenting the anchor as a measured radar point.
+            if dynamic_track is not None and dynamic_track.confirmed:
+                target_track = replace(
+                    dynamic_track,
+                    position_m=tuple(float(value) for value in handoff_position),
+                    velocity_m_per_update=(0.0, 0.0, 0.0),
+                )
+            else:
+                target_track = TargetTrack(
+                    position_m=tuple(float(value) for value in handoff_position),
+                    velocity_m_per_update=(0.0, 0.0, 0.0),
+                    age_updates=0,
+                    hits=0,
+                    missed_updates=STATIC_HANDOFF_MIN_DYNAMIC_MISSES,
+                    confirmed=True,
+                )
+            target_source = "dynamic"
         elif dynamic_track is not None and dynamic_track.confirmed:
             target_track = dynamic_track
             target_source = "dynamic"
@@ -4084,13 +4105,13 @@ def _draw_point_cloud_pyqtgraph(
             point_cloud.target_track.position_m,
             dtype=np.float32,
         ).reshape((1, 3))
-        alpha = 0.4 if point_cloud.target_track.is_predicted else 1.0
+        alpha = 0.75 if point_cloud.target_track.is_predicted else 1.0
         target_color = (
             (1.0, 0.55, 0.05, alpha)
             if point_cloud.target_source == "static"
             else (0.3, 1.0, 0.2, alpha)
         )
-        target_size = 13.0 if point_cloud.target_track.is_predicted else 16.0
+        target_size = 15.0 if point_cloud.target_track.is_predicted else 16.0
     _set_gl_scatter_data(
         scatter_items["target"],
         target_position,

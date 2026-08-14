@@ -922,6 +922,36 @@ class PointCloudBoundsTests(unittest.TestCase):
             (0.3, 1.0, 0.2, 1.0),
         )
 
+    def test_draw_keeps_predicted_target_marker_visible(self) -> None:
+        scatter_items = self._scatter_items()
+        predicted = TargetTrack(
+            position_m=(1.0, 2.0, 3.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=5,
+            hits=3,
+            missed_updates=1,
+            confirmed=True,
+        )
+
+        _draw_point_cloud_pyqtgraph(
+            scatter_items,
+            Mock(),
+            self._payload(target_track=predicted, target_source="dynamic"),
+            10.0,
+            60.0,
+            None,
+            np.zeros((256, 3), dtype=np.uint8),
+        )
+
+        self.assertEqual(
+            scatter_items["target"].setData.call_args.kwargs["color"],
+            (0.3, 1.0, 0.2, 0.75),
+        )
+        self.assertEqual(
+            scatter_items["target"].setData.call_args.kwargs["size"],
+            15.0,
+        )
+
     def test_draw_updates_static_points_and_calibration_indicator(self) -> None:
         scatter_items = self._scatter_items()
         status = Mock()
@@ -1499,7 +1529,9 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                     np.empty((0,), dtype=np.complex64),
                     np.arange(5),
                 )
-                self.assertIsNone(payload.target_source)
+                self.assertEqual(payload.target_source, "dynamic")
+                assert payload.target_track is not None
+                self.assertTrue(payload.target_track.is_predicted)
                 self.assertEqual(payload.static_validation, "handoff_pending")
 
             payload, _cube = sink._compute_point_cloud_payload(
@@ -1555,7 +1587,9 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                     np.arange(5),
                 )
 
-        self.assertIsNone(payload.target_source)
+        self.assertEqual(payload.target_source, "dynamic")
+        assert payload.target_track is not None
+        self.assertTrue(payload.target_track.is_predicted)
         self.assertEqual(payload.static_validation, "handoff_pending")
         self.assertEqual(payload.static_points.shape, (0, 5))
 
@@ -1601,7 +1635,10 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                     np.arange(5),
                 )
 
-        self.assertIsNone(payload.target_source)
+        self.assertEqual(payload.target_source, "dynamic")
+        assert payload.target_track is not None
+        self.assertTrue(payload.target_track.is_predicted)
+        np.testing.assert_allclose(payload.target_track.position_m, (0.0, 2.0, 0.0))
         self.assertEqual(payload.static_validation, "handoff_pending")
         self.assertEqual(payload.static_points.shape, (0, 5))
 
