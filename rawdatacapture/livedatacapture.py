@@ -126,8 +126,6 @@ DEFAULT_STATIC_REFERENCE_FRAMES = 150
 DEFAULT_STATIC_MIN_CHANGE_DB = 3.0
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
-STATIC_MOTION_HISTORY_UPDATES = 30
-STATIC_MOTION_MIN_DISPLACEMENT_M = 0.3
 STATIC_HANDOFF_MIN_DYNAMIC_MISSES = 2
 STATIC_HANDOFF_WINDOW_UPDATES = 60
 STATIC_HANDOFF_DISTANCE_M = 0.4
@@ -552,16 +550,10 @@ class MotionHandoffQualifier:
     def __init__(
         self,
         *,
-        history_updates: int = STATIC_MOTION_HISTORY_UPDATES,
-        minimum_displacement_m: float = STATIC_MOTION_MIN_DISPLACEMENT_M,
         minimum_dynamic_misses: int = STATIC_HANDOFF_MIN_DYNAMIC_MISSES,
         handoff_window_updates: int = STATIC_HANDOFF_WINDOW_UPDATES,
         protection_missed_updates: int = STATIC_TRACK_MAX_MISSED_UPDATES,
     ) -> None:
-        self.history: deque[Optional[np.ndarray]] = deque(
-            maxlen=max(int(history_updates), 2)
-        )
-        self.minimum_displacement_m = max(float(minimum_displacement_m), 0.0)
         self.minimum_dynamic_misses = max(int(minimum_dynamic_misses), 1)
         self.handoff_window_updates = max(int(handoff_window_updates), 1)
         self.protection_missed_updates = max(
@@ -585,26 +577,18 @@ class MotionHandoffQualifier:
                 dynamic_track.position_m,
                 dtype=np.float64,
             )
-            if any(
-                previous is not None
-                and np.linalg.norm(measured_position - previous)
-                >= self.minimum_displacement_m
-                for previous in self.history
-            ):
-                self.motion_armed = True
-            if self.motion_armed:
-                self.last_position_m = measured_position.copy()
+            # Confirmation already requires persistent dynamic detections, so
+            # it is sufficient evidence to arm a later static handoff. A
+            # separate displacement requirement incorrectly excluded slow or
+            # short target motion.
+            self.motion_armed = True
+            self.last_position_m = measured_position.copy()
             # A current measurement means dynamic tracking still owns the
             # target. Cancel any pending handoff; recent genuine motion remains
             # armed in case measurements disappear afterward.
             self.remaining_updates = 0
         else:
             self.consecutive_missed_updates += 1
-        self.history.append(
-            measured_position.copy()
-            if measured_position is not None
-            else None
-        )
 
         if measured_position is not None:
             return None
@@ -1255,9 +1239,10 @@ class ProcessedOutputWriter:
                     "gain suppression and temporal smoothing"
                 ),
                 "validation_policy": (
-                    "recent dynamic motion followed by two missing dynamic "
-                    "measurements and a persistent nearby static local maximum "
-                    "or cluster across three associated updates"
+                    "a confirmed measured dynamic track followed by two "
+                    "missing dynamic measurements and a persistent nearby "
+                    "static local maximum or cluster across three associated "
+                    "updates"
                 ),
             },
             "micro_doppler_units": "dB power",

@@ -1141,26 +1141,19 @@ class MotionHandoffQualifierTests(unittest.TestCase):
             confirmed=True,
         )
 
-    def test_stationary_dynamic_track_does_not_open_handoff(self) -> None:
-        qualifier = MotionHandoffQualifier(
-            history_updates=5,
-            minimum_displacement_m=0.3,
-            handoff_window_updates=4,
-        )
+    def test_healthy_dynamic_track_does_not_open_handoff(self) -> None:
+        qualifier = MotionHandoffQualifier(handoff_window_updates=4)
 
         for x_m in (0.0, 0.05, 0.1, 0.08):
             handoff = qualifier.update(self._track(x_m))
 
         self.assertIsNone(handoff)
 
-    def test_qualified_motion_opens_only_after_dynamic_misses(self) -> None:
+    def test_confirmed_dynamic_track_opens_only_after_dynamic_misses(self) -> None:
         qualifier = MotionHandoffQualifier(
-            history_updates=5,
-            minimum_displacement_m=0.3,
             minimum_dynamic_misses=2,
             handoff_window_updates=4,
         )
-        qualifier.update(self._track(0.0))
 
         handoff = qualifier.update(self._track(0.4))
         self.assertIsNone(handoff)
@@ -1176,12 +1169,9 @@ class MotionHandoffQualifierTests(unittest.TestCase):
 
     def test_dynamic_reacquisition_cancels_active_handoff(self) -> None:
         qualifier = MotionHandoffQualifier(
-            history_updates=5,
-            minimum_displacement_m=0.3,
             minimum_dynamic_misses=2,
             handoff_window_updates=4,
         )
-        qualifier.update(self._track(0.0))
         qualifier.update(self._track(0.4))
         qualifier.update(None)
         self.assertIsNotNone(qualifier.update(None))
@@ -1189,26 +1179,38 @@ class MotionHandoffQualifierTests(unittest.TestCase):
         self.assertIsNone(qualifier.update(self._track(0.45)))
         self.assertEqual(qualifier.remaining_updates, 0)
 
-    def test_motion_must_be_within_preceding_processed_updates(self) -> None:
-        qualifier = MotionHandoffQualifier(
-            history_updates=5,
-            minimum_displacement_m=0.3,
-            handoff_window_updates=4,
+    def test_unconfirmed_and_predicted_tracks_do_not_arm_handoff(self) -> None:
+        qualifier = MotionHandoffQualifier(handoff_window_updates=4)
+        unconfirmed_track = TargetTrack(
+            position_m=(0.0, 2.0, 0.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=1,
+            hits=1,
+            missed_updates=0,
+            confirmed=False,
         )
-        qualifier.update(self._track(0.0))
-        for _ in range(5):
+        predicted_track = TargetTrack(
+            position_m=(0.4, 2.0, 0.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=4,
+            hits=3,
+            missed_updates=1,
+            confirmed=True,
+        )
+
+        self.assertIsNone(qualifier.update(unconfirmed_track))
+        self.assertIsNone(qualifier.update(predicted_track))
+        for _ in range(6):
             qualifier.update(None)
 
-        self.assertIsNone(qualifier.update(self._track(0.4)))
+        self.assertEqual(qualifier.remaining_updates, 0)
+        self.assertIsNone(qualifier.protection_position_m)
 
     def test_motion_protection_releases_after_configured_misses(self) -> None:
         qualifier = MotionHandoffQualifier(
-            history_updates=5,
-            minimum_displacement_m=0.3,
             handoff_window_updates=60,
             protection_missed_updates=30,
         )
-        qualifier.update(self._track(0.0))
         qualifier.update(self._track(0.4))
 
         for _ in range(29):
