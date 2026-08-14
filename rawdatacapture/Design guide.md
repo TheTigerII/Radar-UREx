@@ -305,8 +305,11 @@ Raw static candidates are diagnostic activity, not targets. The static tracker
 receives DBSCAN clusters with a default minimum of one point because the 3D
 local-maximum pass has already reduced a reflector to one spatial candidate.
 A cluster can start a static track only when a confirmed dynamic track moved
-at least 0.3 m within the preceding 30 processed frames, the cluster is within
-0.75 m of the last dynamic position, and it remains associated for three
+at least 0.3 m within the preceding 30 processed frames. This arms handoff but
+does not open it while dynamic measurements remain healthy; measured dynamic
+tracking resets static acquisition. After two consecutive missing dynamic
+measurements, clusters within 0.75 m of the last dynamic position become
+eligible, and the closest such cluster must remain associated for three
 consecutive frames. Deployments can restore stricter same-frame density with
 `--static-cluster-min-samples 3`. Handoff remains eligible for 60 frames. The
 selected target's range, azimuth, and elevation cells are protected by ±2 bins

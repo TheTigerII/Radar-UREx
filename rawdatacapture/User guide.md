@@ -326,11 +326,15 @@ learned noise variation. The reference and learned noise estimates remain
 fixed after calibration by default, so later scene changes are not absorbed.
 
 Raw changes do not become displayed static targets by themselves. A confirmed
-dynamic track must move at least 0.3 m during the preceding 30 frames. For the
-next 60 frames, a static local maximum or cluster can take over only if it is
-within 0.75 m of the last dynamic position and remains associated for three
-consecutive frames. One point is sufficient in each frame by default because
-local-maximum filtering has already reduced a reflector to one candidate.
+dynamic track must move at least 0.3 m during the preceding 30 frames, which
+arms rather than starts handoff. Static acquisition remains disabled and any
+older static track is reset while measured dynamic tracking is healthy. After
+two consecutive missing dynamic measurements, a 60-frame handoff window opens.
+A static local maximum or cluster can take over only if it is within 0.75 m of
+the last dynamic position and remains associated for three consecutive frames.
+When multiple clusters pass the gate, the one nearest that last position is
+tried. One point is sufficient in each frame by default because local-maximum
+filtering has already reduced a reflector to one candidate.
 The validated target is protected by ±2 range, azimuth, and elevation cells
 and remains visible after stopping. Protection is released after 30
 consecutive misses. A removed target is absorbed only when a nonzero

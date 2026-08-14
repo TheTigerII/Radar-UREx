@@ -1115,21 +1115,41 @@ class MotionHandoffQualifierTests(unittest.TestCase):
 
         self.assertIsNone(handoff)
 
-    def test_qualified_motion_opens_and_expires_handoff_window(self) -> None:
+    def test_qualified_motion_opens_only_after_dynamic_misses(self) -> None:
         qualifier = MotionHandoffQualifier(
             history_updates=5,
             minimum_displacement_m=0.3,
+            minimum_dynamic_misses=2,
             handoff_window_updates=4,
         )
         qualifier.update(self._track(0.0))
 
         handoff = qualifier.update(self._track(0.4))
+        self.assertIsNone(handoff)
+        self.assertIsNone(qualifier.update(None))
+
+        handoff = qualifier.update(None)
 
         assert handoff is not None
         np.testing.assert_allclose(handoff, (0.4, 2.0, 0.0))
         for _ in range(4):
             handoff = qualifier.update(None)
         self.assertIsNone(handoff)
+
+    def test_dynamic_reacquisition_cancels_active_handoff(self) -> None:
+        qualifier = MotionHandoffQualifier(
+            history_updates=5,
+            minimum_displacement_m=0.3,
+            minimum_dynamic_misses=2,
+            handoff_window_updates=4,
+        )
+        qualifier.update(self._track(0.0))
+        qualifier.update(self._track(0.4))
+        qualifier.update(None)
+        self.assertIsNotNone(qualifier.update(None))
+
+        self.assertIsNone(qualifier.update(self._track(0.45)))
+        self.assertEqual(qualifier.remaining_updates, 0)
 
     def test_motion_must_be_within_preceding_processed_updates(self) -> None:
         qualifier = MotionHandoffQualifier(
@@ -1271,6 +1291,10 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
             confirmation_hits=1,
             acquisition_policy="nearest",
         )
+        sink.static_target_tracker.update(
+            np.asarray(((0.0, 2.0, 0.0, 1.0),), dtype=np.float32)
+        )
+        self.assertTrue(sink.static_target_tracker.is_confirmed)
         dynamic_points = np.asarray(
             ((0.0, 1.0, 0.0, 100.0),),
             dtype=np.float32,
@@ -1329,6 +1353,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         np.testing.assert_allclose(payload.target_track.position_m, (0.0, 1.0, 0.0))
         self.assertEqual(payload.static_points.shape, (0, 5))
         self.assertEqual(payload.static_validation, "warming")
+        self.assertFalse(sink.static_target_tracker.is_confirmed)
 
     def test_motion_qualified_cluster_hands_off_exact_members_only(self) -> None:
         sink = DisplayPayloadSink(
@@ -1540,6 +1565,74 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         self.assertIsNone(payload.target_source)
         self.assertEqual(payload.static_validation, "handoff_pending")
         self.assertEqual(payload.static_points.shape, (0, 5))
+
+    def test_static_handoff_selects_cluster_nearest_dynamic_position(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+        )
+        sink.static_target_tracker = SingleTargetTracker(
+            confirmation_hits=1,
+            acquisition_policy="nearest",
+        )
+        motion_handoff = Mock()
+        motion_handoff.update.return_value = np.asarray((0.0, 2.0, 0.0))
+        motion_handoff.protection_position_m = np.asarray((0.0, 2.0, 0.0))
+        sink.motion_handoff = motion_handoff
+        empty_points = np.empty((0, 4), dtype=np.float32)
+        static_points = np.asarray(
+            (
+                (0.0, 1.4, 0.0, 80.0, 9.0),
+                (0.0, 2.1, 0.0, 70.0, 8.0),
+            ),
+            dtype=np.float32,
+        )
+        static_clusters = np.asarray(
+            ((0.0, 1.4, 0.0, 1.0), (0.0, 2.1, 0.0, 1.0)),
+            dtype=np.float32,
+        )
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                return_value=static_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture."
+                "cluster_point_cloud_with_labels",
+                return_value=(
+                    static_clusters,
+                    np.asarray((0, 1), dtype=np.intp),
+                ),
+            ),
+        ):
+            payload, _cube = sink._compute_point_cloud_payload(
+                np.empty((0,), dtype=np.complex64),
+                np.arange(5),
+            )
+
+        self.assertEqual(payload.target_source, "static")
+        assert payload.target_track is not None
+        np.testing.assert_allclose(
+            payload.target_track.position_m,
+            (0.0, 2.1, 0.0),
+        )
+        np.testing.assert_allclose(payload.static_points[:, 1], (2.1,))
 
     def test_disabling_static_detection_skips_static_processing(self) -> None:
         sink = DisplayPayloadSink(

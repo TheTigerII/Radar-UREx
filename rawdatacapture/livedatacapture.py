@@ -126,6 +126,7 @@ DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 STATIC_MOTION_HISTORY_UPDATES = 30
 STATIC_MOTION_MIN_DISPLACEMENT_M = 0.3
+STATIC_HANDOFF_MIN_DYNAMIC_MISSES = 2
 STATIC_HANDOFF_WINDOW_UPDATES = 60
 STATIC_HANDOFF_DISTANCE_M = 0.75
 STATIC_PROTECTION_CELLS = 2
@@ -544,13 +545,14 @@ class SingleTargetTracker:
 
 
 class MotionHandoffQualifier:
-    """Retain a short handoff window after a genuinely moving target."""
+    """Arm on genuine motion and open handoff only after dynamic misses."""
 
     def __init__(
         self,
         *,
         history_updates: int = STATIC_MOTION_HISTORY_UPDATES,
         minimum_displacement_m: float = STATIC_MOTION_MIN_DISPLACEMENT_M,
+        minimum_dynamic_misses: int = STATIC_HANDOFF_MIN_DYNAMIC_MISSES,
         handoff_window_updates: int = STATIC_HANDOFF_WINDOW_UPDATES,
         protection_missed_updates: int = STATIC_TRACK_MAX_MISSED_UPDATES,
     ) -> None:
@@ -558,6 +560,7 @@ class MotionHandoffQualifier:
             maxlen=max(int(history_updates), 2)
         )
         self.minimum_displacement_m = max(float(minimum_displacement_m), 0.0)
+        self.minimum_dynamic_misses = max(int(minimum_dynamic_misses), 1)
         self.handoff_window_updates = max(int(handoff_window_updates), 1)
         self.protection_missed_updates = max(
             int(protection_missed_updates),
@@ -565,12 +568,10 @@ class MotionHandoffQualifier:
         )
         self.remaining_updates = 0
         self.consecutive_missed_updates = 0
+        self.motion_armed = False
         self.last_position_m: Optional[np.ndarray] = None
 
     def update(self, dynamic_track: Optional[TargetTrack]) -> Optional[np.ndarray]:
-        if self.remaining_updates > 0:
-            self.remaining_updates -= 1
-
         measured_position: Optional[np.ndarray] = None
         if (
             dynamic_track is not None
@@ -588,9 +589,13 @@ class MotionHandoffQualifier:
                 >= self.minimum_displacement_m
                 for previous in self.history
             ):
-                self.remaining_updates = self.handoff_window_updates
-            if self.remaining_updates > 0:
+                self.motion_armed = True
+            if self.motion_armed:
                 self.last_position_m = measured_position.copy()
+            # A current measurement means dynamic tracking still owns the
+            # target. Cancel any pending handoff; recent genuine motion remains
+            # armed in case measurements disappear afterward.
+            self.remaining_updates = 0
         else:
             self.consecutive_missed_updates += 1
         self.history.append(
@@ -599,11 +604,29 @@ class MotionHandoffQualifier:
             else None
         )
 
-        if self.remaining_updates <= 0:
-            self.last_position_m = None
+        if measured_position is not None:
             return None
-        assert self.last_position_m is not None
-        return self.last_position_m.copy()
+
+        if (
+            self.remaining_updates <= 0
+            and self.motion_armed
+            and self.last_position_m is not None
+            and self.consecutive_missed_updates >= self.minimum_dynamic_misses
+        ):
+            self.remaining_updates = self.handoff_window_updates
+
+        if self.remaining_updates <= 0 or self.last_position_m is None:
+            if self.consecutive_missed_updates >= self.protection_missed_updates:
+                self.motion_armed = False
+                self.last_position_m = None
+            return None
+
+        handoff_position = self.last_position_m.copy()
+        self.remaining_updates -= 1
+        if self.remaining_updates <= 0:
+            self.motion_armed = False
+            self.last_position_m = None
+        return handoff_position
 
     @property
     def protection_position_m(self) -> Optional[np.ndarray]:
@@ -1223,9 +1246,9 @@ class ProcessedOutputWriter:
                     "gain suppression and temporal smoothing"
                 ),
                 "validation_policy": (
-                    "recent dynamic motion followed by a persistent nearby "
-                    "static local maximum or cluster across three associated "
-                    "updates"
+                    "recent dynamic motion followed by two missing dynamic "
+                    "measurements and a persistent nearby static local maximum "
+                    "or cluster across three associated updates"
                 ),
             },
             "micro_doppler_units": "dB power",
@@ -2381,7 +2404,17 @@ class DisplayPayloadSink:
         static_track = None
         static_candidate_count = 0
         static_validation = "disabled"
+        measured_dynamic_track = (
+            dynamic_track is not None
+            and dynamic_track.confirmed
+            and not dynamic_track.is_predicted
+        )
         handoff_position = self.motion_handoff.update(dynamic_track)
+        if measured_dynamic_track:
+            # Static acquisition must never progress while the dynamic tracker
+            # still has a measured target. Reacquisition also cancels any
+            # already-confirmed static fallback from an earlier gap.
+            self.static_target_tracker.reset()
         if self.static_scene_map is not None:
             static_started = time.perf_counter()
             raw_static_points = compute_static_point_cloud(
@@ -2429,6 +2462,19 @@ class DisplayPayloadSink:
                     cluster_candidates = cluster_candidates[
                         handoff_distances <= STATIC_HANDOFF_DISTANCE_M
                     ]
+                    if cluster_candidates.size:
+                        nearest_handoff_index = int(
+                            np.argmin(
+                                np.linalg.norm(
+                                    cluster_candidates[:, :3]
+                                    - handoff_position,
+                                    axis=1,
+                                )
+                            )
+                        )
+                        cluster_candidates = cluster_candidates[
+                            nearest_handoff_index : nearest_handoff_index + 1
+                        ]
 
             static_track = self.static_target_tracker.update(cluster_candidates)
             if static_track is not None and static_track.confirmed:
