@@ -130,7 +130,7 @@ STATIC_HANDOFF_MIN_DYNAMIC_MISSES = 2
 STATIC_HANDOFF_WINDOW_UPDATES = 60
 STATIC_HANDOFF_DISTANCE_M = 0.75
 STATIC_PROTECTION_CELLS = 2
-STATIC_TRACK_MAX_MISSED_UPDATES = 30
+STATIC_TRACK_MAX_MISSED_UPDATES = 60
 DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
 DEFAULT_TRACK_MAX_MISSED_UPDATES = 10
 DEFAULT_TRACK_CONFIRMATION_HITS = 3
@@ -1605,6 +1605,8 @@ class DisplayPayloadSink:
         self.static_target_tracker = SingleTargetTracker(
             acquisition_policy="nearest",
             max_missed_updates=STATIC_TRACK_MAX_MISSED_UPDATES,
+            position_gain=0.35,
+            velocity_gain=0.0,
         )
         self.motion_handoff = MotionHandoffQualifier()
         self.static_cluster_min_samples = max(

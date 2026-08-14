@@ -1182,6 +1182,37 @@ class MotionHandoffQualifierTests(unittest.TestCase):
 
 
 class TrackedDisplayPayloadTests(unittest.TestCase):
+    def test_static_tracker_uses_stationary_model_and_two_second_coast(
+        self,
+    ) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+        )
+        tracker = sink.static_target_tracker
+
+        self.assertEqual(tracker.velocity_gain, 0.0)
+        self.assertEqual(tracker.position_gain, 0.35)
+        self.assertEqual(tracker.max_missed_updates, 60)
+
+        candidate = np.asarray(
+            ((0.0, 2.0, 0.0, 70.0),),
+            dtype=np.float32,
+        )
+        empty = np.empty((0, 4), dtype=np.float32)
+        tracker.update(candidate)
+        tracker.update(candidate)
+        confirmed = tracker.update(candidate)
+        assert confirmed is not None
+        self.assertTrue(confirmed.confirmed)
+
+        for _ in range(59):
+            coasted = tracker.update(empty)
+            self.assertIsNotNone(coasted)
+        self.assertIsNone(tracker.update(empty))
+
     def test_combined_display_uses_tracked_range_for_micro_doppler(self) -> None:
         payload_queue = queue.Queue(maxsize=1)
         config = SimpleNamespace()

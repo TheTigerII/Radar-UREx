@@ -336,8 +336,10 @@ When multiple clusters pass the gate, the one nearest that last position is
 tried. One point is sufficient in each frame by default because local-maximum
 filtering has already reduced a reflector to one candidate.
 The validated target is protected by ±2 range, azimuth, and elevation cells
-and remains visible after stopping. Protection is released after 30
-consecutive misses. A removed target is absorbed only when a nonzero
+and remains visible after stopping. The static tracker uses a zero-velocity
+model with stronger position smoothing and coasts through up to 60 consecutive
+candidate misses. Protection is released after the same 60-miss interval. A
+removed target is absorbed only when a nonzero
 `--static-background-update-rate` has enabled adaptation; the default fixed
 reference does not absorb it. Only the exact points in the validated cluster
 are shown as orange squares; its center is shown as a cyan diamond. Transient

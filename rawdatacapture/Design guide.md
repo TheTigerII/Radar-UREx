@@ -313,8 +313,9 @@ eligible, and the closest such cluster must remain associated for three
 consecutive frames. Deployments can restore stricter same-frame density with
 `--static-cluster-min-samples 3`. Handoff remains eligible for 60 frames. The
 selected target's range, azimuth, and elevation cells are protected by ±2 bins
-while validated; motion-only protection is released after 30 consecutive
-misses. The static tracker also releases after 30 misses. If a nonzero
+while validated. The static tracker uses a zero-velocity model with stronger
+position smoothing, and both motion-only protection and the static track
+release after 60 consecutive candidate misses. If a nonzero
 `--static-background-update-rate` enabled adaptation, released objects can then
 be absorbed into the background; the default zero rate keeps the startup
 reference fixed. Only the exact DBSCAN members of the validated target are
