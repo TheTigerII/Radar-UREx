@@ -321,7 +321,7 @@ scene fixed and leave the target absent for startup calibration. The first
 the warm-up and calibration progress, then `Static reference ready (fixed)`.
 The detector learns normal per-angle-cell variation, applies a per-range power
 floor, removes common receiver-gain drift, and temporally smooths the change
-map. A cell must exceed both the configured 3 dB minimum and four times its
+map. A cell must exceed both the configured 3 dB minimum and twice its
 learned noise variation. The reference and learned noise estimates remain
 fixed after calibration by default, so later scene changes are not absorbed.
 

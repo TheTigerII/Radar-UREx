@@ -293,7 +293,7 @@ implementation does not determine whether those calibration updates are
 target-free, so the operator must keep the target absent until calibration is
 complete. Each live change map is corrected by its per-range median to remove
 common receiver-gain drift and updated with a 0.35-rate temporal EMA. A
-detection must exceed both the default 3 dB absolute threshold and four times
+detection must exceed both the default 3 dB absolute threshold and twice
 the learned cell variation. The reference and noise estimates remain fixed
 after calibration. Range/FOV gating occurs before local-maximum
 testing; when the threshold produces no candidates, the full 3D maximum scan

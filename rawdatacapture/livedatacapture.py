@@ -28,6 +28,7 @@ if __package__ in {None, ""}:
         DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
         DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
         DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE,
+        DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER,
         StaticSceneMap,
         MicroDopplerResult,
         RotorEstimate,
@@ -57,6 +58,7 @@ else:
         DEFAULT_ROTOR_NOISE_MIN_SUPPORT,
         DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER,
         DEFAULT_ROTOR_NOISE_SUPPORT_SHAPE,
+        DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER,
         StaticSceneMap,
         MicroDopplerResult,
         RotorEstimate,
@@ -1228,6 +1230,9 @@ class ProcessedOutputWriter:
                 "warmup_frames": max(int(static_warmup_frames), 0),
                 "reference_frames": max(int(static_reference_frames), 1),
                 "minimum_change_db": max(float(static_min_change_db), 0.0),
+                "noise_sigma_multiplier": (
+                    DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER
+                ),
                 "background_update_rate": min(
                     max(float(static_background_update_rate), 0.0),
                     1.0,
@@ -4619,6 +4624,8 @@ def _run_frame_processor_impl(
             f"warmup={static_warmup_frames} updates, "
             f"reference={static_reference_frames} updates, "
             f"minimum_change={static_min_change_db:g} dB, "
+            f"learned_noise_multiplier="
+            f"{DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER:g}x, "
             f"background_update_rate={static_background_update_rate:g}. "
             "Keep the target absent until calibration is complete."
     )

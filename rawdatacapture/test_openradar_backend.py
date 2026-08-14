@@ -114,6 +114,7 @@ class StaticSceneMapTests(unittest.TestCase):
         scene = StaticSceneMap()
 
         self.assertEqual(scene.minimum_change_db, 3.0)
+        self.assertEqual(scene.noise_sigma_multiplier, 2.0)
         self.assertEqual(scene.background_update_rate, 0.0)
         self.assertEqual(scene.reference_frames, 150)
 
@@ -211,13 +212,34 @@ class StaticSceneMapTests(unittest.TestCase):
 
         changed = background.copy()
         changed[0, 2, 3] = 1000.0
-        changed[1, 3, 4] = 4000.0
+        changed[1, 3, 4] = 3000.0
         change_db = scene.observe(changed)
 
         assert change_db is not None
         detections = scene.detection_mask(change_db)
         self.assertTrue(detections[0, 2, 3])
         self.assertFalse(detections[1, 3, 4])
+
+    def test_default_learned_noise_threshold_uses_two_times_noise(self) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=5,
+            minimum_change_db=0.0,
+            smoothing_rate=1.0,
+        )
+        background = np.full((2, 8, 8), 100.0, dtype=np.float32)
+        for level in (100.0, 158.49, 251.19, 398.11, 630.96):
+            sample = background.copy()
+            sample[1, 3, 4] = level
+            self.assertIsNone(scene.observe(sample))
+
+        assert scene._noise_db is not None
+        assert scene._detection_threshold_db is not None
+        np.testing.assert_allclose(
+            scene._detection_threshold_db[1, 3, 4],
+            2.0 * scene._noise_db[1, 3, 4],
+            rtol=1e-6,
+        )
 
     def test_target_present_during_calibration_is_part_of_reference(self) -> None:
         scene = StaticSceneMap(warmup_frames=0, reference_frames=3)

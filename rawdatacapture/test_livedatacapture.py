@@ -660,6 +660,10 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         )
         self.assertEqual(records[0]["static_detection"]["warmup_frames"], 30)
         self.assertEqual(records[0]["static_detection"]["reference_frames"], 150)
+        self.assertEqual(
+            records[0]["static_detection"]["noise_sigma_multiplier"],
+            2.0,
+        )
         self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
         self.assertEqual(
             records[0]["micro_doppler_processing"]["window_loops"],
