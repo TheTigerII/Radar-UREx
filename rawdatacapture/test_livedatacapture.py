@@ -656,7 +656,7 @@ class ProcessedOutputWriterTests(unittest.TestCase):
         self.assertTrue(records[0]["classification"]["enabled"])
         self.assertEqual(
             records[0]["classification_feature"]["target_gate_range_bins"],
-            2,
+            3,
         )
         self.assertEqual(records[0]["static_detection"]["warmup_frames"], 30)
         self.assertEqual(records[0]["static_detection"]["reference_frames"], 150)

@@ -17,7 +17,7 @@ deployment on the same tensor contract and CNN implementation.
 
 ```mermaid
 flowchart LR
-    A[IWR6843 Doppler cube] --> B[Two-bin target gate and local background]
+    A[IWR6843 Doppler cube] --> B[Three-bin target gate and local background]
     B --> C[One feature step<br/>2 x 64]
     C --> D[48-step rolling window<br/>2 x 48 x 64]
     D --> E[Training-only clipping and standardization]
@@ -35,7 +35,7 @@ Before then, and after a feature or inference error, it returns `unknown`.
 ## Input and dataset contract
 
 The feature version is
-`iwr6843-micro-doppler-v4-two-range-bin`. Every model input is `float32` with
+`iwr6843-micro-doppler-v5-three-range-bin`. Every model input is `float32` with
 channel-first shape `[2, 48, 64]`:
 
 | Axis | Size | Meaning |
@@ -45,8 +45,9 @@ channel-first shape `[2, 48, 64]`:
 | Doppler | 64 | Centered Doppler bins |
 
 For each live step, the feature extractor averages power over transmitter,
-receiver, and two range bins: the selected target bin and its immediately nearer
-neighbour. A separated local background is sampled on both sides of the target.
+receiver, and three range bins: the selected target bin and its immediate
+neighbours on both sides. A separated local background is sampled on both
+sides of the target.
 The Doppler power is reduced to 64 bins, then converted into:
 
 1. `log1p(target_power)`;
@@ -163,7 +164,7 @@ separate. The notebook writes five files under
 
 | Artifact | Contents |
 |---|---|
-| `model_state.pt` | State dict, architecture name, CNN config, input shape, feature version, and two-bin gate declaration |
+| `model_state.pt` | State dict, architecture name, CNN config, input shape, feature version, and three-bin gate declaration |
 | `calibration.joblib` | Logistic calibrator, decision threshold, normalization vectors, profile hash, and dataset-manifest hash |
 | `manifest.json` | Architecture, parameter count, training selection, metrics, class mapping, split policy, hashes, and deployment status |
 | `model.onnx` | Frozen, fixed-batch-one `[1,2,48,64]` network exported during training for TensorRT |
@@ -204,7 +205,7 @@ training and validation.
 Changes to any item below require a new feature/model version and regenerated
 artifacts:
 
-- the two range bins or local-background selection;
+- the three range bins or local-background selection;
 - Doppler reduction or bin order;
 - channel definitions or `[2,48,64]` axis order;
 - window length or stride assumptions;
@@ -214,5 +215,5 @@ artifacts:
 
 Offline generation and live inference must continue to share the feature
 implementation and `_build_model` definition. Silent resizing or loading an
-artifact from an older five-bin/archive feature pipeline is not compatible with
-this architecture.
+artifact from an older range-gate or archive feature pipeline is not compatible
+with this architecture.

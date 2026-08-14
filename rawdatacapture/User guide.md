@@ -87,7 +87,7 @@ needed without PyTorch.
 The notebook uses only native IWR6843 feature captures. Place UAV capture
 JSONL files under `dataset/uav/` and tracked non-UAV target captures under
 `dataset/others/`. Capture with `--display-update-every 1`; processed JSONL
-records save the exact two-channel, two-range-bin `classification_feature`
+records save the exact two-channel, three-range-bin `classification_feature`
 consumed by live inference. Training creates non-overlapping 48-frame windows
 and uses a stratified 70%/15%/15% window-level split. Use
 `--no-classification` while collecting the initial training set so obsolete
@@ -550,7 +550,7 @@ processed update with:
 - conventional-mode short-time micro-Doppler windows, laid out as
   `[window][centered_doppler_bin]`;
 - the selected micro-Doppler range gate;
-- the `[2, 64]` two-range-bin `classification_feature` used to build native
+- the `[2, 64]` three-range-bin `classification_feature` used to build native
   CNN training windows, or `null` when no valid target owns the frame;
 - `classification`: `label`, calibrated `p_drone`, threshold, status/reason,
   and valid history length.

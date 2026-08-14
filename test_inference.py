@@ -32,15 +32,20 @@ class FeatureExtractionTests(unittest.TestCase):
 
     def test_feature_step_matches_notebook_power_formula(self) -> None:
         cube = np.ones((128, 3, 4, 64), dtype=np.complex64)
-        cube[..., 15:17] *= 3.0
+        cube[..., 15] *= 2.0
+        cube[..., 16] *= 3.0
+        cube[..., 17] *= 4.0
 
         step = doppler_cube_to_feature_step(cube, 16)
 
         self.assertEqual(step.shape, (2, 64))
-        np.testing.assert_allclose(step[0], np.log1p(9.0), rtol=1e-6)
+        expected_target_power = (4.0 + 9.0 + 16.0) / 3.0
+        np.testing.assert_allclose(
+            step[0], np.log1p(expected_target_power), rtol=1e-6
+        )
         np.testing.assert_allclose(
             step[1],
-            np.log1p(9.0) - np.log1p(1.0),
+            np.log1p(expected_target_power) - np.log1p(1.0),
             rtol=1e-6,
         )
 
@@ -238,8 +243,8 @@ class ArtifactContractTests(unittest.TestCase):
                 self.card,
             )
 
-    def test_rejects_old_target_gate_contract(self) -> None:
-        self.checkpoint["target_gate_range_bins"] = 5
+    def test_rejects_old_two_bin_target_gate_contract(self) -> None:
+        self.checkpoint["target_gate_range_bins"] = 2
 
         with self.assertRaisesRegex(ValueError, "target range-bin contract"):
             self.engine._validate_artifacts(

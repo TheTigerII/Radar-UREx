@@ -10,11 +10,11 @@ from typing import Any, Literal, Optional, Protocol
 import numpy as np
 
 
-FEATURE_VERSION = "iwr6843-micro-doppler-v4-two-range-bin"
+FEATURE_VERSION = "iwr6843-micro-doppler-v5-three-range-bin"
 WINDOW_STEPS = 48
 DOPPLER_BINS = 64
 INPUT_SHAPE_CHW = (2, WINDOW_STEPS, DOPPLER_BINS)
-TARGET_GATE_BINS = 2
+TARGET_GATE_BINS = 3
 CNN_CONFIG = {
     "input_channels": 2,
     "stem_channels": 48,
@@ -25,7 +25,7 @@ CNN_CONFIG = {
 MODEL_STATE_NAME = "model_state.pt"
 CALIBRATION_NAME = "calibration.joblib"
 MODEL_CARD_NAME = "manifest.json"
-DEPLOYMENT_STATUS = "native_iwr6843_two_range_bin_cnn"
+DEPLOYMENT_STATUS = "native_iwr6843_three_range_bin_cnn"
 
 ClassificationLabel = Literal["drone", "not_drone", "unknown"]
 
@@ -60,9 +60,10 @@ def normalized_profile_sha256(profile_path: Path) -> str:
 
 
 def _range_indices(center: int, count: int) -> tuple[np.ndarray, np.ndarray]:
-    # Use the selected bin and its immediately nearer neighbour. This must stay
-    # deterministic so offline feature generation and live inference agree.
-    target = np.arange(max(0, center - 1), min(count, center + 1))
+    # Use the selected bin and its immediate neighbours on both sides. This
+    # must stay deterministic so offline feature generation and live inference
+    # agree.
+    target = np.arange(max(0, center - 1), min(count, center + 2))
     background = np.concatenate(
         (
             np.arange(max(0, center - 10), max(0, center - 4)),
