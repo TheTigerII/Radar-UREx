@@ -320,10 +320,11 @@ scene fixed and leave the target absent for startup calibration. The first
 150 updates build a median range-azimuth-elevation reference. The plot reports
 the warm-up and calibration progress, then `Static reference ready (fixed)`.
 The detector learns normal per-angle-cell variation, applies a per-range power
-floor, removes common receiver-gain drift, and temporally smooths the change
-map. A cell must exceed both the configured 3 dB minimum and twice its
-learned noise variation. The reference and learned noise estimates remain
-fixed after calibration by default, so later scene changes are not absorbed.
+floor, and removes common receiver-gain drift. It applies the threshold to each
+update's instantaneous change without temporal smoothing. A cell must exceed
+both the configured 3 dB minimum and twice its learned noise variation. The
+reference and learned noise estimates remain fixed after calibration by
+default, so later scene changes are not absorbed.
 
 Raw changes do not become displayed static targets by themselves. A confirmed
 measured dynamic track arms rather than starts handoff; no additional minimum

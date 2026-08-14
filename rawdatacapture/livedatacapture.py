@@ -1240,7 +1240,7 @@ class ProcessedOutputWriter:
                 ),
                 "noise_policy": (
                     "per-cell calibration variability with common-mode "
-                    "gain suppression and temporal smoothing"
+                    "gain suppression and instantaneous change detection"
                 ),
                 "validation_policy": (
                     "a confirmed measured dynamic track followed by two "

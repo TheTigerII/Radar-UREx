@@ -122,7 +122,6 @@ class StaticSceneMapTests(unittest.TestCase):
         scene = StaticSceneMap(
             warmup_frames=0,
             reference_frames=1,
-            smoothing_rate=1.0,
         )
         background = np.full((2, 3, 4), 10.0, dtype=np.float32)
         changed = background.copy()
@@ -137,7 +136,7 @@ class StaticSceneMapTests(unittest.TestCase):
         assert second_change is not None
         np.testing.assert_allclose(second_change, first_change)
 
-    def test_frozen_reference_preserves_new_static_change(self) -> None:
+    def test_frozen_reference_reports_new_static_change_immediately(self) -> None:
         scene = StaticSceneMap(
             warmup_frames=0,
             reference_frames=2,
@@ -161,17 +160,15 @@ class StaticSceneMapTests(unittest.TestCase):
         assert first_change_db is not None
         assert second_change_db is not None
         assert change_db is not None
-        self.assertLess(float(first_change_db[1, 2, 3]), 6.0)
-        self.assertLess(float(second_change_db[1, 2, 3]), 6.0)
-        self.assertGreater(float(change_db[1, 2, 3]), 6.0)
+        self.assertAlmostEqual(float(first_change_db[1, 2, 3]), 10.0)
+        self.assertAlmostEqual(float(second_change_db[1, 2, 3]), 10.0)
+        self.assertAlmostEqual(float(change_db[1, 2, 3]), 10.0)
+        self.assertTrue(scene.detection_mask(first_change_db)[1, 2, 3])
         self.assertTrue(scene.detection_mask(change_db)[1, 2, 3])
 
         repeated_change_db = scene.observe(changed)
         assert repeated_change_db is not None
-        self.assertGreater(
-            float(repeated_change_db[1, 2, 3]),
-            float(change_db[1, 2, 3]),
-        )
+        self.assertAlmostEqual(float(repeated_change_db[1, 2, 3]), 10.0)
 
     def test_common_gain_drift_and_weak_reference_cells_are_suppressed(
         self,
@@ -201,7 +198,6 @@ class StaticSceneMapTests(unittest.TestCase):
             warmup_frames=0,
             reference_frames=5,
             minimum_change_db=6.0,
-            smoothing_rate=1.0,
         )
         background = np.full((2, 8, 8), 100.0, dtype=np.float32)
         noisy_levels = (100.0, 200.0, 400.0, 800.0, 1600.0)
@@ -225,7 +221,6 @@ class StaticSceneMapTests(unittest.TestCase):
             warmup_frames=0,
             reference_frames=5,
             minimum_change_db=0.0,
-            smoothing_rate=1.0,
         )
         background = np.full((2, 8, 8), 100.0, dtype=np.float32)
         for level in (100.0, 158.49, 251.19, 398.11, 630.96):
@@ -273,7 +268,6 @@ class StaticSceneMapTests(unittest.TestCase):
             warmup_frames=0,
             reference_frames=3,
             minimum_change_db=6.0,
-            smoothing_rate=1.0,
             background_update_rate=0.1,
         )
         background = np.full((2, 8, 8), 100.0, dtype=np.float32)
@@ -294,7 +288,6 @@ class StaticSceneMapTests(unittest.TestCase):
             warmup_frames=0,
             reference_frames=3,
             minimum_change_db=6.0,
-            smoothing_rate=1.0,
             background_update_rate=0.1,
         )
         background = np.full((2, 8, 8), 100.0, dtype=np.float32)
@@ -317,7 +310,6 @@ class StaticSceneMapTests(unittest.TestCase):
             warmup_frames=0,
             reference_frames=3,
             minimum_change_db=6.0,
-            smoothing_rate=1.0,
             background_update_rate=0.1,
         )
         background = np.full((2, 8, 8), 100.0, dtype=np.float32)
@@ -423,7 +415,6 @@ class StaticSceneMapTests(unittest.TestCase):
             warmup_frames=0,
             reference_frames=1,
             minimum_change_db=6.0,
-            smoothing_rate=1.0,
         )
         doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
         range_axis = np.arange(5, dtype=np.float32)

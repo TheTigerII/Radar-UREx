@@ -29,7 +29,6 @@ DEFAULT_STATIC_MAX_POINTS = 256
 DEFAULT_STATIC_WARMUP_FRAMES = 30
 DEFAULT_STATIC_REFERENCE_FRAMES = 150
 DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER = 2.0
-DEFAULT_STATIC_SMOOTHING_RATE = 0.35
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE = 20.0
 DEFAULT_STATIC_MINIMUM_NOISE_DB = 1.0
@@ -169,9 +168,9 @@ class StaticSceneMap:
     """Learn a noise-aware adaptive reference for static-scene changes.
 
     Calibration records both the median power and normal per-cell variation.
-    Detection uses log power with a per-range noise floor, removes common gain
-    drift, and smooths changes over time. Unprotected cells adapt continuously;
-    cells around a motion-qualified or validated target can be protected.
+    Detection uses log power with a per-range noise floor and removes common
+    gain drift. Unprotected cells adapt continuously; cells around a
+    motion-qualified or validated target can be protected.
     """
 
     def __init__(
@@ -181,7 +180,6 @@ class StaticSceneMap:
         reference_frames: int = DEFAULT_STATIC_REFERENCE_FRAMES,
         minimum_change_db: float = 3.0,
         noise_sigma_multiplier: float = DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER,
-        smoothing_rate: float = DEFAULT_STATIC_SMOOTHING_RATE,
         background_update_rate: float = DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,
         reference_floor_percentile: float = (
             DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE
@@ -203,8 +201,6 @@ class StaticSceneMap:
             raise ValueError(
                 "Static noise sigma multiplier must be finite and non-negative"
             )
-        if not np.isfinite(smoothing_rate) or not 0.0 < smoothing_rate <= 1.0:
-            raise ValueError("Static smoothing rate must be in (0, 1]")
         if (
             not np.isfinite(background_update_rate)
             or not 0.0 <= background_update_rate <= 1.0
@@ -226,7 +222,6 @@ class StaticSceneMap:
         self.reference_frames = int(reference_frames)
         self.minimum_change_db = float(minimum_change_db)
         self.noise_sigma_multiplier = float(noise_sigma_multiplier)
-        self.smoothing_rate = float(smoothing_rate)
         self.background_update_rate = float(background_update_rate)
         self.reference_floor_percentile = float(
             reference_floor_percentile
@@ -240,7 +235,6 @@ class StaticSceneMap:
         self._noise_db: Optional[np.ndarray] = None
         self._noise_mad_db: Optional[np.ndarray] = None
         self._detection_threshold_db: Optional[np.ndarray] = None
-        self._smoothed_change_db: Optional[np.ndarray] = None
         self._pending_log_power: Optional[np.ndarray] = None
         self._pending_change_db: Optional[np.ndarray] = None
         self._shape: Optional[tuple[int, ...]] = None
@@ -278,13 +272,12 @@ class StaticSceneMap:
         self._noise_db = None
         self._noise_mad_db = None
         self._detection_threshold_db = None
-        self._smoothed_change_db = None
         self._pending_log_power = None
         self._pending_change_db = None
         self._shape = None
 
     def observe(self, power_cube: np.ndarray) -> Optional[np.ndarray]:
-        """Calibrate or return smoothed change in dB against the scene map."""
+        """Calibrate or return instantaneous change in dB from the scene map."""
         power = self._validated_power(power_cube)
         if self._shape != power.shape:
             self.reset()
@@ -316,14 +309,6 @@ class StaticSceneMap:
             keepdims=True,
         )
 
-        if self._smoothed_change_db is None:
-            self._smoothed_change_db = np.zeros_like(
-                instantaneous_change_db,
-                dtype=np.float32,
-            )
-        alpha = self.smoothing_rate
-        self._smoothed_change_db *= 1.0 - alpha
-        self._smoothed_change_db += alpha * instantaneous_change_db
         self._pending_log_power = current_log_power.astype(
             np.float32,
             copy=True,
@@ -332,7 +317,7 @@ class StaticSceneMap:
             np.float32,
             copy=True,
         )
-        return self._smoothed_change_db.astype(np.float32, copy=True)
+        return instantaneous_change_db.astype(np.float32, copy=True)
 
     def detection_mask(self, change_db: np.ndarray) -> np.ndarray:
         """Return changes that exceed both absolute and learned noise limits."""
@@ -452,10 +437,6 @@ class StaticSceneMap:
             self.minimum_change_db,
             self.noise_sigma_multiplier * self._noise_db,
         ).astype(np.float32, copy=False)
-        self._smoothed_change_db = np.zeros_like(
-            reference_power,
-            dtype=np.float32,
-        )
         self._calibration_frames.clear()
 
     @staticmethod
