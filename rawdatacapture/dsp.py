@@ -178,7 +178,7 @@ class StaticSceneMap:
         *,
         warmup_frames: int = DEFAULT_STATIC_WARMUP_FRAMES,
         reference_frames: int = DEFAULT_STATIC_REFERENCE_FRAMES,
-        minimum_change_db: float = 3.0,
+        minimum_change_db: float = 0.0,
         noise_sigma_multiplier: float = DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER,
         background_update_rate: float = DEFAULT_STATIC_BACKGROUND_UPDATE_RATE,
         reference_floor_percentile: float = (

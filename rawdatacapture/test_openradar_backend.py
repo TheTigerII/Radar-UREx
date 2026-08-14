@@ -110,10 +110,12 @@ class AdaptiveClutterMapTests(unittest.TestCase):
 
 
 class StaticSceneMapTests(unittest.TestCase):
-    def test_default_minimum_change_is_three_db(self) -> None:
+    def test_default_threshold_uses_twice_learned_noise_without_db_floor(
+        self,
+    ) -> None:
         scene = StaticSceneMap()
 
-        self.assertEqual(scene.minimum_change_db, 3.0)
+        self.assertEqual(scene.minimum_change_db, 0.0)
         self.assertEqual(scene.noise_sigma_multiplier, 2.0)
         self.assertEqual(scene.background_update_rate, 0.0)
         self.assertEqual(scene.reference_frames, 150)
@@ -220,7 +222,6 @@ class StaticSceneMapTests(unittest.TestCase):
         scene = StaticSceneMap(
             warmup_frames=0,
             reference_frames=5,
-            minimum_change_db=0.0,
         )
         background = np.full((2, 8, 8), 100.0, dtype=np.float32)
         for level in (100.0, 158.49, 251.19, 398.11, 630.96):

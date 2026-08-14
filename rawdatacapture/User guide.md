@@ -321,10 +321,10 @@ scene fixed and leave the target absent for startup calibration. The first
 the warm-up and calibration progress, then `Static reference ready (fixed)`.
 The detector learns normal per-angle-cell variation, applies a per-range power
 floor, and removes common receiver-gain drift. It applies the threshold to each
-update's instantaneous change without temporal smoothing. A cell must exceed
-both the configured 3 dB minimum and twice its learned noise variation. The
-reference and learned noise estimates remain fixed after calibration by
-default, so later scene changes are not absorbed.
+update's instantaneous change without temporal smoothing. By default, a cell
+must exceed twice its learned noise variation; there is no additional absolute
+dB floor. The reference and learned noise estimates remain fixed after
+calibration by default, so later scene changes are not absorbed.
 
 Raw changes do not become displayed static targets by themselves. A confirmed
 measured dynamic track arms rather than starts handoff; no additional minimum
@@ -394,7 +394,8 @@ Use `--static-warmup-frames`, `--static-reference-frames`,
 `--static-min-change-db` to tune calibration, adaptation, validation, and the
 absolute sensitivity floor. Defaults are 30 warm-up frames, 150 reference
 frames, a fixed reference (zero adaptation rate), one same-frame cluster member,
-and 3 dB. Set a nonzero `--static-background-update-rate` to opt into adaptation.
+and no additional dB floor beyond twice the learned noise. Set a nonzero
+`--static-background-update-rate` to opt into adaptation.
 Set `--static-cluster-min-samples 3` to require three spatially adjacent
 candidates in the qualifying handoff update instead of one local maximum. The
 learned noise threshold can make the effective threshold higher in unstable
