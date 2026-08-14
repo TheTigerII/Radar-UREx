@@ -43,9 +43,10 @@ python -m venv .venv
   'openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94'
 ```
 
-The version bounds and OpenRadar commit are intentional. Use the same commands
-when recreating an environment so range/Doppler behavior and saved model
-metadata remain reproducible.
+These bounds and the OpenRadar commit are the tested installation baseline;
+the application itself does not enforce package version strings at runtime.
+Use the same commands when recreating an environment to minimize numerical and
+model-serialization differences.
 
 `libxcb-cursor0` is required for PySide6 windows on an X11 desktop.
 Display startup checks this before capture and reports an installation command
@@ -59,27 +60,29 @@ an empty desktop.
 
 ### Classification notebook and CNN dependencies
 
-Live drone/not-drone classification requires PyTorch 2.6 or newer and below
-version 3. Combined point-cloud + micro-Doppler mode asks whether to enable it,
-with **no** as the default. Install Jupyter as well when using
+Off-Jetson CPU drone/not-drone classification requires PyTorch 2.6 or newer and
+below version 3. Jetson CUDA classification uses TensorRT and does not require
+PyTorch. Combined point-cloud + micro-Doppler mode asks whether to enable
+classification, with **no** as the default. Install Jupyter as well when using
 `classification.ipynb`:
 
 ```bash
-.venv/bin/python -m pip install jupyter "torch>=2.6,<3"
+.venv/bin/python -m pip install jupyter matplotlib "torch>=2.6,<3"
 ```
 
 ```powershell
-.venv\Scripts\python -m pip install jupyter 'torch>=2.6,<3'
+.venv\Scripts\python -m pip install jupyter matplotlib 'torch>=2.6,<3'
 ```
 
 PyTorch builds depend on the operating system, Python version, and whether CPU
 or CUDA acceleration is required. Check the official
 [PyTorch installation selector](https://pytorch.org/get-started/locally/) and
 use its platform-specific command when it differs from the generic command
-above. The CNN cells in `classification.ipynb` are unexecuted by default and
-training starts only when the training cell is run manually.
-Run `run.py --no-classification` when capture is needed in an environment
-without PyTorch.
+above. The notebook stores outputs from its last Colab training run, but opening
+it does not execute any cell. Its first code cell mounts Google Drive and should
+be skipped outside Colab. Training starts only when the data and training cells
+are run manually. Off Jetson, use `run.py --no-classification` when capture is
+needed without PyTorch.
 
 The notebook uses only native IWR6843 feature captures. Place UAV capture
 JSONL files under `dataset/uav/` and tracked non-UAV target captures under
@@ -114,9 +117,11 @@ this one-time GPU build. CUDA/TensorRT failure never silently falls back to
 CPU; use `--classification-device cpu` only as an explicit diagnostic override
 when PyTorch is installed.
 
-Live range and Doppler processing uses OpenRadar. OS-CFAR uses a vectorized
-local implementation for real-time performance. The IWR6843ISK-ODS planar-array
-coordinate mapping remains in the local DSP adapter because
+Capture startup imports OpenRadar as a dependency/compatibility check. Live
+range and Doppler FFTs use local complex64 SciPy kernels that tests compare with
+the pinned OpenRadar implementation when it is installed. OS-CFAR is also a
+vectorized local implementation for real-time performance. The IWR6843ISK-ODS
+planar-array coordinate mapping remains in the local DSP adapter because
 OpenRadar's supplied XYZ helper targets the AWR1843 virtual antenna layout.
 All live views use PyQtGraph with the PySide6 Qt binding. Range and
 range-Doppler views use native 2D plot/image items, 3D point clouds use
@@ -139,10 +144,12 @@ micro-Doppler image in one window.
 5. In combined point-cloud + micro-Doppler mode, asks whether to run live CNN
    classification (default: no), then asks whether to save the timestamped
    JSONL under `dataset/uav`, `dataset/others`, or `dataset` (default: dataset).
-   Other display modes retain the timestamped `rawdatacapture\captures` default.
-   Raw ADC recording is disabled unless `--raw-output` is explicitly given.
+   Other display modes enable classification by default and retain the
+   timestamped `rawdatacapture\captures` output default; pass
+   `--no-classification` when that is not wanted. Raw ADC recording is disabled
+   unless `--raw-output` is explicitly given.
 6. When enabled, runs the trained CNN after 48 consecutive valid tracked
-   frames, reports `DRONE`, `NOT_DRONE`, or `UNKNOWN`, and saves the calibrated
+   frames, displays `DRONE`, `NOT_DRONE`, or `UNKNOWN`, and saves the calibrated
    probability.
 7. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
    control.
@@ -187,18 +194,65 @@ python3 run.py --radar-port /dev/ttyUSB0
 All display modes default to processing every valid frame. Override this with
 `--display-update-every N`.
 
-## Capture Receiver Only
+## Range, Channel, and Angle Calibration
 
-This starts UDP capture but does not configure or start the hardware:
+Interactive choices 7, 8, and 9 run range/channel, azimuth, and elevation
+calibration. Use a strong corner reflector at a laser-measured distance, keep
+the radar and reflector rigid, and remove competing reflectors from the
+configured ±0.20 m search window. Run range/channel calibration before either
+angular calibration so the latter can import the operational profile's channel
+corrections.
 
 ```powershell
-python rawdatacapture\livedatacapture.py
+python run.py --display calibration --calibration-distance-m 1.0
+python run.py --display azimuth-calibration `
+  --calibration-distance-m 1.0 --calibration-angle-deg 0
+python run.py --display elevation-calibration `
+  --calibration-distance-m 1.0 --calibration-angle-deg 0
+```
+
+For angular calibration, `--calibration-angle-deg` is the known physical angle
+from -60 to +60 degrees; omit it to be prompted, with 0 degrees as the default.
+The range distance also prompts when omitted and defaults to 1 m. The launcher
+uses `profiles/profile_calibration.cfg` as a source, creates a temporary raw-
+LVDS runtime profile, ignores 16 warm-up frames, and collects 64 stable frames
+within 90 seconds by default. Override those values with
+`--calibration-profile`, `--calibration-search-window-m`,
+`--calibration-warmup-frames`, `--calibration-frames`, and
+`--calibration-timeout-seconds`.
+
+Hardware is stopped before the result is shown. A JSON report is always written
+to `--calibration-output`, or to a timestamped file in `--capture-dir` when no
+path is supplied. The operational `--config` is changed only after an explicit
+`y` confirmation. Applying a range result replaces its one
+`compRangeBiasAndRxChanPhase` command; applying an angular result writes an SDK-
+safe `% hostAngleCalibration ...` comment. In both cases, the previous profile
+is retained as a timestamped `.bak` file.
+
+Applying calibration changes the normalized profile fingerprint used by the
+CNN artifact contract. Disable classification until the model bundle has been
+trained or exported against the updated `profile.cfg`; otherwise inference
+startup intentionally rejects the profile/artifact mismatch.
+
+## Capture Receiver Only
+
+This starts UDP capture without model loading, but does not configure or start
+the hardware:
+
+```powershell
+python rawdatacapture\livedatacapture.py --no-classification
 ```
 
 Its defaults are `mmwave.json`, `setup.json`, host `192.168.33.30`, UDP port
 4098, no display, an 8,192-datagram receiver queue, a 32-frame processing
 queue, and a requested 4 MiB socket receive buffer. The operating system may
 grant a different receive-buffer size; the actual value is printed.
+
+Unlike combined mode in `run.py`, standalone `livedatacapture.py` enables
+classification by default. Omitting `--no-classification` therefore requires a
+complete compatible model bundle and a `--config` whose normalized fingerprint
+matches it. The repository artifacts match `rawdatacapture/profile.cfg`, not
+the standalone receiver's default `mmwave.json`.
 
 The integrated launcher exposes all three buffering controls:
 
@@ -214,7 +268,8 @@ Use the same config that programmed the radar:
 ```powershell
 python rawdatacapture\livedatacapture.py `
   --config .\rawdatacapture\profile.cfg `
-  --setup .\rawdatacapture\setup.json
+  --setup .\rawdatacapture\setup.json `
+  --no-classification
 ```
 
 Both SDK CLI `.cfg` and mmWave Studio `.json` radar configs are supported. XML
@@ -278,9 +333,11 @@ consecutive frames. One point is sufficient in each frame by default because
 local-maximum filtering has already reduced a reflector to one candidate.
 The validated target is protected by ±2 range, azimuth, and elevation cells
 and remains visible after stopping. Protection is released after 30
-consecutive misses so removed targets are eventually absorbed. Only the exact
-points in the validated cluster are shown as orange squares; its center is
-shown as a cyan diamond. Transient and static-only clutter is suppressed.
+consecutive misses. A removed target is absorbed only when a nonzero
+`--static-background-update-rate` has enabled adaptation; the default fixed
+reference does not absorb it. Only the exact points in the validated cluster
+are shown as orange squares; its center is shown as a cyan diamond. Transient
+and static-only clutter is suppressed.
 
 Static angle processing remains full rate: it runs for every processed
 point-cloud update with the complete 32-by-32 angle FFT. Temporal smoothing
@@ -294,13 +351,17 @@ of view. Spatial DBSCAN defaults to a 0.4 m neighborhood and two-point minimum.
 Dynamic points remain magnitude-colored, and red crosses mark their cluster
 centers. Coordinates are X left/right, Y forward, and Z elevation. The plot
 spans 0 to 10 m forward and approximately -8.66 to +8.66 m across X and Z.
-Dynamic point color is fixed from 40 to 120 dB. Angle output is not calibrated.
+Dynamic point color is fixed from 60 to 120 dB. The supported ODS path applies
+range/channel and azimuth/elevation corrections parsed from the profile, but
+the angle-FFT coordinates remain diagnostic rather than metrology-grade.
 
 The software OS-CFAR requested probability of false alarm defaults to
 `1e-3` per axis.
 
-Use `--max-range-m` to change the shared range limit for any display, and use
-`--point-cloud-fov-deg` to change the point-cloud half-FOV.
+Use `--max-range-m` to change the shared range limit for any display.
+`--point-cloud-fov-deg` changes the point-cloud half-FOV when invoking
+`livedatacapture.py` directly; the integrated `run.py` launcher currently uses
+the receiver's ±60-degree default.
 
 Use `--cluster-eps-m` and `--cluster-min-samples` to tune DBSCAN. Set
 `--cluster-eps-m 0` to disable cluster-center generation:
@@ -339,9 +400,10 @@ python run.py --display point-cloud-micro-doppler
 ```
 
 This mode places the 3D point cloud and a rolling 150-window micro-Doppler
-spectrogram side by side. It reuses one Doppler cube for tracking and range-gate
-selection. The micro-Doppler path calculates a separate slow-time FFT for each
-TX slot using 64-loop Hann windows, a 32-loop hop, and a 128-point FFT. The TX
+spectrogram side by side. It reuses one Doppler cube for dynamic and static
+tracking, then uses the selected track range to gate the original range-FFT
+cube. The micro-Doppler path calculates a separate slow-time FFT for each TX
+slot using 64-loop Hann windows, a 32-loop hop, and a 128-point FFT. The TX
 and RX powers are summed after the FFT; the TX signals are not coherently
 merged. A 128-loop frame produces three short-time spectra. The spectrogram
 uses a five-range-bin gate centered on a confirmed track. A measured dynamic
@@ -372,8 +434,9 @@ available display payload.
 
 ### Dedicated rotor micro-Doppler
 
-Use the dedicated single-TX mode when blade-flash visibility or RPM is more
-important than simultaneous 3D tracking:
+Use the dedicated fixed-range mode when blade-flash visibility or RPM is more
+important than simultaneous 3D tracking. It skips angle processing but retains
+the active profile's three-TX TDM schedule and processes each TX independently:
 
 ```powershell
 python run.py --display micro-doppler --micro-doppler-range-m 2.15 `
@@ -459,7 +522,9 @@ Use `--display none` for packet-loss testing or headless operation.
 
 ## Processed Output
 
-The integrated launcher saves processed data by default. Override its path with:
+The integrated launcher saves processed data by default for normal capture
+modes; calibration modes write their separate JSON report instead. Override a
+normal capture path with:
 
 ```powershell
 python run.py --processed-output .\rawdatacapture\captures\processed.jsonl
@@ -484,7 +549,7 @@ processed update with:
 - the newest complete centered-bin micro-Doppler spectrum in dB;
 - conventional-mode short-time micro-Doppler windows, laid out as
   `[window][centered_doppler_bin]`;
-- the selected micro-Doppler range gate.
+- the selected micro-Doppler range gate;
 - the `[2, 64]` two-range-bin `classification_feature` used to build native
   CNN training windows, or `null` when no valid target owns the frame;
 - `classification`: `label`, calibrated `p_drone`, threshold, status/reason,
@@ -565,13 +630,18 @@ padding are neither processed nor saved.
 
 Successful frames and display latency are not printed continuously. A
 statistics line is emitted immediately whenever one or more capture or
-processing error counters change. Clean shutdown always prints:
+processing error counters change. A normal clean shutdown prints capture,
+processing, static, and DSP timing summaries. It additionally prints the
+post-processing summary only for classified dedicated-rotor capture and the
+display summary only when a visible display was selected:
 
 - a capture summary with total, valid, invalid, and queued frames;
 - a processing summary with queued and completed frames;
-- a post-processing summary with completed frames and queue high-water mark;
-- a display summary with physically rendered updates, latest-update
-  replacements, and frames not rendered over total assembled frames;
+- when active, a post-processing summary with completed frames and queue
+  high-water mark;
+- when active, a display summary with physically rendered updates,
+  latest-update replacements, and frames not rendered over total assembled
+  frames;
 - a static summary with raw candidate, handoff-pending, and validated counts;
 - DSP and post-processing timing summaries with p50, p95, and maximum stage
   latency.

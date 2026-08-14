@@ -13,14 +13,12 @@ try:
         os_cfar_2d as openradar_os_cfar_2d,
         doppler_fft as openradar_doppler_fft,
         range_fft as openradar_range_fft,
-        validate_openradar_backend,
     )
 except ImportError:
     from openradar_backend import (
         os_cfar_2d as openradar_os_cfar_2d,
         doppler_fft as openradar_doppler_fft,
         range_fft as openradar_range_fft,
-        validate_openradar_backend,
     )
 
 
@@ -941,81 +939,6 @@ def _static_angle_geometry(
     return azimuth_u, elevation_u, valid_angles
 
 
-def compute_micro_doppler_spectrum(
-    doppler_cube: np.ndarray,
-    range_axis: Optional[np.ndarray],
-    *,
-    target_range_m: Optional[float] = None,
-    range_half_width_bins: int = 2,
-    min_range_m: float = 0.25,
-    max_range_m: float = 10.0,
-) -> tuple[np.ndarray, Optional[float]]:
-    """Return one range-gated Doppler spectrum and its selected range.
-
-    The input layout is [doppler, tx, rx, range]. When no target range is
-    supplied, the range gate follows the strongest non-zero-Doppler return in
-    the requested range interval. Power is combined before converting to dB.
-    """
-    if doppler_cube.ndim != 4:
-        raise ValueError("Doppler cube must have shape [doppler, tx, rx, range]")
-
-    doppler_bins, _tx_count, _rx_count, range_bins = doppler_cube.shape
-    if doppler_bins == 0 or range_bins == 0:
-        return np.empty((0,), dtype=np.float32), None
-
-    power_map = np.sum(np.abs(doppler_cube) ** 2, axis=(1, 2))
-    physical_range_axis = (
-        np.asarray(range_axis, dtype=np.float64)
-        if range_axis is not None and range_axis.size == range_bins
-        else None
-    )
-    valid_ranges = np.ones(range_bins, dtype=bool)
-    if physical_range_axis is not None:
-        valid_ranges &= physical_range_axis >= max(float(min_range_m), 0.0)
-        if max_range_m > 0.0:
-            valid_ranges &= physical_range_axis <= max_range_m
-    else:
-        valid_ranges[0] = False
-
-    if not np.any(valid_ranges):
-        return np.empty((0,), dtype=np.float32), None
-
-    if target_range_m is not None and physical_range_axis is not None:
-        candidate_bins = np.flatnonzero(valid_ranges)
-        center_bin = int(
-            candidate_bins[
-                np.argmin(np.abs(physical_range_axis[candidate_bins] - target_range_m))
-            ]
-        )
-    else:
-        dynamic_power = power_map.copy()
-        zero_doppler_bin = doppler_bins // 2
-        dynamic_power[
-            max(zero_doppler_bin - 1, 0) : min(zero_doppler_bin + 2, doppler_bins),
-            :,
-        ] = 0.0
-        range_scores = np.max(dynamic_power, axis=0)
-        if not np.any(range_scores[valid_ranges] > 0.0):
-            range_scores = np.max(power_map, axis=0)
-        range_scores[~valid_ranges] = -np.inf
-        center_bin = int(np.argmax(range_scores))
-
-    half_width = max(int(range_half_width_bins), 0)
-    gate_start = max(center_bin - half_width, 0)
-    gate_end = min(center_bin + half_width + 1, range_bins)
-    spectrum_power = np.sum(
-        np.abs(doppler_cube[..., gate_start:gate_end]) ** 2,
-        axis=(1, 2, 3),
-    )
-    spectrum_db = 10.0 * np.log10(spectrum_power + 1e-12)
-    selected_range_m = (
-        float(physical_range_axis[center_bin])
-        if physical_range_axis is not None
-        else None
-    )
-    return spectrum_db.astype(np.float32, copy=False), selected_range_m
-
-
 def compute_per_tx_micro_doppler_spectrogram(
     range_fft: np.ndarray,
     range_axis: Optional[np.ndarray],
@@ -1538,7 +1461,7 @@ def estimate_rotor_rpm(
         precenter=False,
         normalize=True,
     )
-    peak_indices, _properties = scipy_signal.find_peaks(periodogram)
+    peak_indices, _ = scipy_signal.find_peaks(periodogram)
     boundary_peaks: list[int] = []
     if periodogram.size == 1:
         boundary_peaks.append(0)
@@ -1641,7 +1564,7 @@ def cluster_point_cloud(
     min_samples: int = 2,
 ) -> np.ndarray:
     """Return DBSCAN cluster centers as [x, y, z, point_count]."""
-    centers, _labels = cluster_point_cloud_with_labels(
+    centers, _ = cluster_point_cloud_with_labels(
         points,
         eps_m=eps_m,
         min_samples=min_samples,
@@ -1737,25 +1660,6 @@ def _dbscan_labels_small_cloud(
     return labels
 
 
-def _point_is_within_fov(
-    x_m: float,
-    y_m: float,
-    z_m: float,
-    *,
-    azimuth_fov_deg: float,
-    elevation_fov_deg: float,
-) -> bool:
-    """Gate XYZ coordinates using the array's azimuth/elevation direction cosines."""
-    point = np.asarray(((x_m, y_m, z_m),), dtype=np.float64)
-    return bool(
-        _points_are_within_fov(
-            point,
-            azimuth_fov_deg=azimuth_fov_deg,
-            elevation_fov_deg=elevation_fov_deg,
-        )[0]
-    )
-
-
 def _points_are_within_fov(
     xyz_m: np.ndarray,
     *,
@@ -1819,29 +1723,6 @@ def _apply_min_range_gate(
     else:
         gated[:, 0] = False
     return gated
-
-
-def estimate_xyz_from_virtual_array(
-    virtual_samples: np.ndarray,
-    target_range_m: float,
-    config: RadarDspConfig,
-    *,
-    angle_fft_size: int = 32,
-) -> Optional[tuple[float, float, float]]:
-    """Estimate x/y/z from one range-Doppler cell using a simple 2D angle FFT.
-
-    The returned coordinate system is x=left/right, y=forward range, z=elevation.
-    This is an uncalibrated planar-array estimate intended for live visualization.
-    """
-    xyz_m, valid = estimate_xyz_from_virtual_arrays(
-        virtual_samples[np.newaxis, ...],
-        np.asarray((target_range_m,)),
-        config,
-        angle_fft_size=angle_fft_size,
-    )
-    if not valid[0]:
-        return None
-    return tuple(float(value) for value in xyz_m[0])
 
 
 def estimate_xyz_from_virtual_arrays(

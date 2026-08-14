@@ -1,0 +1,36 @@
+{
+  "format_version": 2,
+  "precision": "fp16",
+  "input_shape": [
+    1,
+    2,
+    48,
+    64
+  ],
+  "workspace_bytes": 268435456,
+  "precision_policy": "tensorrt_fp16_auto_tactics_v2",
+  "onnx_sha256": "62574d756b74e87e81c4d89992a23d06d1683ced07feb98783edd6bbe387b886",
+  "parity_data_sha256": "1946b03371ef79b7c958920de80b3c5aca3c96609b2974952c59265f84e559c3",
+  "calibration_sha256": "331856ab0397248eec335ec076e2c1868ddef1e14e46df15e0b038908ce76a15",
+  "model_card_sha256": "fefd4fd6d4d0150b08949f2cd78804b0053587e1a8491358853c72b381ab0ce6",
+  "profile_sha256": "5f89423fbeb8717ea2595750d3f709ecae283021272b6ca7c99a63802192f470",
+  "tensorrt_version": "10.16.2.10",
+  "gpu": {
+    "device_index": 0,
+    "name": "Orin",
+    "compute_capability": [
+      8,
+      7
+    ],
+    "total_memory_bytes": 7849054208,
+    "cuda_runtime_version": 13030,
+    "cuda_driver_version": 13020
+  },
+  "engine_sha256": "836bb242dd99e40b5d46315662bc36100e852670d27e3af36e97f8867eaf031e",
+  "parity": {
+    "windows": 52,
+    "label_mismatches": 0,
+    "max_probability_error": 0.002173618550364173,
+    "tolerance": 0.005
+  }
+}

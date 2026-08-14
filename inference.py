@@ -128,7 +128,7 @@ def doppler_cube_to_feature_step(
     return step
 
 
-def _build_model(torch: Any, nn: Any, config: dict[str, Any]) -> Any:
+def _build_model(nn: Any, config: dict[str, Any]) -> Any:
     class DepthwiseSeparableResidual(nn.Module):
         def __init__(
             self,
@@ -283,7 +283,7 @@ class DroneBirdInference:
             raise ValueError("Classification channel_std must be positive")
         self.calibrator = calibration["calibrator"]
 
-        self.model = _build_model(torch, nn, checkpoint["cnn_config"])
+        self.model = _build_model(nn, checkpoint["cnn_config"])
         self.model.load_state_dict(checkpoint["state_dict"], strict=True)
         self.model.to(torch.device("cpu"))
         self.model.eval()

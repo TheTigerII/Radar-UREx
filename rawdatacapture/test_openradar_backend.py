@@ -18,14 +18,12 @@ from rawdatacapture.dsp import (
     build_virtual_antenna_grids,
     cluster_point_cloud,
     cluster_point_cloud_with_labels,
-    compute_micro_doppler_spectrum,
     compute_per_tx_micro_doppler_spectrogram,
     compute_rotor_micro_doppler_frame,
     compute_point_cloud,
     compute_static_angle_power,
     compute_static_point_cloud,
     doppler_peak_mask,
-    estimate_xyz_from_virtual_array,
     estimate_xyz_from_virtual_arrays,
     estimate_rotor_rpm,
     micro_doppler_velocity_axis_m_s,
@@ -524,29 +522,6 @@ class BatchedAngleFftTests(unittest.TestCase):
 
         np.testing.assert_array_equal(batched, singles)
 
-    def test_batched_angle_fft_matches_single_cell_results(self) -> None:
-        rng = np.random.default_rng(17)
-        samples = (
-            rng.normal(size=(9, 3, 4))
-            + 1j * rng.normal(size=(9, 3, 4))
-        ).astype(np.complex64)
-        ranges_m = np.linspace(0.25, 2.25, samples.shape[0])
-
-        batched_xyz, batched_valid = estimate_xyz_from_virtual_arrays(
-            samples,
-            ranges_m,
-            self.config,
-        )
-        single_results = [
-            estimate_xyz_from_virtual_array(cell, range_m, self.config)
-            for cell, range_m in zip(samples, ranges_m)
-        ]
-        single_valid = np.asarray([result is not None for result in single_results])
-
-        np.testing.assert_array_equal(batched_valid, single_valid)
-        for index in np.flatnonzero(single_valid):
-            np.testing.assert_allclose(batched_xyz[index], single_results[index])
-
     def test_zero_virtual_arrays_point_forward(self) -> None:
         samples = np.zeros((3, 3, 4), dtype=np.complex64)
         ranges_m = np.asarray((0.25, 1.0, 2.0))
@@ -667,63 +642,7 @@ class DopplerPeakMaskTests(unittest.TestCase):
         self.assertTrue(peaks[-1, 0])
 
 
-class MicroDopplerSpectrumTests(unittest.TestCase):
-    def test_auto_gate_uses_strongest_nonzero_doppler_range(self) -> None:
-        doppler_cube = np.zeros((8, 1, 1, 6), dtype=np.complex64)
-        doppler_cube[0, 0, 0, 4] = 3.0
-        doppler_cube[4, 0, 0, 2] = 100.0
-        range_axis = np.arange(6, dtype=np.float32)
-
-        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
-            doppler_cube,
-            range_axis,
-            range_half_width_bins=0,
-            min_range_m=1.0,
-            max_range_m=5.0,
-        )
-
-        self.assertEqual(selected_range_m, 4.0)
-        self.assertEqual(int(np.argmax(spectrum_db)), 0)
-
-    def test_explicit_target_range_combines_gate_power_before_log(self) -> None:
-        doppler_cube = np.zeros((4, 2, 1, 5), dtype=np.complex64)
-        doppler_cube[1, :, :, 1:4] = 1.0
-        range_axis = np.arange(5, dtype=np.float32) * 0.5
-
-        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
-            doppler_cube,
-            range_axis,
-            target_range_m=1.0,
-            range_half_width_bins=1,
-            min_range_m=0.25,
-            max_range_m=2.0,
-        )
-
-        self.assertEqual(selected_range_m, 1.0)
-        self.assertAlmostEqual(
-            float(spectrum_db[1]),
-            10.0 * np.log10(6.0),
-            places=6,
-        )
-
-    def test_explicit_static_target_keeps_centered_zero_doppler_bin(self) -> None:
-        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
-        doppler_cube[4, 0, 0, 2] = 10.0
-        doppler_cube[1, 0, 0, 4] = 20.0
-        range_axis = np.arange(5, dtype=np.float32)
-
-        spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
-            doppler_cube,
-            range_axis,
-            target_range_m=2.0,
-            range_half_width_bins=0,
-            min_range_m=1.0,
-            max_range_m=4.0,
-        )
-
-        self.assertEqual(selected_range_m, 2.0)
-        self.assertEqual(int(np.argmax(spectrum_db)), 4)
-
+class MicroDopplerSpectrogramTests(unittest.TestCase):
     def test_per_tx_stft_uses_64_loop_window_and_32_loop_hop(self) -> None:
         loop_count = 128
         chirps_per_loop = 3

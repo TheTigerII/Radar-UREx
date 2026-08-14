@@ -33,7 +33,6 @@ if __package__ in {None, ""}:
         RotorEstimate,
         cluster_point_cloud,
         cluster_point_cloud_with_labels,
-        compute_micro_doppler_spectrum,
         compute_per_tx_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
@@ -47,9 +46,9 @@ if __package__ in {None, ""}:
         range_axis_m,
         range_resolution_m,
         static_target_protection_mask,
-        validate_openradar_backend,
     )
     from rawdatacapture import calibrate as radar_calibration
+    from rawdatacapture.openradar_backend import validate_openradar_backend
 else:
     from .dsp import (
         AdaptiveClutterMap,
@@ -63,7 +62,6 @@ else:
         RotorEstimate,
         cluster_point_cloud,
         cluster_point_cloud_with_labels,
-        compute_micro_doppler_spectrum,
         compute_per_tx_micro_doppler_spectrogram,
         compute_range_doppler_heatmap,
         compute_range_doppler_fft,
@@ -77,9 +75,9 @@ else:
         range_axis_m,
         range_resolution_m,
         static_target_protection_mask,
-        validate_openradar_backend,
     )
     from . import calibrate as radar_calibration
+    from .openradar_backend import validate_openradar_backend
 
 from inference import (
     DOPPLER_BINS,
@@ -163,7 +161,6 @@ ROTOR_DISPLAY_MAX_RATE_HZ = 60.0
 ROTOR_DISPLAY_TIME_BINS = 512
 PROCESSED_OUTPUT_BUFFER_BYTES = 1024 * 1024
 ROTOR_SPECTRUM_OUTPUT_DECIMALS = 2
-MAGNITUDE_COLORMAP = "turbo"
 POINT_CLOUD_MAGNITUDE_DB_MIN = 60.0
 POINT_CLOUD_MAGNITUDE_DB_MAX = 120.0
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
@@ -459,10 +456,6 @@ class SingleTargetTracker:
         self._consecutive_hits = 0
         self._missed_updates = 0
         self._confirmed = False
-
-    @property
-    def is_active(self) -> bool:
-        return self._position_m is not None
 
     @property
     def is_confirmed(self) -> bool:
@@ -1864,7 +1857,7 @@ class DisplayPayloadSink:
             if combined_payload is not None:
                 payload = combined_payload.point_cloud
             else:
-                payload, _doppler_cube = self._compute_point_cloud_payload(
+                payload, _ = self._compute_point_cloud_payload(
                     range_fft,
                     range_axis_m,
                 )
@@ -2140,15 +2133,7 @@ class DisplayPayloadSink:
             )
 
         micro_doppler_started = time.perf_counter()
-        selected_range_m = None
-        if target_track is not None:
-            _spectrum_db, selected_range_m = compute_micro_doppler_spectrum(
-                doppler_cube,
-                range_axis_m,
-                target_range_m=target_track.range_m,
-                range_half_width_bins=MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
-                max_range_m=self.max_range_m,
-            )
+        selected_range_m = target_track.range_m if target_track is not None else None
         short_time_spectra = np.empty((0, 0), dtype=np.float32)
         if selected_range_m is not None:
             short_time_spectra = compute_per_tx_micro_doppler_spectrogram(
@@ -4698,7 +4683,6 @@ def listen_for_frames(
     packet_queue_size: int,
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
-    display: LiveDisplay,
     pipeline_failure_event: Optional[Any] = None,
     pipeline_process: Optional[Any] = None,
     pipeline_complete_event: Optional[Any] = None,
@@ -6152,7 +6136,6 @@ def main() -> None:
             packet_queue_size=args.packet_queue_size,
             frame_queue=frame_queue,
             log_queue=log_queue,
-            display=display,
             pipeline_failure_event=rotor_post_failure_event,
             pipeline_process=rotor_postprocessor,
             pipeline_complete_event=calibration_complete_event,

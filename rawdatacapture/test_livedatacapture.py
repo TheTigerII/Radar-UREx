@@ -16,7 +16,7 @@ from inference import InferenceResult
 from rawdatacapture.dsp import (
     MicroDopplerResult,
     RotorEstimate,
-    _point_is_within_fov,
+    _points_are_within_fov,
 )
 
 from rawdatacapture.livedatacapture import (
@@ -31,7 +31,6 @@ from rawdatacapture.livedatacapture import (
     DEFAULT_POINT_CLOUD_FOV_DEG,
     DEFAULT_ROTOR_BLADES,
     DEFAULT_ROTOR_RPM_MAX,
-    MAGNITUDE_COLORMAP,
     MICRO_DOPPLER_HISTORY_UPDATES,
     MICRO_DOPPLER_HOP_LOOPS,
     MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
@@ -762,23 +761,27 @@ class PointCloudBoundsTests(unittest.TestCase):
         inside_angle_deg = 60.0
         outside_angle_deg = 61.0
 
-        self.assertTrue(
-            _point_is_within_fov(
-                range_m * math.sin(math.radians(inside_angle_deg)),
-                range_m * math.cos(math.radians(inside_angle_deg)),
-                0.0,
-                azimuth_fov_deg=60.0,
-                elevation_fov_deg=60.0,
+        points = np.asarray(
+            (
+                (
+                    range_m * math.sin(math.radians(inside_angle_deg)),
+                    range_m * math.cos(math.radians(inside_angle_deg)),
+                    0.0,
+                ),
+                (
+                    range_m * math.sin(math.radians(outside_angle_deg)),
+                    range_m * math.cos(math.radians(outside_angle_deg)),
+                    0.0,
+                ),
             )
         )
-        self.assertFalse(
-            _point_is_within_fov(
-                range_m * math.sin(math.radians(outside_angle_deg)),
-                range_m * math.cos(math.radians(outside_angle_deg)),
-                0.0,
+        np.testing.assert_array_equal(
+            _points_are_within_fov(
+                points,
                 azimuth_fov_deg=60.0,
                 elevation_fov_deg=60.0,
-            )
+            ),
+            (True, False),
         )
 
     def test_range_limit_includes_every_range_bin(self) -> None:
@@ -1187,10 +1190,6 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 return_value=clusters,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
-                return_value=(np.ones(4, dtype=np.float32), 2.0),
-            ) as micro_doppler,
-            patch(
                 "rawdatacapture.livedatacapture."
                 "compute_per_tx_micro_doppler_spectrogram",
                 return_value=np.arange(12, dtype=np.float32).reshape(4, 3),
@@ -1199,12 +1198,11 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
             for _ in range(3):
                 sink.update(np.empty((0,), dtype=np.complex64), np.arange(4))
 
-        micro_doppler.assert_called_once()
+        short_time_micro_doppler.assert_called_once()
         self.assertAlmostEqual(
-            micro_doppler.call_args.kwargs["target_range_m"],
+            short_time_micro_doppler.call_args.kwargs["target_range_m"],
             2.0,
         )
-        short_time_micro_doppler.assert_called_once()
         np.testing.assert_array_equal(
             sink.latest_micro_doppler_db,
             np.asarray((2.0, 5.0, 8.0, 11.0)),
@@ -1672,13 +1670,6 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 ),
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
-                side_effect=(
-                    (np.ones(8, dtype=np.float32), 2.0),
-                    (np.ones(8, dtype=np.float32), 2.1),
-                ),
-            ),
-            patch(
                 "rawdatacapture.livedatacapture."
                 "compute_per_tx_micro_doppler_spectrogram",
                 return_value=spectra,
@@ -1751,13 +1742,6 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 side_effect=(
                     (payload(dynamic_track, "dynamic"), doppler_cube),
                     (payload(static_track, "static"), doppler_cube),
-                ),
-            ),
-            patch(
-                "rawdatacapture.livedatacapture.compute_micro_doppler_spectrum",
-                side_effect=(
-                    (np.ones(8, dtype=np.float32), 2.0),
-                    (np.ones(8, dtype=np.float32), 2.4),
                 ),
             ),
             patch(
@@ -2011,9 +1995,6 @@ class RangeDisplayBoundsTests(unittest.TestCase):
 
 
 class MicroDopplerDisplayTests(unittest.TestCase):
-    def test_magnitude_colormap_runs_from_dark_blue_to_red(self) -> None:
-        self.assertEqual(MAGNITUDE_COLORMAP, "turbo")
-
     def test_shared_magnitude_colorbar_starts_at_sixty_db(self) -> None:
         self.assertEqual(POINT_CLOUD_MAGNITUDE_DB_MIN, 60.0)
 

@@ -4,9 +4,11 @@ This document describes the code currently implemented for live raw ADC capture
 from a TI IWR6843ISK-ODS through a DCA1000EVM. It is an implementation guide,
 not a description of TI UART TLV output or mmWave Studio post-processing.
 
-Range FFT, TDM separation, and Doppler FFT use numerically equivalent
-complex64 SciPy kernels in `openradar_backend.py`, validated against the pinned
-OpenRadar implementation. Hann windows are cached, and the unused OpenRadar
+Range FFT, TDM separation, and Doppler FFT use local complex64 SciPy kernels in
+`openradar_backend.py`. Tests compare them with the pinned OpenRadar
+implementation when that package is installed, and capture startup imports
+OpenRadar as a compatibility/dependency check; live FFT calls do not delegate
+their arrays to OpenRadar. Hann windows are cached, and the unused OpenRadar
 complex128/log-magnitude intermediates are not created. OS-CFAR uses a local
 vectorized ordered-window implementation with cached training indices and
 scale factors. Raw DCA1000 decoding and the
@@ -113,6 +115,14 @@ channel_interleave
 lvds_lanes
 sample_rate_ksps
 frequency_slope_mhz_per_us
+start_frequency_ghz
+idle_time_us
+ramp_end_time_us
+frame_periodicity_ms
+range_bias_m
+rx_channel_compensation
+azimuth_bias_deg
+elevation_bias_deg
 bytes_per_frame
 ```
 
@@ -169,10 +179,44 @@ Both interleaved and non-interleaved channel layouts are handled after the
 two-lane IQ conversion. Configuring any LVDS lane count other than two raises
 `NotImplementedError` during conversion and is rejected by startup preflight.
 
+## Calibration Workflow
+
+`run.py` implements three calibration modes: `calibration` for range bias and
+12 physical TX/RX channel coefficients, plus `azimuth-calibration` and
+`elevation-calibration` for host-side angular offsets. All require four RX
+channels and one chirp for each physical TX1, TX2, and TX3. The default source
+is `profiles/profile_calibration.cfg`; the operational profile to update is
+the normal `--config`, which defaults to `rawdatacapture/profile.cfg`.
+
+The launcher never programs the source calibration file directly. It creates a
+temporary runtime profile that disables UART GUI output and firmware-side range
+measurement, enables raw LVDS streaming, and inserts the requested reflector
+distance and search window. The capture process ignores 16 frames by default,
+then requires 64 accepted frames within a 90-second timeout.
+
+Range/channel calibration averages the zero-Doppler response across loops,
+orders channels by physical TX number, finds the reflector within the requested
+range window, and uses three-point interpolation for sub-bin range bias. It
+accepts a result only after range, phase, and magnitude stability limits pass,
+then emits a TI `compRangeBiasAndRxChanPhase` command. Angular calibration first
+imports the operational profile's range/channel compensation into host DSP,
+forms a 128-by-128 angle FFT at the reflector bin, and records measured minus
+known angle as the selected axis bias.
+
+Hardware is stopped before the result is offered to the operator. Every result
+is written to a JSON report. Applying it is an explicit `y/N` confirmation:
+range calibration atomically replaces the profile's single
+`compRangeBiasAndRxChanPhase` line, while angular calibration updates the SDK-
+safe `% hostAngleCalibration ...` comment. Both paths create a timestamped
+profile backup first. Normal capture parses these corrections: range bias
+shifts the physical range axis, channel coefficients are applied in the ODS
+virtual array, and azimuth/elevation offsets correct the reported directions.
+
 ## Implemented DSP
 
-The DSP in `dsp.py` is intended for live visualization, not calibrated target
-measurement.
+The DSP in `dsp.py` is intended for live visualization. It applies configured
+range/channel and angular corrections, but it is not a precision metrology or
+validated multi-target tracking system.
 
 ### Range profile
 
@@ -267,15 +311,19 @@ consecutive frames. Deployments can restore stricter same-frame density with
 `--static-cluster-min-samples 3`. Handoff remains eligible for 60 frames. The
 selected target's range, azimuth, and elevation cells are protected by ±2 bins
 while validated; motion-only protection is released after 30 consecutive
-misses. The static tracker also releases after 30 misses, allowing removed
-objects to be absorbed into the adaptive map. Only the exact DBSCAN members of
-the validated target are displayed and saved. All suppressed raw activity is
-reported separately as `static_candidate_count`.
+misses. The static tracker also releases after 30 misses. If a nonzero
+`--static-background-update-rate` enabled adaptation, released objects can then
+be absorbed into the background; the default zero rate keeps the startup
+reference fixed. Only the exact DBSCAN members of the validated target are
+displayed and saved. All suppressed raw activity is reported separately as
+`static_candidate_count`.
 
 For four RX channels and TX masks corresponding to TX1-TX3, the virtual grid
 uses the IWR6843ISK-ODS antenna layout and applies a sign inversion to RX2 and
 RX3. Other layouts fall back to a generic grid. Returned coordinates use
-X=left/right, Y=forward, and Z=elevation; the estimate is uncalibrated.
+X=left/right, Y=forward, and Z=elevation. Configured range/channel and fixed
+azimuth/elevation corrections are applied for the supported ODS path, but the
+result remains a diagnostic angle-FFT estimate.
 
 ### Combined point cloud and micro-Doppler
 
@@ -289,10 +337,11 @@ selected 3D track range
 ```
 
 The `point-cloud-micro-doppler` display computes one Doppler cube for each
-processed update and reuses it for the dynamic point cloud, static angle cube,
-and range-gate selection. A measured confirmed dynamic track has priority
-while the target is moving. A validated static track takes over after handoff;
-a predicted dynamic track is used only when neither is measured. During a
+processed update and reuses it for the dynamic point cloud and static angle
+cube. The selected track range then gates the original range-FFT cube for the
+per-TX STFT. A measured confirmed dynamic track has priority while the target
+is moving. A validated static track takes over after handoff; a predicted
+dynamic track is used only when neither is measured. During a
 short dynamic detection gap, a constant-velocity prediction maintains the gate
 and the tracked-target marker is shown smaller and translucent. No static-only
 clutter or arbitrary range fallback can activate micro-Doppler.
@@ -432,9 +481,11 @@ space externally.
 - No packet reordering; only duplicate and overlap handling.
 - Only complex 16-bit, two-lane LVDS reshape is implemented.
 - The dedicated rotor mode derives an approximate velocity axis from profile
-  timing, but antenna, phase, and range-bias calibration are still absent.
-- Tracking supports one target only, uses uncalibrated XYZ positions, and has
-  no Doppler-assisted association or externally validated track identity.
+  timing. Configured range and channel corrections are available, but there is
+  no rotor-specific velocity or blade-geometry calibration.
+- Tracking supports one target only. XYZ positions can include configured
+  range/channel and fixed angular corrections, but track accuracy and identity
+  are not externally validated and association is not Doppler-assisted.
 - Range FFT includes the full complex FFT rather than selecting only a
   physically useful half-spectrum.
 - The point cloud is a diagnostic visualization, not precision metrology.
