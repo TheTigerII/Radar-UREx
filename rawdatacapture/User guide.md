@@ -31,6 +31,10 @@ trtexec --onnx=model_weights/model.onnx \
 When `model.fp16.engine` is present, live classification automatically uses
 TensorRT on the Jetson GPU. TensorRT engines are device-specific and should be
 rebuilt after changing the Jetson, TensorRT version, or ONNX model.
+The TensorRT path also requires the `tensorrt` module and
+`cuda.bindings.runtime` from the JetPack/CUDA Python installation to be
+importable. If the engine is absent, inference uses an available ONNX Runtime
+provider, preferring CUDA and retaining CPU fallback when both are available.
 
 The radar must run SDK CLI-compatible firmware. Connect the IWR6843 command
 UART, connect the DCA1000 Ethernet interface, and configure that interface:
@@ -47,7 +51,7 @@ To use `training.ipynb`, install a PyTorch build appropriate for the training
 machine, then install the remaining notebook dependencies:
 
 ```bash
-python -m pip install scikit-learn matplotlib onnx jupyter
+python -m pip install scikit-learn matplotlib onnx onnxscript jupyter
 ```
 
 Jetson users should use NVIDIA's supported PyTorch package rather than assuming
@@ -63,12 +67,20 @@ source .venv/bin/activate
 python run.py --display combined
 ```
 
-The launcher starts capture first, configures and arms the DCA1000, sends the
-fixed 20 m profile to the radar, and then sends `sensorStart`. It prompts for a
-duration; Enter selects five minutes and `0` runs until Ctrl+C.
-By default it selects the serial device whose USB description is
-`CP2105 Dual USB to UART Bridge Controller - Enhanced COM Port`. Use
-`--radar-port` only to override that selection.
+The launcher starts capture first, waits for its worker and UDP listener to be
+ready, configures the DCA1000, sends the selected SDK CLI profile to the radar,
+arms DCA1000 recording, and then sends `sensorStart`. The default profile is
+`rawdatacapture/profile-mini4-20m.cfg`; normal PMM capture accepts another
+`.cfg` path only when its acquisition values match the Mini4 contract. The
+launcher prompts for a duration; Enter selects five minutes and `0` runs until
+Ctrl+C.
+
+Without `--radar-port`, the launcher selects the only serial device whose
+description contains `CP2105`, `Enhanced`, and `COM Port` (case-insensitive).
+If that match is unavailable but exactly one serial port is enumerated, it
+uses that port; with multiple ports it prompts for a selection. If no ports are
+enumerated, the prompted fallback is `/dev/ttyUSB0` on Linux or `COM4` on
+Windows. Use `--radar-port` to override discovery.
 
 For normal capture modes the launcher asks whether to enable real-time UAV
 classification. Press Enter to keep it off. When combined display option 5 is
@@ -102,9 +114,11 @@ python run.py --display combined --classification \
   --dataset-destination dataset
 ```
 
-The display choices are `none`, `range`, `range-doppler`, `point-cloud`, and
-`combined`. All graphical modes use PyQtGraph; the 3D modes also use its
-OpenGL widgets. Use `none` for unattended or headless operation.
+The normal display choices are `none`, `range`, `range-doppler`, `point-cloud`,
+and `combined`. The launcher also provides the dedicated `calibration`,
+`azimuth-calibration`, and `elevation-calibration` modes described below. All
+graphical modes use PyQtGraph; the 3D normal modes also use its OpenGL widgets.
+Use `none` for unattended or headless operation.
 
 Keep the monitored area target-free during the first 30 seconds. The status is
 `calibrating` during that period and no detection is emitted.
@@ -137,11 +151,54 @@ python run.py --help
 python rawdatacapture/livedatacapture.py --help
 ```
 
+## Hardware calibration
+
+The three calibration display modes use
+`profiles/profile_calibration.cfg` to create a temporary raw-LVDS runtime
+profile; that source file and the operational profile are not changed during
+measurement. Place a strong reflector at a laser-measured distance, keep the
+rest of the calibration region clear, and run range/RX-channel calibration
+first:
+
+```bash
+python run.py --display calibration --calibration-distance-m 1.0
+```
+
+The defaults are a 1 m target distance, a ±0.20 m search window, 16 warm-up
+frames, 64 accepted frames, and a 90-second timeout. A stable result produces a
+JSON report under `rawdatacapture/captures/` unless
+`--calibration-output` supplies another path. The launcher then asks before
+updating `compRangeBiasAndRxChanPhase` in the operational profile. Applying a
+result creates a timestamped `.bak` copy first.
+
+After range/RX calibration has been applied, measure azimuth and elevation at
+a known tripod angle:
+
+```bash
+python run.py --display azimuth-calibration \
+  --calibration-distance-m 1.0 --calibration-angle-deg 0
+
+python run.py --display elevation-calibration \
+  --calibration-distance-m 1.0 --calibration-angle-deg 0
+```
+
+Angular calibration loads the operational profile's range and RX-channel
+corrections while measuring. Applying the result writes a host-only
+`% hostAngleCalibration` comment and preserves the other angular bias. These
+modes produce a calibration report rather than normal PMM JSONL or raw capture
+output. Use the `--calibration-search-window-m`,
+`--calibration-warmup-frames`, `--calibration-frames`, and
+`--calibration-timeout-seconds` options to override their defaults.
+
 ## Output
 
-The default processed filename is
-`rawdatacapture/captures/pmm_capture_<timestamp>.jsonl`. Each run begins with a
-metadata record, followed by frame records. Look for:
+The generated processed filename is `pmm_capture_<timestamp>.jsonl`. Its
+default directory is `rawdatacapture/captures/` for normal modes other than
+`combined`; combined mode prompts for `dataset/`, `dataset/uav/`, or
+`dataset/other/` and defaults to `dataset/`. Supplying
+`--dataset-destination` uses that dataset directory in any normal mode, while
+`--processed-output` supplies the exact output path. Each run begins with a
+metadata record followed by update records. Look for:
 
 - `pmm_tracking.state`
 - `pmm_tracking.label`, always `PMM target`
@@ -198,9 +255,13 @@ source .venv/bin/activate
 jupyter lab training.ipynb
 ```
 
-Run the cells in order when training is intended. The committed notebook is
-unexecuted and does not contain weights or metrics. It validates that all input
-files share the same Mini4 profile, feature pipeline, and capture threshold;
+For local Jupyter, skip the first code cell: it is a Google Colab bootstrap
+that imports `google.colab`, mounts Drive, changes to a Colab-specific path,
+and installs export packages. Start with the imports cell after installing the
+dependencies above. In Colab, adjust the Drive path in the bootstrap cell and
+then run all cells in order. The committed notebook is unexecuted and does not
+contain weights or metrics. It validates that all input files share the same
+Mini4 profile, feature pipeline, and capture threshold;
 extracts non-overlapping 36-by-64 Doppler-Time segments; applies the recorded
 PMM threshold; balances the classes; and creates deterministic stratified 70%,
 15%, and 15% training, validation, and locked-test partitions. Normalization is
@@ -216,6 +277,7 @@ After the export cell runs, the following ignored artifacts are written:
 ```text
 training_output/mmhawkeye_lstm/model_state.pt
 training_output/mmhawkeye_lstm/model.onnx
+training_output/mmhawkeye_lstm/model.onnx.data  # when external data is emitted
 training_output/mmhawkeye_lstm/manifest.json
 ```
 
@@ -240,11 +302,13 @@ fingerprint, feature fingerprint, feature version, input shape, label order,
 normalization, architecture, or ONNX interface does not match the running
 pipeline.
 
-After 36 tracked frames pass the PMM gate, the point-cloud and combined status
-text includes `UAV` or `OTHER` with confidence. Before that it reports warm-up;
-low-PMM windows remain unknown. Classification metadata and per-frame results
-are also written to processed JSONL. This output is a model prediction, not
-independent ground truth.
+Once a complete 36-frame Doppler-Time history and 36 associated PMM scores are
+available, the point-cloud and combined status text can include `UAV` or
+`OTHER` with confidence. The quality gate uses the maximum PMM score in that
+window; before the history is complete it reports warm-up, and a window whose
+maximum is below threshold remains unknown. Classification metadata and
+per-frame results are also written to processed JSONL. This output is a model
+prediction, not independent ground truth.
 
 ## Replay
 
@@ -257,12 +321,14 @@ python rawdatacapture/replay_pmm.py \
   --output rawdatacapture/captures/session_replay.jsonl
 ```
 
-Use `python rawdatacapture/replay_pmm.py --help` for frame limits and PMM
-settings.
+Replay emits one `pmm_replay` JSON object per complete raw frame and rejects an
+incomplete trailing frame. Use `python rawdatacapture/replay_pmm.py --help` for
+the available output path, background-calibration duration, and threshold
+options. The replay CLI does not provide a frame-limit option.
 
 ## Hardware preflight
 
-Validate the fixed profile and setup without sending hardware commands:
+Run the startup configuration preflight without sending hardware commands:
 
 ```bash
 python rawdatacapture/startup.py \
@@ -272,11 +338,19 @@ python rawdatacapture/startup.py \
   --preflight-only --skip-socket-preflight
 ```
 
+This checks the parsed dimensions, two-lane LVDS support, DCA1000 and serial
+settings, and the SDK command file. Because `--skip-socket-preflight` is shown,
+it does not test the UDP bind; omit that flag when the host interface is
+configured and the port should be checked. The normal capture worker performs
+the stricter Mini4 acquisition-contract validation before live reception.
+
 ## Troubleshooting
 
-If preflight rejects the profile, use the repository
-`profile-mini4-20m.cfg` unchanged. The processing dimensions are intentionally
-fixed.
+If normal capture rejects a profile, compare its acquisition dimensions,
+timing, slope, sample rate, and `(1, 4, 2)` TX order with the repository
+`profile-mini4-20m.cfg`. Those acquisition values are intentionally fixed;
+range/RX compensation and host angular-bias values may differ after hardware
+calibration.
 
 If packet loss increases, verify the dedicated Ethernet address, close other
 DCA1000 tools, increase the OS receive buffer if permitted, and avoid slow

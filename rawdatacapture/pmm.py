@@ -481,7 +481,7 @@ def capon_pmm_angle_scores(
     folding_size_min: int,
     folding_size_max: int,
     doppler_fft_size: int = MINI4_DOPPLER_FFT_SIZE,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Return angle grid and 2-D PMM folding scores at one target range."""
     loops = int(config.num_loops or 0)
     tx_count = int(config.num_chirps_per_loop or 0)
@@ -557,7 +557,7 @@ def capon_pmm_angle_scores(
         folding_size_min,
         folding_size_max,
     )
-    return angles, folded.reshape(angles.size, angles.size), beamformed
+    return angles, folded.reshape(angles.size, angles.size)
 
 
 class PmmTracker:
@@ -906,7 +906,7 @@ class PmmTracker:
         azimuth_deg: Optional[float] = None
         elevation_deg: Optional[float] = None
         if detected:
-            angles, angle_scores, _beamformed = capon_pmm_angle_scores(
+            angles, angle_scores = capon_pmm_angle_scores(
                 range_fft,
                 range_bin,
                 self.radar_config,

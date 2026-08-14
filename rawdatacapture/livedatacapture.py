@@ -292,33 +292,6 @@ class RadarCaptureConfig:
     def chirp_tx_masks(self) -> tuple[int, ...]:
         return tuple(self.tx_channel_masks or ())
 
-    @property
-    def chirp_period_s(self) -> Optional[float]:
-        if self.idle_time_us is None or self.ramp_end_time_us is None:
-            return None
-        return (self.idle_time_us + self.ramp_end_time_us) * 1e-6
-
-    @property
-    def slow_time_interval_s(self) -> Optional[float]:
-        if self.chirp_period_s is None:
-            return None
-        return self.chirp_period_s * int(self.num_chirps_per_loop or 1)
-
-    @property
-    def slow_time_rate_hz(self) -> Optional[float]:
-        interval = self.slow_time_interval_s
-        return None if not interval else 1.0 / interval
-
-    @property
-    def frame_duty_cycle(self) -> Optional[float]:
-        if self.chirp_period_s is None or not self.frame_periodicity_ms:
-            return None
-        return (
-            self.num_chirps_per_frame
-            * self.chirp_period_s
-            / (self.frame_periodicity_ms * 1e-3)
-        )
-
 
 def _with_host_compensation(
     capture_config: RadarCaptureConfig,
@@ -1177,14 +1150,14 @@ class _PyQtGraphDisplay:
             plot.addItem(self.range_doppler_image)
             self.window.resize(1050, 650)
         elif self.mode == "point-cloud":
-            self.window, _point_view = self._make_point_panel()
+            self.window = self._make_point_panel()
             self.window.setWindowTitle("Mini4 PMM — Target")
             self.window.resize(850, 700)
         elif self.mode == COMBINED_DISPLAY_MODE:
             self.window = self.QtWidgets.QWidget()
             self.window.setWindowTitle("Mini4 PMM — Combined")
             layout = self.QtWidgets.QHBoxLayout(self.window)
-            point_panel, _point_view = self._make_point_panel()
+            point_panel = self._make_point_panel()
             doppler_panel = self.pg.GraphicsLayoutWidget()
             doppler_plot = doppler_panel.addPlot(
                 title="Target-gated Doppler–Time"
@@ -1206,7 +1179,7 @@ class _PyQtGraphDisplay:
             raise ValueError(f"Unsupported PyQtGraph display mode: {self.mode}")
         self.window.show()
 
-    def _make_point_panel(self) -> tuple[Any, Any]:
+    def _make_point_panel(self) -> Any:
         panel = self.QtWidgets.QWidget()
         layout = self.QtWidgets.QVBoxLayout(panel)
         self.point_status = self.QtWidgets.QLabel("PMM target — starting")
@@ -1250,7 +1223,7 @@ class _PyQtGraphDisplay:
         view.addItem(self.target_scatter)
         layout.addWidget(self.point_status)
         layout.addWidget(view, 1)
-        return panel, view
+        return panel
 
     def _poll(self) -> None:
         if self.stop_event.is_set():

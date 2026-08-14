@@ -532,7 +532,6 @@ class CalibrationAccumulator:
         self._accepted_profiles: deque[np.ndarray] = deque(maxlen=settings.accepted_frames)
         self._accepted_biases: deque[float] = deque(maxlen=settings.accepted_frames)
         self.result: Optional[CalibrationResult] = None
-        self.last_payload: Optional[CalibrationPayload] = None
 
     def _empty_coefficients(self) -> tuple[np.ndarray, np.ndarray]:
         return np.zeros(12, dtype=np.float64), np.zeros(12, dtype=np.float64)
@@ -575,7 +574,7 @@ class CalibrationAccumulator:
                     )
                 )
             )
-        payload = CalibrationPayload(
+        return CalibrationPayload(
             range_axis_m=self.range_axis_m.copy(),
             range_profile_db=np.asarray(profile_db, dtype=np.float64),
             search_min_m=self.settings.target_distance_m - self.settings.search_window_m,
@@ -591,8 +590,6 @@ class CalibrationAccumulator:
             max_magnitude_cv=max_magnitude_cv,
             status=status,
         )
-        self.last_payload = payload
-        return payload
 
     def update(self, range_fft: np.ndarray) -> CalibrationPayload:
         cube = np.asarray(range_fft)
@@ -786,7 +783,6 @@ class AngularCalibrationAccumulator:
         self._accepted_angles: deque[float] = deque(maxlen=settings.accepted_frames)
         self._accepted_ranges: deque[float] = deque(maxlen=settings.accepted_frames)
         self.result: Optional[AngularCalibrationResult] = None
-        self.last_payload: Optional[AngularCalibrationPayload] = None
         bins = np.arange(ANGLE_FFT_SIZE, dtype=np.float64)
         direction_cosines = np.clip(
             2.0 * (bins - ANGLE_FFT_SIZE // 2) / ANGLE_FFT_SIZE,
@@ -810,7 +806,7 @@ class AngularCalibrationAccumulator:
             if len(self._accepted_angles) >= 2
             else None
         )
-        payload = AngularCalibrationPayload(
+        return AngularCalibrationPayload(
             calibration_type=self.settings.calibration_type,
             range_axis_m=self.range_axis_m.copy(),
             range_profile_db=np.asarray(range_profile_db, dtype=np.float64),
@@ -834,8 +830,6 @@ class AngularCalibrationAccumulator:
             required_frames=self.settings.accepted_frames,
             status=status,
         )
-        self.last_payload = payload
-        return payload
 
     def update(self, range_fft: np.ndarray) -> AngularCalibrationPayload:
         cube = np.asarray(range_fft)

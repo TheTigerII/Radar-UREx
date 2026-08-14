@@ -1,11 +1,12 @@
 # Mini4 PMM Tracking Design
 
-This repository contains one live radar processing path: Phase 1 detection and
-tracking of a single periodic-micro-motion (PMM) target. The live path does not
-identify the reflector type, and every runtime target is labelled `PMM target`.
-The repository also contains an optional LSTM training notebook and a gated
-real-time inference path. Classification is disabled unless explicitly enabled
-and compatible weights are present.
+This repository contains one normal live radar processing path for Phase 1
+detection and tracking of a single periodic-micro-motion (PMM) target, plus
+separate range/RX-channel and angular hardware-calibration modes. The PMM path
+does not identify the reflector type, and every runtime target is labelled
+`PMM target`. The repository also contains an optional LSTM training notebook
+and a gated real-time inference path. Classification is disabled unless
+explicitly enabled and compatible weights are present.
 
 ## Signal path
 
@@ -42,7 +43,7 @@ history after PMM tracking:
 36-frame target-gated Doppler-Time history
   -> capture-threshold PMM quality gate
   -> training-identical alignment and normalization
-  -> two-layer LSTM through ONNX Runtime
+  -> two-layer LSTM through TensorRT or ONNX Runtime
   -> other/UAV probabilities in JSONL and display status
 ```
 
@@ -53,7 +54,9 @@ DCA1000 decoding primitives needed by this path.
 
 ## Fixed acquisition profile
 
-Only `profile-mini4-20m.cfg` is accepted:
+Normal PMM tracking accepts an SDK CLI `.cfg` whose acquisition fields match
+the Mini4 contract. `profile-mini4-20m.cfg` is the default and reference
+profile:
 
 - 60.25 GHz start frequency.
 - 3 TDM transmitters and 4 receivers.
@@ -70,10 +73,15 @@ has its complex mean removed. This suppresses stationary zero-Doppler clutter
 in PMM extraction and in the displayed range-Doppler and Doppler-time spectra.
 It can also attenuate genuinely very slow target components.
 
-Preflight rejects any dimension, timing, slope, sampling-rate, TX order, or
-frame-period mismatch. Processing and display are gated to 0.3–20 m.
-The profile's `adcbufCfg` selects the IWR68xx non-interleaved ADC layout, so
-each receiver's samples are decoded contiguously within a chirp.
+The capture worker rejects any dimension, timing, slope, sampling-rate, TX
+order, or frame-period mismatch. The startup preflight separately validates
+positive dimensions, two-lane LVDS support, DCA1000 settings, serial settings,
+the SDK command file, and (unless skipped) the UDP bind. Processing and display
+are gated to 0.3–20 m after applying the configured range bias. The profile's
+`adcbufCfg` selects the IWR68xx non-interleaved ADC layout, so each receiver's
+samples are decoded contiguously within a chirp. Range/RX compensation and the
+host angular-bias comment may change without changing the acquisition
+contract.
 
 ## Capture integrity
 
@@ -83,6 +91,35 @@ Packets and complete frames move through bounded queues, and overflow counters
 are included in diagnostics. A large discontinuity resynchronizes frame
 ownership. Raw capture remains optional and stores complete frames with sidecar
 metadata.
+
+## Hardware calibration path
+
+The `calibration`, `azimuth-calibration`, and `elevation-calibration` modes are
+separate from PMM background calibration and normal processed output. The
+launcher reads `profiles/profile_calibration.cfg`, creates a temporary runtime
+profile that enables raw LVDS, disables GUI output and firmware range
+calibration, and starts a range-FFT-only calibration worker. It writes a JSON
+report after a stable result and changes the operational profile only after an
+interactive confirmation.
+
+Range/RX-channel calibration uses a laser-measured reflector distance. It
+forms a Hann-weighted zero-Doppler response across loops, searches the requested
+range window, interpolates the peak, and accumulates the 12 physical TX/RX
+channels. The default acceptance contract is 16 warm-up frames followed by 64
+stable frames, with at least 10 dB peak prominence, range standard deviation at
+most 0.01 m, phase standard deviation at most 5 degrees, and channel-magnitude
+coefficient of variation at most 0.05. Applying the result replaces the single
+`compRangeBiasAndRxChanPhase` command atomically after creating a timestamped
+backup.
+
+Angular calibration uses the operational profile's range bias and RX-channel
+coefficients as host-side corrections while the temporary calibration profile
+runs on the radar. The 12 corrected virtual channels are mapped to the ODS
+planar array, transformed on a 128-by-128 FFT angle grid, and accumulated until
+64 accepted angle estimates have a standard deviation at most 1 degree.
+Applying an azimuth or elevation result updates an SDK-safe
+`% hostAngleCalibration` comment while preserving the other angular bias,
+again with a timestamped backup.
 
 ## PMM extraction and calibration
 
@@ -96,29 +133,31 @@ Startup requires 300 valid target-free frames by default. Their mean PMM
 spectrum becomes the background. Projection-based subtraction estimates the
 background gain and subtracts the projected spectrum. Until calibration
 finishes, the only state is `calibrating` and no detection is emitted.
-Calibration is tied to profile and feature fingerprints and is reset by a
-profile mismatch or observation discontinuity.
+The metadata records profile and feature fingerprints for compatibility
+checking. A changed range axis or incompatible Doppler-cube shape resets the
+learned background calibration. A non-monotonic timestamp or a gap greater
+than 1.5 frame periods resets track ownership and histories but preserves the
+learned background.
 
-The default score threshold is 750. It is a runtime setting derived from the
-first local target-free and Mini 4 Pro recordings after correcting the ADC
-layout and folding implementation. In that pair, the target-free maximum was
-about 615 and the target recording's median post-calibration score was about
-1,145. More target-free and controlled-flight recordings are still required
-before treating 750 as a site-independent threshold.
+The code-level default score threshold is 750. It is a site-dependent runtime
+setting rather than a universal physical constant, so target-free and
+controlled-flight recordings are required before deploying it at a new site.
 
 The paper's value of 30,000 is not used here: it gates complete 3.6-second
 Doppler-Time segments before the paper's identification stage, rather than
-individual tracking frames. The live Phase 1 path has no identification stage.
-The offline notebook instead gates each segment using the compatible capture's
-recorded `detection_threshold`, because the paper's value is not portable to
-this acquisition profile or signal scale.
+individual tracking frames. The core PMM tracker has no identification stage;
+object classification is the separate optional path described below. The
+offline notebook gates each segment using the compatible capture's recorded
+`detection_threshold`, because the paper's value is not portable to this
+acquisition profile or signal scale.
 
 ## Tracking
 
 Dynamic programming maximizes cumulative PMM score while limiting each
 range-bin transition. The default 4 m/s speed limit is converted to bins from
-the measured frame interval and 7.8 cm range spacing. A path becomes
-provisional after five valid observations.
+the measured frame interval and 7.8 cm range spacing. PMM path evaluation
+begins after five corrected observations by default; a threshold hit can then
+create a `tentative` track.
 
 A 5,000-particle constant-velocity filter smooths range and estimates radial
 velocity. At the filtered range, Capon beamforming searches the 12-element ODS
@@ -145,7 +184,7 @@ ownership.
 ## Output contract
 
 Processed output is JSON Lines. The metadata record contains the exact profile
-and feature fingerprints and PMM settings. Frame records contain:
+and feature fingerprints and PMM settings. Update records contain:
 
 - calibration progress;
 - raw and background-subtracted PMM scores;
@@ -153,7 +192,7 @@ and feature fingerprints and PMM settings. Frame records contain:
 - selected range bin and filtered range;
 - filtered radial velocity, azimuth, and elevation;
 - track state, age, hits, misses, and predicted/measured status;
-- dynamic-programming and particle-filter diagnostics;
+- dynamic-programming diagnostics and the configured particle count;
 - target-gated Doppler–Time history;
 - stage latency, queue occupancy, and packet/frame-loss counters.
 
@@ -211,14 +250,17 @@ two output logits. A trained `model.onnx`, its external tensor-data sidecar when
 declared, and `manifest.json` must be copied into the `model_weights/` directory
 before live classification can be enabled.
 
-`inference.py` prefers a device-built `model.fp16.engine` with TensorRT and
-falls back to loading `model.onnx` with ONNX Runtime. It validates the manifest
-and graph interface. It rejects missing metadata, unexpected label order,
-architecture or input-shape changes, invalid normalization, and mismatched
-profile/feature fingerprints.
-It maintains the rolling PMM score window, returns `warming_up` until all 36
-frames are present, and returns `unknown` if the maximum score is below the
-runtime threshold. Otherwise it applies the notebook's dB-to-amplitude,
+`inference.py` uses a device-built `model.fp16.engine` with TensorRT when that
+file is present; otherwise it loads `model.onnx` with an available ONNX Runtime
+CUDA or CPU provider. A TensorRT loading or execution error is reported rather
+than retried through ONNX Runtime. Both runtime paths validate their tensor
+interfaces, and the manifest validator rejects missing metadata, unexpected
+label order, architecture or input-shape changes, invalid normalization, and
+mismatched profile/feature fingerprints.
+It maintains the rolling PMM score window, returns `warming_up` until both the
+Doppler-Time history and PMM-score window contain 36 entries, and returns
+`unknown` if the maximum score is below the runtime threshold. Otherwise it
+applies the notebook's dB-to-amplitude,
 strongest-bin alignment, `log1p`, and stored normalization operations before
 computing the two probabilities. Inference runs in the DSP worker rather than
 the UDP receiver, and its latency is included in processing diagnostics.
@@ -229,11 +271,12 @@ the notebook.
 
 ## Process model
 
-The main process receives UDP packets. A worker process performs all DSP,
-optional LSTM inference, and serialization, and an optional PyQtGraph display
-process consumes a latest-only queue. Range and image modes use native
-PyQtGraph plot items; target and combined modes use `pyqtgraph.opengl` for the
-3D PMM position.
+After `run.py` launches the capture subprocess, that subprocess's main process
+receives UDP packets and assembles frames. A spawned worker process performs
+all DSP, optional LSTM inference, raw/processed writing, and serialization; an
+optional PyQtGraph display process consumes a latest-only queue. Range and
+image modes use native PyQtGraph plot items; target and combined modes use
+`pyqtgraph.opengl` for the 3D PMM position.
 The processing queue is bounded and records drops rather than allowing
 unbounded memory growth. The display queue is also bounded and may discard
 superseded drawings without affecting processing.

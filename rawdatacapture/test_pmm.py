@@ -205,7 +205,7 @@ class CaponAngleTests(unittest.TestCase):
             MINI4_NUM_RX_CHANNELS,
         ).reshape(MINI4_NUM_CHIRPS, MINI4_NUM_RX_CHANNELS)
 
-        angles, scores, _beamformed = capon_pmm_angle_scores(
+        angles, scores = capon_pmm_angle_scores(
             range_fft,
             target_bin,
             config,
@@ -311,7 +311,7 @@ class PmmTrackerStateTests(unittest.TestCase):
         angle_scores[30, 30] = 100.0
         with patch(
             "rawdatacapture.pmm.capon_pmm_angle_scores",
-            return_value=(angles, angle_scores, np.empty((0, 0))),
+            return_value=(angles, angle_scores),
         ):
             first = tracker.update(target, range_fft, range_axis)
             second = tracker.update(target, range_fft, range_axis)
@@ -326,7 +326,7 @@ class PmmTrackerStateTests(unittest.TestCase):
         miss = background.copy()
         with patch(
             "rawdatacapture.pmm.capon_pmm_angle_scores",
-            return_value=(angles, angle_scores, np.empty((0, 0))),
+            return_value=(angles, angle_scores),
         ):
             coast_one = tracker.update(miss, range_fft, range_axis)
             coast_two = tracker.update(miss, range_fft, range_axis)
@@ -373,7 +373,7 @@ class PmmTrackerStateTests(unittest.TestCase):
         angle_scores = np.zeros((61, 61), dtype=np.float32)
         with patch(
             "rawdatacapture.pmm.capon_pmm_angle_scores",
-            return_value=(angles, angle_scores, np.empty((0, 0))),
+            return_value=(angles, angle_scores),
         ):
             tracker.update(target, range_fft, range_axis, timestamp_s=1.1)
             tracker.update(target, range_fft, range_axis, timestamp_s=1.2)
