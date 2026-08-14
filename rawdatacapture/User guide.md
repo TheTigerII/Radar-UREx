@@ -331,11 +331,12 @@ displacement is required. Static acquisition remains disabled and any older
 static track is reset while measured dynamic tracking is healthy. After two
 consecutive missing dynamic measurements, a 60-frame handoff window opens.
 A static local maximum or cluster can take over only if it is within 0.4 m of
-the last dynamic position and remains associated for three consecutive frames.
-When multiple clusters pass the gate, the one nearest that last position is
-tried. One point is sufficient in each frame by default because local-maximum
-filtering has already reduced a reflector to one candidate.
-While static confirmation is pending, a clearly visible predicted target marker
+the last dynamic position. Because the target identity was already confirmed by
+the dynamic tracker, the first qualifying static return completes the handoff;
+it does not need three additional temporal hits. When multiple clusters pass
+the gate, the one nearest that last position is tried. One point is sufficient
+in each frame by default because local-maximum filtering has already reduced a
+reflector to one candidate. Until that return arrives, a predicted static marker
 is held at the last measured dynamic position. It is continuity state rather
 than a new radar point and remains marked as predicted in processed output.
 The validated target is protected by ±2 range, azimuth, and elevation cells
@@ -393,9 +394,10 @@ Use `--static-warmup-frames`, `--static-reference-frames`,
 absolute sensitivity floor. Defaults are 30 warm-up frames, 150 reference
 frames, a fixed reference (zero adaptation rate), one same-frame cluster member,
 and 3 dB. Set a nonzero `--static-background-update-rate` to opt into adaptation.
-Set `--static-cluster-min-samples 3` to require three spatially adjacent candidates
-in every update in addition to temporal confirmation. The learned
-noise threshold can make the effective threshold higher in unstable cells.
+Set `--static-cluster-min-samples 3` to require three spatially adjacent
+candidates in the qualifying handoff update instead of one local maximum. The
+learned noise threshold can make the effective threshold higher in unstable
+cells.
 Disable the static branch without changing the moving-target path with:
 
 ```powershell

@@ -309,10 +309,11 @@ track has armed handoff; no additional displacement test is required. Handoff
 does not open while dynamic measurements remain healthy, and measured dynamic
 tracking resets static acquisition. After two consecutive missing dynamic
 measurements, clusters within 0.4 m of the last dynamic position become
-eligible, and the closest such cluster must remain associated for three
-consecutive frames. Deployments can restore stricter same-frame density with
+eligible. The prior dynamic confirmation plus this spatial gate establishes
+identity, so the closest qualifying cluster confirms the static track on its
+first return. Deployments can restore stricter same-frame density with
 `--static-cluster-min-samples 3`. Handoff remains eligible for 60 frames. The
-last measured dynamic position remains as an explicit predicted target marker
+last measured dynamic position remains as an explicit predicted static marker
 during this pending interval, including after the dynamic tracker expires; it
 is not serialized or displayed as a measured point. The
 selected target's range, azimuth, and elevation cells are protected by ±2 bins
@@ -347,10 +348,10 @@ The `point-cloud-micro-doppler` display computes one Doppler cube for each
 processed update and reuses it for the dynamic point cloud and static angle
 cube. The selected track range then gates the original range-FFT cube for the
 per-TX STFT. A measured confirmed dynamic track has priority while the target
-is moving. A validated static track takes over after handoff; a predicted
-dynamic track is used only when neither is measured. During a
-short dynamic detection gap, a constant-velocity prediction maintains the gate
-and the tracked-target marker is shown smaller and translucent. No static-only
+is moving. A one-update dynamic prediction covers the initial detection miss;
+after the handoff opens, a predicted static anchor holds the last measured
+position until the first qualified static return takes over. Predicted markers
+are shown smaller and translucent. No static-only
 clutter or arbitrary range fallback can activate micro-Doppler.
 
 The micro-Doppler branch reshapes the chronological chirps into explicit loop

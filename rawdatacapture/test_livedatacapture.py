@@ -668,6 +668,10 @@ class ProcessedOutputWriterTests(unittest.TestCase):
             records[0]["static_detection"]["handoff_distance_m"],
             0.4,
         )
+        self.assertEqual(
+            records[0]["static_detection"]["handoff_confirmation_hits"],
+            1,
+        )
         self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
         self.assertEqual(
             records[0]["micro_doppler_processing"]["window_loops"],
@@ -1222,7 +1226,7 @@ class MotionHandoffQualifierTests(unittest.TestCase):
 
 
 class TrackedDisplayPayloadTests(unittest.TestCase):
-    def test_static_tracker_uses_stationary_model_and_two_second_coast(
+    def test_static_tracker_uses_one_hit_handoff_and_two_second_coast(
         self,
     ) -> None:
         sink = DisplayPayloadSink(
@@ -1235,6 +1239,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         self.assertEqual(tracker.velocity_gain, 0.0)
         self.assertEqual(tracker.position_gain, 0.35)
+        self.assertEqual(tracker.confirmation_hits, 1)
         self.assertEqual(tracker.max_missed_updates, 60)
 
         candidate = np.asarray(
@@ -1242,8 +1247,6 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
             dtype=np.float32,
         )
         empty = np.empty((0, 4), dtype=np.float32)
-        tracker.update(candidate)
-        tracker.update(candidate)
         confirmed = tracker.update(candidate)
         assert confirmed is not None
         self.assertTrue(confirmed.confirmed)
@@ -1489,7 +1492,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         self.assertEqual(payload.static_points.shape, (3, 5))
         self.assertFalse(np.any(payload.static_points[:, 3] == 120.0))
 
-    def test_single_static_maximum_requires_three_temporal_hits(self) -> None:
+    def test_first_qualified_static_maximum_completes_handoff(self) -> None:
         sink = DisplayPayloadSink(
             COMBINED_DISPLAY_MODE,
             1,
@@ -1526,16 +1529,6 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 return_value=empty_points,
             ),
         ):
-            for _ in range(2):
-                payload, _cube = sink._compute_point_cloud_payload(
-                    np.empty((0,), dtype=np.complex64),
-                    np.arange(5),
-                )
-                self.assertEqual(payload.target_source, "dynamic")
-                assert payload.target_track is not None
-                self.assertTrue(payload.target_track.is_predicted)
-                self.assertEqual(payload.static_validation, "handoff_pending")
-
             payload, _cube = sink._compute_point_cloud_payload(
                 np.empty((0,), dtype=np.complex64),
                 np.arange(5),
@@ -1545,6 +1538,87 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         self.assertEqual(payload.static_validation, "validated")
         self.assertEqual(payload.static_points.shape, (1, 5))
         self.assertEqual(payload.static_clusters.shape, (1, 4))
+
+    def test_stopped_dynamic_target_transitions_without_selection_gap(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+        )
+        dynamic_points = np.asarray(
+            ((0.0, 2.0, 0.0, 70.0),),
+            dtype=np.float32,
+        )
+        dynamic_clusters = np.asarray(
+            ((0.0, 2.0, 0.0, 1.0),),
+            dtype=np.float32,
+        )
+        empty_dynamic = np.empty((0, 4), dtype=np.float32)
+        empty_static = np.empty((0, 5), dtype=np.float32)
+        static_point = np.asarray(
+            ((0.0, 2.0, 0.0, 70.0, 9.0),),
+            dtype=np.float32,
+        )
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                side_effect=[
+                    dynamic_points,
+                    dynamic_points,
+                    dynamic_points,
+                    empty_dynamic,
+                    empty_dynamic,
+                ],
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                side_effect=[
+                    dynamic_clusters,
+                    dynamic_clusters,
+                    dynamic_clusters,
+                    empty_dynamic,
+                    empty_dynamic,
+                ],
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                side_effect=[
+                    empty_static,
+                    empty_static,
+                    empty_static,
+                    empty_static,
+                    static_point,
+                ],
+            ),
+        ):
+            payloads = [
+                sink._compute_point_cloud_payload(
+                    np.empty((0,), dtype=np.complex64),
+                    np.arange(5),
+                )[0]
+                for _ in range(5)
+            ]
+
+        self.assertEqual(payloads[2].target_source, "dynamic")
+        assert payloads[2].target_track is not None
+        self.assertFalse(payloads[2].target_track.is_predicted)
+        self.assertEqual(payloads[3].target_source, "dynamic")
+        assert payloads[3].target_track is not None
+        self.assertTrue(payloads[3].target_track.is_predicted)
+        self.assertEqual(payloads[4].target_source, "static")
+        assert payloads[4].target_track is not None
+        self.assertFalse(payloads[4].target_track.is_predicted)
+        self.assertEqual(payloads[4].static_validation, "validated")
+        self.assertTrue(
+            all(payload.target_track is not None for payload in payloads[2:])
+        )
 
     def test_strict_static_cluster_override_rejects_single_maximum(self) -> None:
         sink = DisplayPayloadSink(
@@ -1589,7 +1663,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                     np.arange(5),
                 )
 
-        self.assertEqual(payload.target_source, "dynamic")
+        self.assertEqual(payload.target_source, "static")
         assert payload.target_track is not None
         self.assertTrue(payload.target_track.is_predicted)
         self.assertEqual(payload.static_validation, "handoff_pending")
@@ -1637,7 +1711,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                     np.arange(5),
                 )
 
-        self.assertEqual(payload.target_source, "dynamic")
+        self.assertEqual(payload.target_source, "static")
         assert payload.target_track is not None
         self.assertTrue(payload.target_track.is_predicted)
         np.testing.assert_allclose(payload.target_track.position_m, (0.0, 2.0, 0.0))

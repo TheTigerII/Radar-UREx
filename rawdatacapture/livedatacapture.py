@@ -129,6 +129,7 @@ DEFAULT_STATIC_CLUSTER_MIN_SAMPLES = 1
 STATIC_HANDOFF_MIN_DYNAMIC_MISSES = 2
 STATIC_HANDOFF_WINDOW_UPDATES = 60
 STATIC_HANDOFF_DISTANCE_M = 0.4
+STATIC_HANDOFF_CONFIRMATION_HITS = 1
 STATIC_PROTECTION_CELLS = 2
 STATIC_TRACK_MAX_MISSED_UPDATES = 60
 DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
@@ -1229,6 +1230,9 @@ class ProcessedOutputWriter:
                 "handoff_min_dynamic_misses": (
                     STATIC_HANDOFF_MIN_DYNAMIC_MISSES
                 ),
+                "handoff_confirmation_hits": (
+                    STATIC_HANDOFF_CONFIRMATION_HITS
+                ),
                 "reference_update_unit": "processed detection update",
                 "reference_policy": (
                     "startup median, adaptive except around motion-qualified "
@@ -1240,9 +1244,8 @@ class ProcessedOutputWriter:
                 ),
                 "validation_policy": (
                     "a confirmed measured dynamic track followed by two "
-                    "missing dynamic measurements and a persistent nearby "
-                    "static local maximum or cluster across three associated "
-                    "updates"
+                    "missing dynamic measurements and the nearest static "
+                    "local maximum or cluster inside the handoff radius"
                 ),
             },
             "micro_doppler_units": "dB power",
@@ -1598,6 +1601,10 @@ class DisplayPayloadSink:
         self.dynamic_target_tracker = SingleTargetTracker()
         self.static_target_tracker = SingleTargetTracker(
             acquisition_policy="nearest",
+            # Dynamic tracking already confirmed this identity. Spatial
+            # continuity through the handoff gate replaces a second temporal
+            # confirmation delay when the target stops.
+            confirmation_hits=STATIC_HANDOFF_CONFIRMATION_HITS,
             max_missed_updates=STATIC_TRACK_MAX_MISSED_UPDATES,
             position_gain=0.35,
             velocity_gain=0.0,
@@ -2545,10 +2552,10 @@ class DisplayPayloadSink:
             target_track = static_track
             target_source = "static"
         elif handoff_position is not None:
-            # Keep one explicit predicted target at the last measured dynamic
-            # position while static confirmation is pending. This bridges the
-            # interval even after the dynamic tracker itself has expired,
-            # without presenting the anchor as a measured radar point.
+            # Once dynamic ownership is lost, represent the continuity anchor
+            # as a predicted static track. The first measured static return
+            # inside the handoff radius replaces it, so the selected target
+            # does not vanish merely because its Doppler reached zero.
             if dynamic_track is not None and dynamic_track.confirmed:
                 target_track = replace(
                     dynamic_track,
@@ -2564,7 +2571,7 @@ class DisplayPayloadSink:
                     missed_updates=STATIC_HANDOFF_MIN_DYNAMIC_MISSES,
                     confirmed=True,
                 )
-            target_source = "dynamic"
+            target_source = "static"
         elif dynamic_track is not None and dynamic_track.confirmed:
             target_track = dynamic_track
             target_source = "dynamic"
