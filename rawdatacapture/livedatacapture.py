@@ -130,7 +130,7 @@ STATIC_MOTION_HISTORY_UPDATES = 30
 STATIC_MOTION_MIN_DISPLACEMENT_M = 0.3
 STATIC_HANDOFF_MIN_DYNAMIC_MISSES = 2
 STATIC_HANDOFF_WINDOW_UPDATES = 60
-STATIC_HANDOFF_DISTANCE_M = 0.75
+STATIC_HANDOFF_DISTANCE_M = 0.4
 STATIC_PROTECTION_CELLS = 2
 STATIC_TRACK_MAX_MISSED_UPDATES = 60
 DEFAULT_TRACK_ASSOCIATION_DISTANCE_M = 0.75
@@ -1240,6 +1240,10 @@ class ProcessedOutputWriter:
                 "cluster_min_samples": max(
                     int(static_cluster_min_samples),
                     1,
+                ),
+                "handoff_distance_m": STATIC_HANDOFF_DISTANCE_M,
+                "handoff_min_dynamic_misses": (
+                    STATIC_HANDOFF_MIN_DYNAMIC_MISSES
                 ),
                 "reference_update_unit": "processed detection update",
                 "reference_policy": (
@@ -4626,6 +4630,7 @@ def _run_frame_processor_impl(
             f"minimum_change={static_min_change_db:g} dB, "
             f"learned_noise_multiplier="
             f"{DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER:g}x, "
+            f"handoff_distance={STATIC_HANDOFF_DISTANCE_M:g} m, "
             f"background_update_rate={static_background_update_rate:g}. "
             "Keep the target absent until calibration is complete."
     )

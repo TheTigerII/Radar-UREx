@@ -664,6 +664,10 @@ class ProcessedOutputWriterTests(unittest.TestCase):
             records[0]["static_detection"]["noise_sigma_multiplier"],
             2.0,
         )
+        self.assertEqual(
+            records[0]["static_detection"]["handoff_distance_m"],
+            0.4,
+        )
         self.assertEqual(records[0]["radar_config"]["num_loops"], 128)
         self.assertEqual(
             records[0]["micro_doppler_processing"]["window_loops"],
@@ -1568,7 +1572,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
         sink.motion_handoff = motion_handoff
         empty_points = np.empty((0, 4), dtype=np.float32)
         static_point = np.asarray(
-            ((0.0, 3.0, 0.0, 70.0, 9.0),),
+            ((0.0, 2.41, 0.0, 70.0, 9.0),),
             dtype=np.float32,
         )
         doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
