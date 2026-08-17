@@ -11,7 +11,7 @@ from scipy import fft as scipy_fft
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
-MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v4"
+MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v6"
 MINI4_NUM_ADC_SAMPLES = 256
 MINI4_NUM_RX_CHANNELS = 4
 MINI4_NUM_LOOPS = 32
@@ -662,6 +662,12 @@ class PmmTracker:
             "feature_version": MINI4_FEATURE_VERSION,
             "config": asdict(self.config),
             "doppler_fft_size": MINI4_DOPPLER_FFT_SIZE,
+            "tracking_clutter_suppression": (
+                "paper R-PMM background projection subtraction after folding"
+            ),
+            "identification_dc_removal": (
+                "paper center-bin baseline subtraction before body-peak alignment"
+            ),
         }
         feature_fingerprint = hashlib.sha256(
             json.dumps(
@@ -900,6 +906,9 @@ class PmmTracker:
             filtered_range_m = measured_range_m
             radial_velocity_m_s = None
 
+        # The paper's tracking and identification paths both start from the
+        # non-demeaned Doppler spectrum. Identification applies its separate,
+        # body-peak-aware center-bin subtraction to this rolling history.
         target_spectrum = magnitude[range_bin]
         self.doppler_history.append(target_spectrum.astype(np.float32))
         self.angle_elapsed_s += self.current_delta_time_s

@@ -108,7 +108,7 @@ def compute_range_doppler_fft(
     *,
     fft_size: int = 64,
 ) -> np.ndarray:
-    """Return DC-clutter-suppressed TDM data as [doppler, tx, rx, range]."""
+    """Return Hann-windowed TDM data as [doppler, tx, rx, range]."""
     loops = int(config.num_loops or 0)
     tx_count = int(config.num_chirps_per_loop or 0)
     if loops <= 0 or tx_count <= 0:
@@ -123,8 +123,7 @@ def compute_range_doppler_fft(
         config.num_rx_channels,
         config.num_adc_samples,
     )
-    dc_removed = explicit - explicit.mean(axis=0, keepdims=True)
-    windowed = dc_removed * _hann_window(loops)[:, None, None, None]
+    windowed = explicit * _hann_window(loops)[:, None, None, None]
     transformed = scipy_fft.fft(
         windowed,
         n=fft_size,

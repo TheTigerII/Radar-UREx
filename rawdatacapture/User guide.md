@@ -265,9 +265,18 @@ then run all cells in order. The committed notebook is unexecuted and does not
 contain weights or metrics. It validates that all input files share the same
 Mini4 profile, feature pipeline, and capture threshold;
 extracts non-overlapping 36-by-64 Doppler-Time segments; applies the recorded
-PMM threshold; balances the classes; and creates deterministic stratified 70%,
-15%, and 15% training, validation, and locked-test partitions. Normalization is
-fitted only on the training partition.
+PMM threshold; estimates the center-bin DC baseline only from frames whose body
+peak is away from DC; aligns the pre-removal body peak; balances the classes;
+and creates deterministic stratified 70%, 15%, and 15% training, validation,
+and locked-test partitions. Normalization is fitted only on the training
+partition.
+
+Feature version `mini4-pmm-tracking-v6` uses the paper's tracking clutter
+suppression: non-demeaned Doppler spectra are folded first, followed by
+projection subtraction of the calibrated Range-Time-PMM background. Earlier
+captures and the committed v4 model weights cannot reproduce this input and
+must not be relabelled as v6. Record a new v6 dataset and retrain before enabling
+classification.
 
 Training uses a two-layer, 128-hidden-unit LSTM for 100 epochs with Adam at
 `5e-5` and batch size 10. Validation loss chooses the retained state. The final

@@ -27,7 +27,7 @@ DEFAULT_MANIFEST_NAME = "manifest.json"
 
 
 def align_doppler_time(history_db: np.ndarray) -> np.ndarray:
-    """Apply the exact alignment and compression contract used for training."""
+    """Apply paper-style DC removal, body-peak alignment, and compression."""
     history = np.asarray(history_db, dtype=np.float32)
     if history.shape != (SEGMENT_FRAMES, DOPPLER_BINS):
         raise ValueError(
@@ -36,14 +36,23 @@ def align_doppler_time(history_db: np.ndarray) -> np.ndarray:
     if not np.isfinite(history).all():
         raise ValueError("Doppler-Time history contains non-finite values")
     amplitude = np.power(10.0, history / 20.0, dtype=np.float32)
+    body_peak_bins = np.argmax(amplitude, axis=1)
+    away_from_dc = np.abs(body_peak_bins - CENTER_BIN) > CENTER_TOLERANCE_BINS
+    dc_removed = amplitude.copy()
+    if np.any(away_from_dc):
+        dc_noise = float(np.mean(amplitude[away_from_dc, CENTER_BIN]))
+        dc_removed[:, CENTER_BIN] = np.maximum(
+            dc_removed[:, CENTER_BIN] - dc_noise,
+            0.0,
+        )
     coordinates = np.arange(DOPPLER_BINS, dtype=np.float32)
     aligned = np.empty_like(amplitude)
-    for time_index, spectrum in enumerate(amplitude):
-        strongest_bin = int(np.argmax(spectrum))
-        if abs(strongest_bin - CENTER_BIN) <= CENTER_TOLERANCE_BINS:
+    for time_index, spectrum in enumerate(dc_removed):
+        body_peak_bin = int(body_peak_bins[time_index])
+        if abs(body_peak_bin - CENTER_BIN) <= CENTER_TOLERANCE_BINS:
             aligned[time_index] = spectrum
             continue
-        shift = CENTER_BIN - strongest_bin
+        shift = CENTER_BIN - body_peak_bin
         aligned[time_index] = np.interp(
             coordinates - shift,
             coordinates,
@@ -402,9 +411,9 @@ class RealtimeUavClassifier:
         if not isinstance(dataset, dict):
             raise ValueError("Model dataset metadata must be an object")
         for field in (
-            "profile_fingerprint",
-            "feature_fingerprint",
             "feature_version",
+            "feature_fingerprint",
+            "profile_fingerprint",
         ):
             observed = runtime_contract.get(field)
             expected = dataset.get(field)

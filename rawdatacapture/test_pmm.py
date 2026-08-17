@@ -257,6 +257,10 @@ class PmmTrackerStateTests(unittest.TestCase):
         self.assertEqual(result.state, "searching")
         self.assertEqual(result.history_frames, 20)
         self.assertEqual(tracker.spectrogram_db.shape, (64, 19))
+        np.testing.assert_array_equal(
+            np.argmax(tracker.spectrogram_db, axis=0),
+            np.zeros(19, dtype=np.int64),
+        )
         self.assertFalse(tracker.range_filter.initialized)
         self.assertIsNone(result.radial_velocity_m_s)
 

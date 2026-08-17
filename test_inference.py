@@ -22,7 +22,7 @@ def _runtime_contract() -> dict:
     return {
         "profile_fingerprint": "profile-test",
         "feature_fingerprint": "feature-test",
-        "feature_version": "mini4-pmm-tracking-v4",
+        "feature_version": "mini4-pmm-tracking-v6",
     }
 
 
@@ -88,6 +88,41 @@ class PreprocessingTests(unittest.TestCase):
             np.full(SEGMENT_FRAMES, DOPPLER_BINS // 2),
         )
 
+    def test_dc_noise_uses_only_frames_with_body_peak_away_from_center(self) -> None:
+        amplitude = np.ones((SEGMENT_FRAMES, DOPPLER_BINS), dtype=np.float32)
+        amplitude[:, DOPPLER_BINS // 2] = 10.0
+        amplitude[: SEGMENT_FRAMES // 2, 12] = 100.0
+        amplitude[SEGMENT_FRAMES // 2 :, DOPPLER_BINS // 2] = 50.0
+        history_db = 20.0 * np.log10(amplitude)
+
+        processed = np.expm1(align_doppler_time(history_db))
+
+        np.testing.assert_allclose(
+            processed[: SEGMENT_FRAMES // 2, DOPPLER_BINS // 2],
+            100.0,
+            atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            processed[SEGMENT_FRAMES // 2 :, DOPPLER_BINS // 2],
+            40.0,
+            atol=1e-4,
+        )
+
+    def test_all_hovering_segment_preserves_center_peak(self) -> None:
+        history = _history(SEGMENT_FRAMES, peak_bin=DOPPLER_BINS // 2).T
+
+        processed = np.expm1(align_doppler_time(history))
+
+        np.testing.assert_array_equal(
+            np.argmax(processed, axis=1),
+            np.full(SEGMENT_FRAMES, DOPPLER_BINS // 2),
+        )
+        np.testing.assert_allclose(
+            processed[:, DOPPLER_BINS // 2],
+            10.0,
+            rtol=1e-5,
+        )
+
     def test_wrong_history_shape_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Expected"):
             align_doppler_time(np.zeros((35, DOPPLER_BINS), dtype=np.float32))
@@ -105,6 +140,14 @@ class RealtimeClassifierTests(unittest.TestCase):
             _write_artifacts(weights, feature_fingerprint="different")
 
             with self.assertRaisesRegex(ValueError, "feature_fingerprint mismatch"):
+                RealtimeUavClassifier(weights, _runtime_contract())
+
+    def test_legacy_preprocessing_version_is_rejected_before_model_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            weights = Path(directory) / "model_weights"
+            _write_artifacts(weights, feature_version="mini4-pmm-tracking-v5")
+
+            with self.assertRaisesRegex(ValueError, "feature_version mismatch"):
                 RealtimeUavClassifier(weights, _runtime_contract())
 
     def test_declared_external_data_must_exist(self) -> None:

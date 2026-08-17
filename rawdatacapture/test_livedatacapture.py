@@ -233,7 +233,7 @@ class AdcLayoutTests(unittest.TestCase):
 
 
 class DopplerProcessingTests(unittest.TestCase):
-    def test_slow_time_mean_subtraction_removes_static_clutter(self) -> None:
+    def test_static_signal_is_retained_at_zero_doppler_for_paper_pipeline(self) -> None:
         loops = 8
         transmitters = 2
         config = SimpleNamespace(
@@ -254,7 +254,12 @@ class DopplerProcessingTests(unittest.TestCase):
             fft_size=8,
         )
 
-        np.testing.assert_allclose(doppler_cube, 0.0, atol=1e-5)
+        center_bin = doppler_cube.shape[0] // 2
+        self.assertGreater(float(np.abs(doppler_cube[center_bin]).min()), 0.0)
+        np.testing.assert_array_equal(
+            np.argmax(np.abs(doppler_cube), axis=0),
+            np.full(doppler_cube.shape[1:], center_bin),
+        )
 
 
 class UdpPacketReceiverTests(unittest.TestCase):

@@ -14,12 +14,13 @@ explicitly enabled and compatible weights are present.
 DCA1000 raw ADC
   -> validate and assemble complete frames
   -> 256-point range FFT
-  -> per-TX/RX/range slow-time mean subtraction
   -> 64-point Doppler FFT (32 samples/TX, zero-padded)
   -> PMM spectrum folding
   -> calibrated projection subtraction
   -> continuity-constrained range tracking
   -> particle-filter range/velocity smoothing
+  -> identification branch: Doppler spectrum at tracked range
+  -> center-bin DC baseline subtraction and body-peak alignment
   -> 12-element ODS Capon angle search
   -> angle continuity tracking and particle smoothing
   -> JSONL and display
@@ -68,10 +69,12 @@ profile:
 - 256 range bins at approximately 7.8 cm spacing.
 - 64 Doppler bins after zero-padding.
 
-Before Doppler windowing and transformation, each TX/RX/range slow-time vector
-has its complex mean removed. This suppresses stationary zero-Doppler clutter
-in PMM extraction and in the displayed range-Doppler and Doppler-time spectra.
-It can also attenuate genuinely very slow target components.
+The slow-time vectors are Hann-windowed and transformed without complex-mean
+subtraction. As in the paper, tracking suppresses static background only after
+PMM folding by projecting each Range-Time-PMM column onto the target-free
+background spectrum and subtracting that projection. The same non-demeaned
+Doppler spectrum remains available for identification, preserving a hovering
+target's body-velocity peak.
 
 The capture worker rejects any dimension, timing, slope, sampling-rate, TX
 order, or frame-period mismatch. The startup preflight separately validates
@@ -219,11 +222,13 @@ versions, or capture thresholds. Full rolling histories are selected at
 only if the maximum corrected PMM score in its 36 frames reaches the capture's
 recorded threshold.
 
-Slow-time complex mean subtraction in `dsp.py` is treated as the DC-removal
-stage, so the notebook does not subtract DC again. Each spectrum is converted
-from dB to linear amplitude; if its strongest bin is more than one bin from the
-center, it is shifted to the center with linear interpolation and zero fill.
-The aligned amplitude is compressed with `log1p`.
+Each identification spectrum is converted from dB to linear amplitude. The
+body-peak bin is located before DC removal. Center-bin values are averaged only
+over frames whose body peak is more than one bin from the center, and that
+average is subtracted from every center-bin value with a zero floor. If no such
+frame exists, the center bin is left unchanged to preserve a hovering target.
+Spectra with an off-center body peak are then shifted to the center with linear
+interpolation and zero fill. The aligned amplitude is compressed with `log1p`.
 
 Before splitting, the majority class is deterministically undersampled to the
 minority count. A seed-42, stratified segment-level split assigns approximately
