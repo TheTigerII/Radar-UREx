@@ -27,6 +27,7 @@ from rawdatacapture.dsp import (
     doppler_peak_mask,
     estimate_xyz_from_virtual_arrays,
     estimate_rotor_rpm,
+    frame_bytes_to_radar_cube,
     micro_doppler_velocity_axis_m_s,
     rotor_velocity_alias_diagnostic,
     static_target_protection_mask,
@@ -986,6 +987,53 @@ class RotorMicroDopplerTests(unittest.TestCase):
         self.assertIn("Expected tip speed", warning)
 
 
+class FrameDecodingTests(unittest.TestCase):
+    @staticmethod
+    def _config(*, iq_swap: bool, channel_interleave: bool) -> SimpleNamespace:
+        return SimpleNamespace(
+            bytes_per_frame=16,
+            lvds_lanes=2,
+            iq_swap=iq_swap,
+            num_chirps_per_frame=1,
+            num_rx_channels=2,
+            num_adc_samples=2,
+            channel_interleave=channel_interleave,
+        )
+
+    def test_decodes_two_lane_iq_directly_to_complex64(self) -> None:
+        samples = np.arange(1, 9, dtype="<i2")
+
+        cube = frame_bytes_to_radar_cube(
+            samples.tobytes(),
+            self._config(iq_swap=True, channel_interleave=False),
+        )
+
+        self.assertEqual(cube.dtype, np.complex64)
+        np.testing.assert_array_equal(
+            cube,
+            np.asarray(
+                (((3 + 1j, 4 + 2j), (7 + 5j, 8 + 6j)),),
+                dtype=np.complex64,
+            ),
+        )
+
+    def test_channel_interleave_transposes_sample_and_receiver_axes(self) -> None:
+        samples = np.arange(1, 9, dtype="<i2")
+
+        cube = frame_bytes_to_radar_cube(
+            samples.tobytes(),
+            self._config(iq_swap=False, channel_interleave=True),
+        )
+
+        np.testing.assert_array_equal(
+            cube,
+            np.asarray(
+                (((1 + 3j, 5 + 7j), (2 + 4j, 6 + 8j)),),
+                dtype=np.complex64,
+            ),
+        )
+
+
 class PointCloudClusteringTests(unittest.TestCase):
     def test_dbscan_returns_cluster_centers_and_ignores_noise(self) -> None:
         points = np.asarray(
@@ -1049,6 +1097,24 @@ class PointCloudClusteringTests(unittest.TestCase):
 
         self.assertEqual(centers.shape, (1, 4))
         np.testing.assert_array_equal(labels, (0, 0, -1))
+
+    def test_static_sized_cloud_does_not_enter_sklearn_path(self) -> None:
+        points = np.zeros((256, 4), dtype=np.float32)
+        labels = np.zeros(256, dtype=np.intp)
+
+        with patch(
+            "rawdatacapture.dsp._dbscan_labels_small_cloud",
+            return_value=labels,
+        ) as vectorized_dbscan:
+            centers, actual_labels = cluster_point_cloud_with_labels(
+                points,
+                eps_m=0.4,
+                min_samples=1,
+            )
+
+        vectorized_dbscan.assert_called_once()
+        self.assertEqual(centers.shape, (1, 4))
+        np.testing.assert_array_equal(actual_labels, labels)
 
 
 class OsCfarParameterTests(unittest.TestCase):

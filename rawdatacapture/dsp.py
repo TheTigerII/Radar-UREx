@@ -8,6 +8,8 @@ import numpy as np
 from scipy import fft as scipy_fft
 from scipy import ndimage as scipy_ndimage
 from scipy import signal as scipy_signal
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 
 try:
     from .openradar_backend import (
@@ -33,6 +35,8 @@ DEFAULT_STATIC_NOISE_SIGMA_MULTIPLIER = 2.0
 DEFAULT_STATIC_BACKGROUND_UPDATE_RATE = 0.0
 DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE = 20.0
 DEFAULT_STATIC_MINIMUM_NOISE_DB = 1.0
+MAX_VECTORIZED_DBSCAN_POINTS = DEFAULT_STATIC_MAX_POINTS
+DBSCAN_GRAPH_MIN_POINTS = 96
 DEFAULT_ROTOR_NOISE_GATE_MIN_DB = 3.0
 DEFAULT_ROTOR_NOISE_GATE_MAX_DB = 15.0
 DEFAULT_ROTOR_NOISE_SIGMA_MULTIPLIER = 3.0
@@ -1650,7 +1654,10 @@ def cluster_point_cloud_with_labels(
     if min_samples < 1:
         raise ValueError("DBSCAN min_samples must be at least 1")
 
-    if points.shape[0] <= 128:
+    # Live static clouds are capped at DEFAULT_STATIC_MAX_POINTS.  Keeping
+    # those bounded clouds on the in-process implementation prevents the
+    # first sklearn import from landing in the frame-processing hot path.
+    if points.shape[0] <= MAX_VECTORIZED_DBSCAN_POINTS:
         labels = _dbscan_labels_small_cloud(
             points[:, :3],
             eps_m=float(eps_m),
@@ -1681,12 +1688,21 @@ def _dbscan_labels_small_cloud(
     min_samples: int,
 ) -> np.ndarray:
     """Deterministic DBSCAN without sklearn's per-frame validation overhead."""
-    coordinates = np.asarray(xyz_m, dtype=np.float64)
+    coordinates = np.asarray(xyz_m, dtype=np.float32)
     point_count = coordinates.shape[0]
     differences = (
         coordinates[:, np.newaxis, :] - coordinates[np.newaxis, :, :]
     )
-    neighbors = np.sum(differences * differences, axis=2) <= eps_m * eps_m
+    squared_distances = np.einsum(
+        "ijk,ijk->ij",
+        differences,
+        differences,
+        optimize=True,
+    )
+    neighbors = squared_distances <= eps_m * eps_m
+    if point_count >= DBSCAN_GRAPH_MIN_POINTS:
+        return _dbscan_labels_from_neighbor_graph(neighbors, min_samples)
+
     labels = np.full(point_count, -1, dtype=np.intp)
     visited = np.zeros(point_count, dtype=bool)
     cluster_label = 0
@@ -1718,6 +1734,35 @@ def _dbscan_labels_small_cloud(
             if labels[neighbor_index] < 0:
                 labels[neighbor_index] = cluster_label
         cluster_label += 1
+    return labels
+
+
+def _dbscan_labels_from_neighbor_graph(
+    neighbors: np.ndarray,
+    min_samples: int,
+) -> np.ndarray:
+    """Label a bounded DBSCAN neighbor graph without Python cluster walks."""
+    point_count = int(neighbors.shape[0])
+    labels = np.full(point_count, -1, dtype=np.intp)
+    core_mask = np.count_nonzero(neighbors, axis=1) >= int(min_samples)
+    core_indices = np.flatnonzero(core_mask)
+    if core_indices.size == 0:
+        return labels
+
+    _component_count, core_labels = connected_components(
+        csr_matrix(neighbors[np.ix_(core_mask, core_mask)]),
+        directed=False,
+        return_labels=True,
+    )
+    labels[core_indices] = core_labels
+
+    border_indices = np.flatnonzero(~core_mask)
+    if border_indices.size:
+        reachable_core = neighbors[np.ix_(border_indices, core_indices)]
+        has_core_neighbor = np.any(reachable_core, axis=1)
+        if np.any(has_core_neighbor):
+            first_core = np.argmax(reachable_core[has_core_neighbor], axis=1)
+            labels[border_indices[has_core_neighbor]] = core_labels[first_core]
     return labels
 
 
@@ -2003,25 +2048,26 @@ def frame_bytes_to_radar_cube(
             f"LVDS reshape currently supports 2 lanes, got {config.lvds_lanes}"
         )
 
-    grouped = adc_samples.reshape(-1, 4)
-    first = grouped[:, 0:2].reshape(-1).astype(np.float32)
-    second = grouped[:, 2:4].reshape(-1).astype(np.float32)
-
-    if config.iq_swap:
-        complex_samples = second + 1j * first
-    else:
-        complex_samples = first + 1j * second
-
     expected_complex_count = (
         config.num_chirps_per_frame
         * config.num_rx_channels
         * config.num_adc_samples
     )
-    if complex_samples.size != expected_complex_count:
+    actual_complex_count = adc_samples.size // 2
+    if actual_complex_count != expected_complex_count:
         raise ValueError(
             "Frame produced "
-            f"{complex_samples.size} complex samples; expected {expected_complex_count}"
+            f"{actual_complex_count} complex samples; expected {expected_complex_count}"
         )
+
+    grouped = adc_samples.reshape(-1, 4)
+    complex_samples = np.empty(expected_complex_count, dtype=np.complex64)
+    if config.iq_swap:
+        complex_samples.real = grouped[:, 2:4].reshape(-1)
+        complex_samples.imag = grouped[:, 0:2].reshape(-1)
+    else:
+        complex_samples.real = grouped[:, 0:2].reshape(-1)
+        complex_samples.imag = grouped[:, 2:4].reshape(-1)
 
     if config.channel_interleave:
         return complex_samples.reshape(

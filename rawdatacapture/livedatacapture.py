@@ -378,6 +378,7 @@ class ProcessingTimingStats:
     """Collect low-overhead per-stage timing samples for the final summary."""
 
     STAGE_ORDER = (
+        "frame_decode",
         "range_fft",
         "doppler",
         "dynamic_detection",
@@ -463,6 +464,18 @@ class SingleTargetTracker:
     @property
     def is_confirmed(self) -> bool:
         return self._confirmed
+
+    @property
+    def has_track(self) -> bool:
+        return self._position_m is not None
+
+    @property
+    def predicted_position_m(self) -> Optional[np.ndarray]:
+        if self._position_m is None:
+            return None
+        return (
+            self._position_m + self._velocity_m_per_update
+        ).copy()
 
     def update(self, candidates: np.ndarray) -> Optional[TargetTrack]:
         candidates = np.asarray(candidates, dtype=np.float64)
@@ -1626,6 +1639,10 @@ class DisplayPayloadSink:
         self.frame_count = 0
         self.timings = ProcessingTimingStats()
         self.static_candidate_total = 0
+        self.static_detection_updates = 0
+        self.static_detection_skips = 0
+        self.static_cluster_input_total = 0
+        self.static_cluster_input_max = 0
         self.static_validated_updates = 0
         self.static_handoff_pending_updates = 0
         self.micro_doppler_range_m = (
@@ -2480,35 +2497,79 @@ class DisplayPayloadSink:
             # already-confirmed static fallback from an earlier gap.
             self.static_target_tracker.reset()
         if self.static_scene_map is not None:
-            static_started = time.perf_counter()
-            raw_static_points = compute_static_point_cloud(
-                doppler_cube,
-                range_axis_m,
-                self.config,
-                self.static_scene_map,
-                max_range_m=self.max_range_m,
-                azimuth_fov_deg=self.point_cloud_fov_deg,
-                elevation_fov_deg=self.point_cloud_fov_deg,
+            static_update_required = (
+                not self.static_scene_map.is_ready
+                or self.static_scene_map.background_update_rate > 0.0
+                or handoff_position is not None
+                or self.static_target_tracker.has_track
             )
-            self.timings.add(
-                "static_detection",
-                time.perf_counter() - static_started,
-            )
+            if static_update_required:
+                self.static_detection_updates += 1
+                static_started = time.perf_counter()
+                raw_static_points = compute_static_point_cloud(
+                    doppler_cube,
+                    range_axis_m,
+                    self.config,
+                    self.static_scene_map,
+                    max_range_m=self.max_range_m,
+                    azimuth_fov_deg=self.point_cloud_fov_deg,
+                    elevation_fov_deg=self.point_cloud_fov_deg,
+                )
+                self.timings.add(
+                    "static_detection",
+                    time.perf_counter() - static_started,
+                )
+            else:
+                self.static_detection_skips += 1
             static_candidate_count = int(raw_static_points.shape[0])
             self.static_candidate_total += static_candidate_count
             clustering_started = time.perf_counter()
-            raw_static_clusters, raw_static_labels = (
-                cluster_point_cloud_with_labels(
-                    raw_static_points,
-                    eps_m=self.cluster_eps_m,
-                    min_samples=self.static_cluster_min_samples,
-                )
+            clustering_anchor = (
+                self.static_target_tracker.predicted_position_m
+                if self.static_target_tracker.has_track
+                else handoff_position
             )
+            raw_static_labels = np.full(
+                raw_static_points.shape[0],
+                -1,
+                dtype=np.intp,
+            )
+            if clustering_anchor is not None and raw_static_points.size:
+                localization_radius_m = (
+                    max(
+                        self.static_target_tracker.association_distance_m,
+                        STATIC_HANDOFF_DISTANCE_M,
+                    )
+                    + 2.0 * self.cluster_eps_m
+                )
+                local_mask = (
+                    np.linalg.norm(
+                        raw_static_points[:, :3] - clustering_anchor,
+                        axis=1,
+                    )
+                    <= localization_radius_m
+                )
+                local_indices = np.flatnonzero(local_mask)
+                local_static_points = raw_static_points[local_indices]
+                local_point_count = int(local_static_points.shape[0])
+                self.static_cluster_input_total += local_point_count
+                self.static_cluster_input_max = max(
+                    self.static_cluster_input_max,
+                    local_point_count,
+                )
+                raw_static_clusters, local_static_labels = (
+                    cluster_point_cloud_with_labels(
+                        local_static_points,
+                        eps_m=self.cluster_eps_m,
+                        min_samples=self.static_cluster_min_samples,
+                    )
+                )
+                raw_static_labels[local_indices] = local_static_labels
             clustering_elapsed += time.perf_counter() - clustering_started
             cluster_candidates = np.empty((0, 4), dtype=np.float32)
             if raw_static_clusters.size:
                 cluster_candidates = _point_cloud_track_candidates(
-                    raw_static_points,
+                    raw_static_points[raw_static_labels >= 0],
                     raw_static_clusters,
                     assignment_distance_m=max(
                         2.0 * self.cluster_eps_m,
@@ -2672,9 +2733,18 @@ class DisplayPayloadSink:
         )
 
     def format_static_summary(self) -> str:
+        mean_cluster_input = (
+            self.static_cluster_input_total / self.static_detection_updates
+            if self.static_detection_updates
+            else 0.0
+        )
         return (
             "Static detection summary: "
             f"candidate_points={self.static_candidate_total}, "
+            f"full_updates={self.static_detection_updates}, "
+            f"skipped_inactive_updates={self.static_detection_skips}, "
+            f"local_cluster_points_mean={mean_cluster_input:.1f}, "
+            f"local_cluster_points_max={self.static_cluster_input_max}, "
             f"handoff_pending_updates={self.static_handoff_pending_updates}, "
             f"validated_updates={self.static_validated_updates}"
         )
@@ -4265,7 +4335,12 @@ def process_complete_frame(
         return
 
     raw_writer.write_frame(frame)
+    frame_decode_started = time.perf_counter()
     radar_cube = frame_bytes_to_radar_cube(frame.data, config)
+    display.timings.add(
+        "frame_decode",
+        time.perf_counter() - frame_decode_started,
+    )
     range_fft_started = time.perf_counter()
     range_fft = compute_range_fft(radar_cube)
     display.timings.add(

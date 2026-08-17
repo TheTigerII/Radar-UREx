@@ -1863,6 +1863,121 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         self.assertEqual(static_point_cloud.call_count, 5)
 
+    def test_ready_static_detection_sleeps_without_handoff_or_track(self) -> None:
+        sink = DisplayPayloadSink(
+            "point-cloud",
+            1,
+            None,
+            SimpleNamespace(),
+        )
+        scene_map = Mock()
+        scene_map.is_ready = True
+        scene_map.background_update_rate = 0.0
+        scene_map.frames_seen = 150
+        scene_map.reference_frames = 150
+        scene_map.warmup_frames_seen = 30
+        scene_map.warmup_frames = 30
+        scene_map.reference_shape = (5, 4, 4)
+        scene_map.is_warming_up = False
+        sink.static_scene_map = scene_map
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+        empty_points = np.empty((0, 4), dtype=np.float32)
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+            ) as static_point_cloud,
+            patch(
+                "rawdatacapture.livedatacapture."
+                "cluster_point_cloud_with_labels",
+            ) as static_clustering,
+        ):
+            payload, _cube = sink._compute_point_cloud_payload(
+                np.empty((0,), dtype=np.complex64),
+                np.arange(5),
+            )
+
+        static_point_cloud.assert_not_called()
+        static_clustering.assert_not_called()
+        self.assertEqual(payload.static_validation, "background")
+        self.assertEqual(payload.static_candidate_count, 0)
+
+    def test_static_clustering_is_localized_to_handoff(self) -> None:
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+        )
+        handoff_position = np.asarray((0.0, 2.0, 0.0))
+        motion_handoff = Mock()
+        motion_handoff.update.return_value = handoff_position
+        motion_handoff.protection_position_m = handoff_position
+        sink.motion_handoff = motion_handoff
+        doppler_cube = np.zeros((8, 1, 1, 5), dtype=np.complex64)
+        empty_points = np.empty((0, 4), dtype=np.float32)
+        static_points = np.asarray(
+            (
+                (0.0, 2.0, 0.0, 70.0, 9.0),
+                (0.1, 2.0, 0.0, 68.0, 8.0),
+                (0.0, 6.0, 0.0, 120.0, 15.0),
+            ),
+            dtype=np.float32,
+        )
+        local_cluster = np.asarray(
+            ((0.05, 2.0, 0.0, 2.0),),
+            dtype=np.float32,
+        )
+
+        with (
+            patch(
+                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                return_value=doppler_cube,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                return_value=empty_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                return_value=static_points,
+            ),
+            patch(
+                "rawdatacapture.livedatacapture."
+                "cluster_point_cloud_with_labels",
+                return_value=(
+                    local_cluster,
+                    np.asarray((0, 0), dtype=np.intp),
+                ),
+            ) as static_clustering,
+        ):
+            payload, _cube = sink._compute_point_cloud_payload(
+                np.empty((0,), dtype=np.complex64),
+                np.arange(5),
+            )
+
+        clustered_points = static_clustering.call_args.args[0]
+        self.assertEqual(clustered_points.shape, (2, 5))
+        self.assertFalse(np.any(clustered_points[:, 1] == 6.0))
+        self.assertEqual(payload.static_candidate_count, 3)
+        self.assertEqual(payload.static_points.shape, (2, 5))
+
     def test_micro_doppler_history_survives_brief_track_gap(self) -> None:
         sink = DisplayPayloadSink(
             COMBINED_DISPLAY_MODE,
