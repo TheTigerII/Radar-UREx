@@ -1,6 +1,7 @@
 from collections import deque
 from dataclasses import dataclass
 from functools import lru_cache
+import threading
 from typing import Optional, Protocol
 
 import numpy as np
@@ -185,6 +186,7 @@ class StaticSceneMap:
             DEFAULT_STATIC_REFERENCE_FLOOR_PERCENTILE
         ),
         minimum_noise_db: float = DEFAULT_STATIC_MINIMUM_NOISE_DB,
+        finalize_async: bool = False,
     ) -> None:
         if warmup_frames < 0:
             raise ValueError("Static warm-up frames cannot be negative")
@@ -227,8 +229,15 @@ class StaticSceneMap:
             reference_floor_percentile
         )
         self.minimum_noise_db = float(minimum_noise_db)
+        self.finalize_async = bool(finalize_async)
+        self._calibration_lock = threading.Lock()
+        self._calibration_generation = 0
+        self._calibration_thread: Optional[threading.Thread] = None
+        self._completed_calibration: Optional[dict[str, np.ndarray]] = None
+        self._calibration_error: Optional[BaseException] = None
         self._warmup_frames_seen = 0
         self._calibration_frames: list[np.ndarray] = []
+        self._reference_frames_collected = 0
         self._reference_power: Optional[np.ndarray] = None
         self._reference_log_power: Optional[np.ndarray] = None
         self._reference_floor: Optional[np.ndarray] = None
@@ -248,7 +257,7 @@ class StaticSceneMap:
         return (
             self.reference_frames
             if self.is_ready
-            else len(self._calibration_frames)
+            else self._reference_frames_collected
         )
 
     @property
@@ -264,8 +273,14 @@ class StaticSceneMap:
         return self._shape if self.is_ready else None
 
     def reset(self) -> None:
+        with self._calibration_lock:
+            self._calibration_generation += 1
+            self._completed_calibration = None
+            self._calibration_error = None
+            self._calibration_thread = None
         self._warmup_frames_seen = 0
         self._calibration_frames.clear()
+        self._reference_frames_collected = 0
         self._reference_power = None
         self._reference_log_power = None
         self._reference_floor = None
@@ -283,15 +298,23 @@ class StaticSceneMap:
             self.reset()
             self._shape = power.shape
 
+        self._collect_completed_calibration()
+
         if not self.is_ready:
             if self._warmup_frames_seen < self.warmup_frames:
                 self._warmup_frames_seen += 1
                 return None
+            if self._calibration_thread is not None:
+                return None
             self._calibration_frames.append(
                 power.astype(np.float32, copy=True)
             )
+            self._reference_frames_collected += 1
             if len(self._calibration_frames) >= self.reference_frames:
-                self._finish_calibration()
+                if self.finalize_async:
+                    self._start_async_calibration()
+                else:
+                    self._finish_calibration()
             return None
 
         assert self._reference_power is not None
@@ -376,8 +399,11 @@ class StaticSceneMap:
         self._pending_log_power = None
         self._pending_change_db = None
 
-    def _finish_calibration(self) -> None:
-        calibration = np.stack(self._calibration_frames, axis=0).astype(
+    def _build_calibration(
+        self,
+        calibration_frames: list[np.ndarray],
+    ) -> dict[str, np.ndarray]:
+        calibration = np.stack(calibration_frames, axis=0).astype(
             np.float32,
             copy=False,
         )
@@ -419,25 +445,79 @@ class StaticSceneMap:
             axis=0,
         )
 
-        self._reference_power = reference_power
-        self._reference_log_power = reference_log_power.astype(
-            np.float32,
-            copy=False,
+        noise_mad_db = median_absolute_deviation.astype(
+            np.float32, copy=False
         )
-        self._reference_floor = reference_floor
-        self._noise_mad_db = median_absolute_deviation.astype(
-            np.float32,
-            copy=False,
-        )
-        self._noise_db = np.maximum(
+        noise_db = np.maximum(
             1.4826 * median_absolute_deviation,
             self.minimum_noise_db,
         ).astype(np.float32, copy=False)
-        self._detection_threshold_db = np.maximum(
+        detection_threshold_db = np.maximum(
             self.minimum_change_db,
-            self.noise_sigma_multiplier * self._noise_db,
+            self.noise_sigma_multiplier * noise_db,
         ).astype(np.float32, copy=False)
+        return {
+            "reference_power": reference_power,
+            "reference_log_power": reference_log_power.astype(
+                np.float32, copy=False
+            ),
+            "reference_floor": reference_floor,
+            "noise_mad_db": noise_mad_db,
+            "noise_db": noise_db,
+            "detection_threshold_db": detection_threshold_db,
+        }
+
+    def _apply_calibration(self, result: dict[str, np.ndarray]) -> None:
+        self._reference_power = result["reference_power"]
+        self._reference_log_power = result["reference_log_power"]
+        self._reference_floor = result["reference_floor"]
+        self._noise_mad_db = result["noise_mad_db"]
+        self._noise_db = result["noise_db"]
+        self._detection_threshold_db = result["detection_threshold_db"]
         self._calibration_frames.clear()
+
+    def _finish_calibration(self) -> None:
+        self._apply_calibration(
+            self._build_calibration(self._calibration_frames)
+        )
+
+    def _start_async_calibration(self) -> None:
+        calibration_frames = self._calibration_frames
+        self._calibration_frames = []
+        generation = self._calibration_generation
+
+        def finish() -> None:
+            try:
+                result = self._build_calibration(calibration_frames)
+            except BaseException as exc:
+                with self._calibration_lock:
+                    if generation == self._calibration_generation:
+                        self._calibration_error = exc
+                return
+            with self._calibration_lock:
+                if generation == self._calibration_generation:
+                    self._completed_calibration = result
+
+        self._calibration_thread = threading.Thread(
+            target=finish,
+            name="StaticSceneCalibration",
+            daemon=True,
+        )
+        self._calibration_thread.start()
+
+    def _collect_completed_calibration(self) -> None:
+        with self._calibration_lock:
+            error = self._calibration_error
+            result = self._completed_calibration
+            if error is not None:
+                self._calibration_error = None
+            if result is not None:
+                self._completed_calibration = None
+        if error is not None:
+            raise RuntimeError("Static scene calibration failed") from error
+        if result is not None:
+            self._apply_calibration(result)
+            self._calibration_thread = None
 
     @staticmethod
     def _validated_power(power_cube: np.ndarray) -> np.ndarray:

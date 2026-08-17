@@ -1,4 +1,5 @@
 import importlib.util
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -110,6 +111,44 @@ class AdaptiveClutterMapTests(unittest.TestCase):
 
 
 class StaticSceneMapTests(unittest.TestCase):
+    def test_async_reference_finalization_does_not_block_frame_processing(
+        self,
+    ) -> None:
+        scene = StaticSceneMap(
+            warmup_frames=0,
+            reference_frames=2,
+            finalize_async=True,
+        )
+        background = np.full((8, 16, 16), 10.0, dtype=np.float32)
+        original_build = scene._build_calibration
+
+        def delayed_build(frames):
+            time.sleep(0.05)
+            return original_build(frames)
+
+        with patch.object(
+            scene,
+            "_build_calibration",
+            side_effect=delayed_build,
+        ):
+            self.assertIsNone(scene.observe(background))
+            started = time.perf_counter()
+            self.assertIsNone(scene.observe(background))
+            elapsed = time.perf_counter() - started
+            self.assertLess(elapsed, 0.03)
+
+            deadline = time.monotonic() + 1.0
+            change_db = None
+            while time.monotonic() < deadline and not scene.is_ready:
+                change_db = scene.observe(background)
+                time.sleep(0.005)
+
+        self.assertTrue(scene.is_ready)
+        if change_db is None:
+            change_db = scene.observe(background)
+        assert change_db is not None
+        np.testing.assert_allclose(change_db, 0.0)
+
     def test_default_threshold_uses_twice_learned_noise_without_db_floor(
         self,
     ) -> None:

@@ -1,4 +1,5 @@
 import argparse
+from concurrent.futures import Future, ThreadPoolExecutor
 import importlib.util
 import json
 import multiprocessing as mp
@@ -1594,6 +1595,7 @@ class DisplayPayloadSink:
                 reference_frames=static_reference_frames,
                 minimum_change_db=static_min_change_db,
                 background_update_rate=static_background_update_rate,
+                finalize_async=True,
             )
             if static_detection
             else None
@@ -1663,6 +1665,26 @@ class DisplayPayloadSink:
             tuple[str, Optional[str]]
         ] = None
         self._classification_owner_position_m: Optional[np.ndarray] = None
+        self._classification_executor: Optional[
+            ThreadPoolExecutor
+        ] = (
+            ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="RadarTensorRT",
+            )
+            if inference_engine is not None
+            and mode != ROTOR_DISPLAY_MODE
+            else None
+        )
+
+    def close(self) -> None:
+        if self._classification_executor is not None:
+            self._classification_executor.shutdown(wait=True)
+            self._classification_executor = None
+        if self.inference_engine is not None and hasattr(
+            self.inference_engine, "close"
+        ):
+            self.inference_engine.close()
 
     def update(
         self,
@@ -2137,17 +2159,19 @@ class DisplayPayloadSink:
         )
         target_track = point_cloud.target_track
         target_changed = self._update_micro_doppler_history_owner(target_track)
-        self._classify_tracked_target(
+        classification_future = self._classify_tracked_target(
             doppler_cube,
             range_axis_m,
             target_track,
             target_changed=target_changed,
-        )
-        point_cloud = replace(
-            point_cloud,
-            classification=self.latest_classification,
+            defer=True,
         )
         if not build_micro_doppler:
+            self._finish_deferred_classification(classification_future)
+            point_cloud = replace(
+                point_cloud,
+                classification=self.latest_classification,
+            )
             return CombinedDisplayPayload(
                 point_cloud=point_cloud,
                 spectrogram_db=np.empty((0, 0), dtype=np.float32),
@@ -2197,6 +2221,11 @@ class DisplayPayloadSink:
             "micro_doppler",
             time.perf_counter() - micro_doppler_started,
         )
+        self._finish_deferred_classification(classification_future)
+        point_cloud = replace(
+            point_cloud,
+            classification=self.latest_classification,
+        )
         return CombinedDisplayPayload(
             point_cloud=point_cloud,
             spectrogram_db=spectrogram_db,
@@ -2210,7 +2239,8 @@ class DisplayPayloadSink:
         target_track: Optional[TargetTrack],
         *,
         target_changed: bool,
-    ) -> None:
+        defer: bool = False,
+    ) -> Optional[Future[InferenceResult]]:
         if target_track is None:
             self._classification_owner_position_m = None
             self.latest_classification_feature = None
@@ -2218,7 +2248,7 @@ class DisplayPayloadSink:
                 self._set_classification(
                     self.inference_engine.reset("no_confirmed_target")
                 )
-            return
+            return None
         if target_track.is_predicted:
             self._classification_owner_position_m = None
             self.latest_classification_feature = None
@@ -2226,7 +2256,7 @@ class DisplayPayloadSink:
                 self._set_classification(
                     self.inference_engine.reset("predicted_target")
                 )
-            return
+            return None
         target_position_m = np.asarray(
             target_track.position_m,
             dtype=np.float64,
@@ -2248,12 +2278,13 @@ class DisplayPayloadSink:
                 self._set_classification(
                     self.inference_engine.reset("target_changed")
                 )
-            return
+            return None
         self._classification_owner_position_m = target_position_m.copy()
-        self._classify_fixed_range(
+        return self._classify_fixed_range(
             doppler_cube,
             range_axis_m,
             target_track.range_m,
+            defer=defer,
         )
 
     def _classify_fixed_range(
@@ -2261,7 +2292,9 @@ class DisplayPayloadSink:
         doppler_cube: np.ndarray,
         range_axis_m: Optional[np.ndarray],
         target_range_m: Optional[float],
-    ) -> None:
+        *,
+        defer: bool = False,
+    ) -> Optional[Future[InferenceResult]]:
         self.latest_classification_feature = None
         range_axis = (
             np.asarray(range_axis_m, dtype=np.float64)
@@ -2278,7 +2311,7 @@ class DisplayPayloadSink:
                 self._set_classification(
                     self.inference_engine.reset("invalid_target_range")
                 )
-            return
+            return None
         target_range_bin = int(
             np.argmin(np.abs(range_axis - float(target_range_m)))
         )
@@ -2292,12 +2325,40 @@ class DisplayPayloadSink:
                 self._set_classification(
                     self.inference_engine.reset(f"invalid_feature_step:{exc}")
                 )
-            return
+            return None
         self.latest_classification_feature = feature_step
         if self.inference_engine is not None:
+            if defer and self._classification_executor is not None:
+                return self._classification_executor.submit(
+                    self._update_feature_step_timed,
+                    feature_step,
+                )
             self._set_classification(
-                self.inference_engine.update(doppler_cube, target_range_bin)
+                self.inference_engine.update_feature_step(feature_step)
             )
+        return None
+
+    def _update_feature_step_timed(
+        self,
+        feature_step: np.ndarray,
+    ) -> InferenceResult:
+        if self.inference_engine is None:
+            raise RuntimeError("Classification engine is unavailable")
+        classification_started = time.perf_counter()
+        result = self.inference_engine.update_feature_step(feature_step)
+        self.timings.add(
+            "classification",
+            time.perf_counter() - classification_started,
+        )
+        return result
+
+    def _finish_deferred_classification(
+        self,
+        future: Optional[Future[InferenceResult]],
+    ) -> None:
+        if future is None:
+            return
+        self._set_classification(future.result())
 
     def _set_classification(self, result: InferenceResult) -> None:
         self.latest_classification = result
@@ -3208,6 +3269,14 @@ def _run_display_process(
     skipped_updates: Any,
     startup_status_queue: mp.Queue,
 ) -> None:
+    if mp.current_process().name == "RadarLiveDisplay":
+        try:
+            # Preserve CPU time for the loss-sensitive capture/DSP workers.
+            # Display updates are explicitly coalesced and can tolerate lower
+            # scheduling priority.
+            os.nice(5)
+        except OSError:
+            pass
     try:
         import signal
 
@@ -4713,6 +4782,7 @@ def _run_frame_processor_impl(
                     continue
         raw_writer.close()
         processed_writer.close()
+        display.close()
         worker_emit(display.format_static_summary())
         worker_emit(display.timings.format_summary())
 

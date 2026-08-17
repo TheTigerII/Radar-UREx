@@ -2138,7 +2138,7 @@ class ClassificationIntegrationTests(unittest.TestCase):
     def test_fixed_range_is_converted_to_nearest_range_bin(self) -> None:
         engine = Mock()
         engine.unknown.return_value = self._result()
-        engine.update.return_value = self._result("drone")
+        engine.update_feature_step.return_value = self._result("drone")
         sink = DisplayPayloadSink(
             "none",
             1,
@@ -2151,7 +2151,10 @@ class ClassificationIntegrationTests(unittest.TestCase):
 
         sink._classify_fixed_range(doppler_cube, range_axis, 2.05)
 
-        engine.update.assert_called_once_with(doppler_cube, 10)
+        engine.update_feature_step.assert_called_once()
+        feature_step = engine.update_feature_step.call_args.args[0]
+        self.assertEqual(feature_step.shape, (2, 64))
+        engine.update.assert_not_called()
         self.assertEqual(sink.latest_classification.label, "drone")
 
     def test_native_feature_is_available_without_a_trained_classifier(self) -> None:
@@ -2169,6 +2172,89 @@ class ClassificationIntegrationTests(unittest.TestCase):
 
         self.assertIsNotNone(sink.latest_classification_feature)
         self.assertEqual(sink.latest_classification_feature.shape, (2, 64))
+
+    def test_combined_mode_overlaps_classification_with_micro_doppler(self) -> None:
+        engine_started = threading.Event()
+        micro_doppler_started = threading.Event()
+
+        class FakeInference:
+            def __init__(self, result):
+                self.result = result
+                self.closed = False
+
+            def unknown(self, _reason):
+                return ClassificationIntegrationTests._result()
+
+            def update_feature_step(self, _step):
+                engine_started.set()
+                if not micro_doppler_started.wait(timeout=1.0):
+                    raise RuntimeError("micro-Doppler did not overlap inference")
+                return self.result
+
+            def reset(self, _reason):
+                return ClassificationIntegrationTests._result()
+
+            def close(self):
+                self.closed = True
+
+        track = TargetTrack(
+            position_m=(0.0, 2.0, 0.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=4,
+            hits=4,
+            missed_updates=0,
+            confirmed=True,
+        )
+        point_cloud = PointCloudDisplayPayload(
+            points=np.empty((0, 4), dtype=np.float32),
+            clusters=np.empty((0, 4), dtype=np.float32),
+            static_points=np.empty((0, 5), dtype=np.float32),
+            static_clusters=np.empty((0, 4), dtype=np.float32),
+            target_track=track,
+            target_source="dynamic",
+            static_reference=StaticReferenceStatus(False, False, 0, 0),
+        )
+        doppler_cube = np.ones((128, 3, 4, 64), dtype=np.complex64)
+        range_axis = np.arange(64, dtype=np.float32) * 0.2
+        inference = FakeInference(self._result("drone"))
+        sink = DisplayPayloadSink(
+            COMBINED_DISPLAY_MODE,
+            1,
+            None,
+            SimpleNamespace(),
+            inference_engine=inference,
+        )
+
+        def micro_doppler(*_args, **_kwargs):
+            micro_doppler_started.set()
+            if not engine_started.wait(timeout=1.0):
+                raise RuntimeError("inference did not overlap micro-Doppler")
+            return np.ones((128, 1), dtype=np.float32)
+
+        try:
+            with (
+                patch.object(
+                    sink,
+                    "_compute_point_cloud_payload",
+                    return_value=(point_cloud, doppler_cube),
+                ),
+                patch(
+                    "rawdatacapture.livedatacapture."
+                    "compute_per_tx_micro_doppler_spectrogram",
+                    side_effect=micro_doppler,
+                ),
+            ):
+                payload = sink._compute_combined_payload(
+                    np.ones((384, 4, 64), dtype=np.complex64),
+                    range_axis,
+                )
+        finally:
+            sink.close()
+
+        self.assertTrue(engine_started.is_set())
+        self.assertTrue(micro_doppler_started.is_set())
+        self.assertEqual(payload.point_cloud.classification.label, "drone")
+        self.assertTrue(inference.closed)
 
     def test_predicted_track_resets_classification_history(self) -> None:
         engine = Mock()
