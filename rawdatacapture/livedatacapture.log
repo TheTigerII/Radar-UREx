@@ -1,9 +1,0 @@
-Loaded Mini4 profile: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=96, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=32, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=6250.0, frequency_slope_mhz_per_us=46.875, start_frequency_ghz=60.25, idle_time_us=850.0, adc_start_time_us=6.0, ramp_end_time_us=50.0, frame_periodicity_ms=100.0)
-Saving PMM output to /home/rgmtc/Desktop/Radar-UREx/rawdatacapture/captures/pmm_capture_2026_07_29T22_31_01.jsonl
-PMM tracking enabled: calibration=30s, threshold=30000, folding=2-20, history=3.6s
-Radar frame processor ready.
-Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=393216
-Streaming stopped.
-Capture summary: packets=133072, frames=492, invalid_frames=0, lost_packets=0, receiver_queue_drops=0, processing_drops=0, stream_resyncs=0
-PMM output saved: updates=492, path=/home/rgmtc/Desktop/Radar-UREx/rawdatacapture/captures/pmm_capture_2026_07_29T22_31_01.jsonl
-Processing timing summary: {"range_fft":{"p50_ms":1.6784534991529654,"p95_ms":2.4307305007823734,"max_ms":8.058783001615666},"doppler_fft":{"p50_ms":4.940898999848287,"p95_ms":6.249366849624494,"max_ms":8.77571500132035},"pmm_tracking":{"p50_ms":11.982095499661227,"p95_ms":17.618856448734732,"max_ms":32.74488500028383},"serialization":{"p50_ms":0.36462649950408377,"p95_ms":1.5233029501359845,"max_ms":8.466731000225991},"total":{"p50_ms":17.55713150032534,"p95_ms":24.4754561001173,"max_ms":42.952568001055624}}

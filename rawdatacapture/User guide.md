@@ -16,25 +16,27 @@ source .venv/bin/activate
 python -m pip install \
   "numpy<3" "scipy<2" \
   "pyqtgraph>=0.14,<0.15" "PySide6>=6.8,<7" "PyOpenGL>=3.1,<4" \
-  pyserial onnxruntime
+  pyserial
 ```
 
-For GPU inference on Jetson, use JetPack's TensorRT installation and compile
-the exported model once on the target device:
+GPU inference requires JetPack's TensorRT installation, the `trtexec` command,
+and the `tensorrt` and `cuda.bindings.runtime` Python modules. When
+classification starts without an engine, the application runs the equivalent
+of this command automatically:
 
 ```bash
 trtexec --onnx=model_weights/model.onnx \
-  --saveEngine=model_weights/model.fp16.engine \
+  --saveEngine=model_weights/generated/model.fp16.engine \
   --fp16 --shapes=doppler_time:1x36x64 --skipInference
 ```
 
-When `model.fp16.engine` is present, live classification automatically uses
-TensorRT on the Jetson GPU. TensorRT engines are device-specific and should be
-rebuilt after changing the Jetson, TensorRT version, or ONNX model.
-The TensorRT path also requires the `tensorrt` module and
-`cuda.bindings.runtime` from the JetPack/CUDA Python installation to be
-importable. If the engine is absent, inference uses an available ONNX Runtime
-provider, preferring CUDA and retaining CPU fallback when both are available.
+The full `trtexec` output is printed live so the build is visibly progressing.
+After a successful build, the engine is stored as
+`model_weights/generated/model.fp16.engine` and loaded for classification.
+One existing hardware-named `.engine` file in that directory is also accepted.
+Live classification is TensorRT GPU-only and has no PyTorch or ONNX Runtime
+fallback. TensorRT engines are device-specific; delete the generated engine to
+force a rebuild after changing the Jetson, TensorRT version, or ONNX model.
 
 The radar must run SDK CLI-compatible firmware. Connect the IWR6843 command
 UART, connect the DCA1000 Ethernet interface, and configure that interface:

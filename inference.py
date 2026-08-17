@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
+import subprocess
 import time
 from collections import deque
 from dataclasses import asdict, dataclass
@@ -20,6 +22,7 @@ CENTER_TOLERANCE_BINS = 1
 LABEL_TO_INDEX = {"other": 0, "uav": 1}
 DEFAULT_MODEL_NAME = "model.onnx"
 DEFAULT_TENSORRT_ENGINE_NAME = "model.fp16.engine"
+GENERATED_ENGINE_DIRECTORY_NAME = "generated"
 DEFAULT_MANIFEST_NAME = "manifest.json"
 
 
@@ -64,17 +67,6 @@ def resolve_model_artifact_paths(model_weights_dir: Path) -> tuple[Path, Path]:
     return model_path, manifest_path
 
 
-def _load_onnxruntime() -> Any:
-    try:
-        import onnxruntime as ort
-    except ImportError as exc:
-        raise RuntimeError(
-            "ONNX Runtime is required for classification; install onnxruntime "
-            "or an appropriate onnxruntime-gpu build"
-        ) from exc
-    return ort
-
-
 def _load_tensorrt() -> tuple[Any, Any]:
     try:
         import tensorrt as trt
@@ -85,6 +77,68 @@ def _load_tensorrt() -> tuple[Any, Any]:
             f"{DEFAULT_TENSORRT_ENGINE_NAME} classifier engine"
         ) from exc
     return trt, cudart
+
+
+def ensure_tensorrt_engine(model_path: Path) -> Path:
+    """Return the generated TensorRT engine, building it with visible output."""
+    generated_directory = model_path.parent / GENERATED_ENGINE_DIRECTORY_NAME
+    engine_path = generated_directory / DEFAULT_TENSORRT_ENGINE_NAME
+    if engine_path.is_file():
+        return engine_path
+    existing_engines = (
+        sorted(generated_directory.glob("*.engine"))
+        if generated_directory.is_dir()
+        else []
+    )
+    if len(existing_engines) == 1:
+        return existing_engines[0]
+    if len(existing_engines) > 1:
+        paths = ", ".join(str(path) for path in existing_engines)
+        raise RuntimeError(
+            "Multiple TensorRT engines were found without the preferred "
+            f"{engine_path.name}: {paths}"
+        )
+
+    trtexec = shutil.which("trtexec")
+    if trtexec is None:
+        raise RuntimeError(
+            "TensorRT engine is missing and trtexec was not found in PATH"
+        )
+
+    generated_directory.mkdir(parents=True, exist_ok=True)
+    building_path = engine_path.with_name(engine_path.name + ".building")
+    if building_path.exists():
+        building_path.unlink()
+    command = [
+        trtexec,
+        f"--onnx={model_path}",
+        f"--saveEngine={building_path}",
+        "--fp16",
+        f"--shapes=doppler_time:1x{SEGMENT_FRAMES}x{DOPPLER_BINS}",
+        "--skipInference",
+    ]
+    print(
+        "TensorRT engine not found; compiling it now on the Jetson GPU.",
+        flush=True,
+    )
+    print(f"TensorRT engine destination: {engine_path}", flush=True)
+    print("trtexec output follows:", flush=True)
+    try:
+        completed = subprocess.run(command, check=False)
+    except OSError as exc:
+        raise RuntimeError(f"Could not start trtexec: {exc}") from exc
+    if completed.returncode != 0:
+        building_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"TensorRT engine compilation failed with exit code "
+            f"{completed.returncode}"
+        )
+    if not building_path.is_file() or building_path.stat().st_size == 0:
+        building_path.unlink(missing_ok=True)
+        raise RuntimeError("trtexec completed without creating a TensorRT engine")
+    building_path.replace(engine_path)
+    print(f"TensorRT engine compiled successfully: {engine_path}", flush=True)
+    return engine_path
 
 
 class _TensorRtSession:
@@ -249,7 +303,9 @@ class RealtimeUavClassifier:
         self.model_path, self.manifest_path = resolve_model_artifact_paths(
             model_weights_dir
         )
-        self.engine_path = self.model_path.parent / DEFAULT_TENSORRT_ENGINE_NAME
+        requested_device = device.lower() if device is not None else None
+        if requested_device not in {None, "cuda", "cuda:0", "tensorrt"}:
+            raise ValueError("Live classification is TensorRT GPU-only")
         try:
             manifest = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
@@ -269,25 +325,11 @@ class RealtimeUavClassifier:
                     f"{self.external_data_path}"
                 )
 
-        requested_device = device.lower() if device is not None else None
-        if self.engine_path.is_file() and requested_device != "cpu":
-            self.session = _TensorRtSession(self.engine_path)
-            self.runtime_name = "tensorrt"
-            self.providers = ["TensorRT"]
-            self.device = "cuda"
-        else:
-            ort = _load_onnxruntime()
-            providers = self._select_providers(ort, device)
-            self.session = ort.InferenceSession(
-                str(self.model_path),
-                providers=providers,
-            )
-            self._validate_onnx_interface()
-            self.runtime_name = "onnxruntime"
-            self.providers = list(self.session.get_providers())
-            self.device = (
-                "cuda" if "CUDAExecutionProvider" in self.providers else "cpu"
-            )
+        self.engine_path = ensure_tensorrt_engine(self.model_path)
+        self.session = _TensorRtSession(self.engine_path)
+        self.runtime_name = "tensorrt"
+        self.providers = ["TensorRT"]
+        self.device = "cuda"
 
         self.mean = float(manifest["normalization"]["mean"])
         self.std = float(manifest["normalization"]["std"])
@@ -371,66 +413,12 @@ class RealtimeUavClassifier:
                     f"Model {field} mismatch: expected={expected}, observed={observed}"
                 )
 
-    @staticmethod
-    def _select_providers(ort: Any, device: Optional[str]) -> list[str]:
-        available = list(ort.get_available_providers())
-        requested = device.lower() if device is not None else None
-        if requested is not None and requested not in {"cpu", "cuda", "cuda:0"}:
-            raise ValueError("ONNX device must be 'cpu' or 'cuda'")
-        if requested in {"cuda", "cuda:0"}:
-            if "CUDAExecutionProvider" not in available:
-                raise RuntimeError("ONNX Runtime CUDAExecutionProvider is not available")
-            providers = ["CUDAExecutionProvider"]
-            if "CPUExecutionProvider" in available:
-                providers.append("CPUExecutionProvider")
-            return providers
-        if requested == "cpu":
-            if "CPUExecutionProvider" not in available:
-                raise RuntimeError("ONNX Runtime CPUExecutionProvider is not available")
-            return ["CPUExecutionProvider"]
-        if "CUDAExecutionProvider" in available:
-            providers = ["CUDAExecutionProvider"]
-            if "CPUExecutionProvider" in available:
-                providers.append("CPUExecutionProvider")
-            return providers
-        if "CPUExecutionProvider" in available:
-            return ["CPUExecutionProvider"]
-        raise RuntimeError("ONNX Runtime has no supported CPU or CUDA provider")
-
-    def _validate_onnx_interface(self) -> None:
-        inputs = self.session.get_inputs()
-        outputs = self.session.get_outputs()
-        if len(inputs) != 1:
-            raise ValueError("ONNX model must have exactly one input")
-        model_input = inputs[0]
-        if (
-            model_input.name != "doppler_time"
-            or model_input.type != "tensor(float)"
-            or list(model_input.shape[1:]) != [SEGMENT_FRAMES, DOPPLER_BINS]
-        ):
-            raise ValueError(
-                "ONNX input must be float32 doppler_time with shape [batch, 36, 64]"
-            )
-        if len(outputs) != 1:
-            raise ValueError("ONNX model must have exactly one output")
-        model_output = outputs[0]
-        if (
-            model_output.name != "logits"
-            or model_output.type != "tensor(float)"
-            or list(model_output.shape[1:]) != [len(LABEL_TO_INDEX)]
-        ):
-            raise ValueError("ONNX output must be float32 logits with shape [batch, 2]")
-
     @property
     def metadata(self) -> dict[str, Any]:
         return {
             "enabled": True,
             "runtime": self.runtime_name,
-            "model_path": str(
-                self.engine_path
-                if self.runtime_name == "tensorrt"
-                else self.model_path
-            ),
+            "model_path": str(self.engine_path),
             "onnx_model_path": str(self.model_path),
             "manifest_path": str(self.manifest_path),
             "external_data_path": (

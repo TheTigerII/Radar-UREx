@@ -1,4 +1,5 @@
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from inference import (
     SEGMENT_FRAMES,
     RealtimeUavClassifier,
     align_doppler_time,
+    ensure_tensorrt_engine,
     resolve_model_artifact_paths,
 )
 
@@ -50,27 +52,7 @@ def _write_artifacts(directory: Path, **dataset_overrides) -> tuple[Path, Path]:
     return model_path, manifest_path
 
 
-class _FakeNodeArg:
-    def __init__(self, name: str, shape: list) -> None:
-        self.name = name
-        self.shape = shape
-        self.type = "tensor(float)"
-
-
-class _FakeSession:
-    def __init__(self, model_path: str, *, providers: list[str]) -> None:
-        self.model_path = model_path
-        self.providers = providers
-
-    def get_inputs(self) -> list[_FakeNodeArg]:
-        return [_FakeNodeArg("doppler_time", ["batch", SEGMENT_FRAMES, DOPPLER_BINS])]
-
-    def get_outputs(self) -> list[_FakeNodeArg]:
-        return [_FakeNodeArg("logits", ["batch", len(LABEL_TO_INDEX)])]
-
-    def get_providers(self) -> list[str]:
-        return list(self.providers)
-
+class _FakeTensorRtSession:
     def run(
         self,
         output_names: list[str],
@@ -81,17 +63,12 @@ class _FakeSession:
         return [np.tile(logits, (batch_size, 1))]
 
 
-class _FakeOrt:
-    InferenceSession = _FakeSession
-
-    @staticmethod
-    def get_available_providers() -> list[str]:
-        return ["CPUExecutionProvider"]
-
-
 def _classifier(weights: Path) -> RealtimeUavClassifier:
-    with patch("inference._load_onnxruntime", return_value=_FakeOrt):
-        return RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
+    generated = weights / "generated"
+    generated.mkdir()
+    (generated / "model.fp16.engine").write_bytes(b"test TensorRT engine")
+    with patch("inference._TensorRtSession", return_value=_FakeTensorRtSession()):
+        return RealtimeUavClassifier(weights, _runtime_contract())
 
 
 def _history(frame_count: int, peak_bin: int = 20) -> np.ndarray:
@@ -128,7 +105,7 @@ class RealtimeClassifierTests(unittest.TestCase):
             _write_artifacts(weights, feature_fingerprint="different")
 
             with self.assertRaisesRegex(ValueError, "feature_fingerprint mismatch"):
-                RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
+                RealtimeUavClassifier(weights, _runtime_contract())
 
     def test_declared_external_data_must_exist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -139,13 +116,14 @@ class RealtimeClassifierTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             with self.assertRaisesRegex(FileNotFoundError, "external data"):
-                RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
+                RealtimeUavClassifier(weights, _runtime_contract())
 
     def test_tensorrt_engine_is_preferred_for_default_device(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             weights = Path(directory) / "model_weights"
             _write_artifacts(weights)
-            engine_path = weights / "model.fp16.engine"
+            engine_path = weights / "generated" / "model.fp16.engine"
+            engine_path.parent.mkdir()
             engine_path.write_bytes(b"test TensorRT engine")
             fake_session = object()
 
@@ -156,6 +134,60 @@ class RealtimeClassifierTests(unittest.TestCase):
             self.assertEqual(classifier.metadata["runtime"], "tensorrt")
             self.assertEqual(classifier.metadata["device"], "cuda")
             self.assertEqual(classifier.metadata["model_path"], str(engine_path))
+
+    def test_missing_engine_is_compiled_into_generated_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            weights = Path(directory) / "model_weights"
+            model_path, _ = _write_artifacts(weights)
+
+            def fake_run(command: list[str], *, check: bool):
+                self.assertFalse(check)
+                destination = next(
+                    value.removeprefix("--saveEngine=")
+                    for value in command
+                    if value.startswith("--saveEngine=")
+                )
+                Path(destination).write_bytes(b"compiled TensorRT engine")
+                return subprocess.CompletedProcess(command, 0)
+
+            with (
+                patch("inference.shutil.which", return_value="/usr/bin/trtexec"),
+                patch("inference.subprocess.run", side_effect=fake_run),
+                patch("builtins.print") as output,
+            ):
+                engine_path = ensure_tensorrt_engine(model_path)
+
+            self.assertEqual(
+                engine_path,
+                weights / "generated" / "model.fp16.engine",
+            )
+            self.assertEqual(engine_path.read_bytes(), b"compiled TensorRT engine")
+            self.assertTrue(
+                any("compiling it now" in str(call) for call in output.call_args_list)
+            )
+
+    def test_single_hardware_named_generated_engine_is_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            weights = Path(directory) / "model_weights"
+            model_path, _ = _write_artifacts(weights)
+            generated = weights / "generated"
+            generated.mkdir()
+            engine_path = generated / "model_sm87_fp16.engine"
+            engine_path.write_bytes(b"existing TensorRT engine")
+
+            with patch("inference.subprocess.run") as compiler:
+                resolved = ensure_tensorrt_engine(model_path)
+
+            self.assertEqual(resolved, engine_path)
+            compiler.assert_not_called()
+
+    def test_cpu_device_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            weights = Path(directory) / "model_weights"
+            _write_artifacts(weights)
+
+            with self.assertRaisesRegex(ValueError, "TensorRT GPU-only"):
+                RealtimeUavClassifier(weights, _runtime_contract(), device="cpu")
 
     def test_warms_up_then_classifies_a_full_quality_gated_history(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -43,7 +43,7 @@ history after PMM tracking:
 36-frame target-gated Doppler-Time history
   -> capture-threshold PMM quality gate
   -> training-identical alignment and normalization
-  -> two-layer LSTM through TensorRT or ONNX Runtime
+  -> two-layer LSTM through TensorRT on the Jetson GPU
   -> other/UAV probabilities in JSONL and display status
 ```
 
@@ -250,11 +250,12 @@ two output logits. A trained `model.onnx`, its external tensor-data sidecar when
 declared, and `manifest.json` must be copied into the `model_weights/` directory
 before live classification can be enabled.
 
-`inference.py` uses a device-built `model.fp16.engine` with TensorRT when that
-file is present; otherwise it loads `model.onnx` with an available ONNX Runtime
-CUDA or CPU provider. A TensorRT loading or execution error is reported rather
-than retried through ONNX Runtime. Both runtime paths validate their tensor
-interfaces, and the manifest validator rejects missing metadata, unexpected
+`inference.py` uses `model_weights/generated/model.fp16.engine` with TensorRT.
+When that file is absent, it invokes `trtexec` and streams the compiler output
+to the terminal before loading the generated engine. There is no PyTorch or
+ONNX Runtime inference fallback. TensorRT loading, compilation, or execution
+errors are reported. The runtime validates the engine tensor interface, and
+the manifest validator rejects missing metadata, unexpected
 label order, architecture or input-shape changes, invalid normalization, and
 mismatched profile/feature fingerprints.
 It maintains the rolling PMM score window, returns `warming_up` until both the
