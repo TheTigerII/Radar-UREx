@@ -32,6 +32,7 @@ if __package__ in {None, ""}:
         range_resolution_m,
     )
     from rawdatacapture.pmm import (
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
         PmmConfig,
         PmmTrackResult,
@@ -50,6 +51,7 @@ else:
         range_resolution_m,
     )
     from .pmm import (
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
         PmmConfig,
         PmmTrackResult,
@@ -1026,7 +1028,8 @@ def _run_frame_processor(
                 f"fixed threshold={pmm_config.detection_threshold:g}"
                 if pmm_config.detection_threshold is not None
                 else "adaptive threshold="
-                f"{pmm_config.adaptive_threshold_sigma:g} sigma"
+                f"{pmm_config.adaptive_threshold_sigma:g} sigma, minimum="
+                f"{pmm_config.adaptive_threshold_minimum:g}"
             )
             worker_emit(
                 "PMM tracking enabled: "
@@ -1662,6 +1665,11 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
     )
+    parser.add_argument(
+        "--pmm-adaptive-threshold-minimum",
+        type=float,
+        default=MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
+    )
     parser.add_argument("--pmm-history-seconds", type=float, default=3.6)
     parser.add_argument("--pmm-provisional-frames", type=int, default=5)
     parser.add_argument("--pmm-confirmation-window-frames", type=int, default=10)
@@ -1731,6 +1739,7 @@ def main() -> None:
             folding_size_max=args.pmm_folding_size_max,
             detection_threshold=args.pmm_detection_threshold,
             adaptive_threshold_sigma=args.pmm_adaptive_threshold_sigma,
+            adaptive_threshold_minimum=args.pmm_adaptive_threshold_minimum,
             history_seconds=args.pmm_history_seconds,
             provisional_frames=args.pmm_provisional_frames,
             confirmation_window_frames=(

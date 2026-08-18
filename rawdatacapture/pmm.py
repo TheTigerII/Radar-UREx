@@ -28,6 +28,7 @@ MINI4_DOPPLER_FFT_SIZE = 64
 MINI4_MIN_RANGE_M = 0.3
 MINI4_MAX_RANGE_M = 20.0
 MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA = 6.0
+MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM = 700.0
 
 TrackState = Literal[
     "calibrating",
@@ -66,6 +67,7 @@ class PmmConfig:
     folding_size_max: int = 32
     detection_threshold: Optional[float] = None
     adaptive_threshold_sigma: float = MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA
+    adaptive_threshold_minimum: float = MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM
     history_seconds: float = 3.6
     provisional_frames: int = 5
     confirmation_window_frames: int = 10
@@ -106,6 +108,13 @@ class PmmConfig:
             or self.adaptive_threshold_sigma <= 0.0
         ):
             raise ValueError("PMM adaptive threshold sigma must be finite and positive")
+        if (
+            not np.isfinite(self.adaptive_threshold_minimum)
+            or self.adaptive_threshold_minimum < 0.0
+        ):
+            raise ValueError(
+                "PMM adaptive threshold minimum must be finite and non-negative"
+            )
         if self.history_seconds <= 0.0:
             raise ValueError("PMM history duration must be positive")
         if self.provisional_frames < 1:
@@ -915,14 +924,10 @@ class PmmTracker:
                         axis=0,
                     )
                     robust_sigma = 1.4826 * residual_mad
-                    numerical_floor = np.maximum(
-                        np.abs(self.background) * 1e-6,
-                        np.finfo(np.float32).eps,
-                    )
                     self.adaptive_thresholds = np.maximum(
                         residual_median
                         + self.config.adaptive_threshold_sigma * robust_sigma,
-                        numerical_floor,
+                        self.config.adaptive_threshold_minimum,
                     ).astype(np.float32)
                 else:
                     self.adaptive_thresholds = np.full_like(

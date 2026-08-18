@@ -18,7 +18,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from rawdatacapture.pmm import MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA
+from rawdatacapture.pmm import (
+    MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
+    MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
+)
 from rawdatacapture import calibrate as radar_calibration
 
 
@@ -160,6 +163,11 @@ def parse_args() -> argparse.Namespace:
         "--pmm-adaptive-threshold-sigma",
         type=float,
         default=MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
+    )
+    parser.add_argument(
+        "--pmm-adaptive-threshold-minimum",
+        type=float,
+        default=MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
     )
     parser.add_argument("--pmm-history-seconds", type=float, default=3.6)
     parser.add_argument("--pmm-provisional-frames", type=int, default=5)
@@ -372,6 +380,8 @@ def build_capture_command(
         str(args.pmm_folding_size_max),
         "--pmm-adaptive-threshold-sigma",
         str(args.pmm_adaptive_threshold_sigma),
+        "--pmm-adaptive-threshold-minimum",
+        str(args.pmm_adaptive_threshold_minimum),
         "--pmm-history-seconds",
         str(args.pmm_history_seconds),
         "--pmm-provisional-frames",
@@ -919,7 +929,10 @@ def main() -> int:
         + (
             f"fixed threshold={args.pmm_detection_threshold:g}"
             if args.pmm_detection_threshold is not None
-            else f"adaptive threshold={args.pmm_adaptive_threshold_sigma:g} sigma"
+            else (
+                f"adaptive threshold={args.pmm_adaptive_threshold_sigma:g} sigma, "
+                f"minimum={args.pmm_adaptive_threshold_minimum:g}"
+            )
         )
     )
 

@@ -137,6 +137,8 @@ backgrounds used by the paper's projection subtraction.
 - `--pmm-adaptive-threshold-sigma`: number of robust calibration standard
   deviations above the per-range residual median; default 6. Thresholds are
   learned only from startup calibration and remain frozen during tracking.
+- `--pmm-adaptive-threshold-minimum`: lower bound applied to every learned
+  linear-score threshold; default 700.
 - `--pmm-detection-threshold`: optional fixed linear-score override for legacy
   experiments; omitted by default.
 - `--pmm-history-seconds`: retained range-time history.

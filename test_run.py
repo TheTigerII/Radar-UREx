@@ -26,6 +26,7 @@ def _args() -> argparse.Namespace:
         pmm_folding_size_max=32,
         pmm_detection_threshold=30_000.0,
         pmm_adaptive_threshold_sigma=6.0,
+        pmm_adaptive_threshold_minimum=700.0,
         pmm_history_seconds=3.6,
         pmm_provisional_frames=5,
         pmm_confirmation_window_frames=10,
@@ -55,6 +56,7 @@ class CaptureCommandTests(unittest.TestCase):
 
         self.assertIn("--pmm-detection-threshold", command)
         self.assertIn("--pmm-adaptive-threshold-sigma", command)
+        self.assertIn("--pmm-adaptive-threshold-minimum", command)
         self.assertIn("--pmm-background-calibration-seconds", command)
         self.assertIn("--raw-output", command)
 

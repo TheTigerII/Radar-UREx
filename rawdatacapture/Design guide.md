@@ -140,7 +140,9 @@ spectrum becomes the background. Projection-based subtraction estimates the
 background gain and subtracts the projected spectrum. The tracker also applies
 that final background to every stored calibration frame, then learns a frozen
 threshold independently for each range bin as the residual median plus six
-scaled median absolute deviations. These thresholds are never updated after
+scaled median absolute deviations, with a default linear-score floor of 700.
+In other words, each threshold is the larger of the calibrated value and 700.
+These thresholds are never updated after
 startup calibration. Adaptive tracking paths use score-to-threshold ratios so
 that a naturally noisy range bin does not win merely because its raw residual
 scale is larger. An optional fixed-score override remains available for

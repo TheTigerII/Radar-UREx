@@ -309,13 +309,17 @@ class PmmTrackerStateTests(unittest.TestCase):
         sizes = np.full(256, 2, dtype=np.int16)
 
         score_frames = []
-        for small_noise, large_noise in ((-1.0, -10.0), (0.0, 0.0), (1.0, 10.0)):
-            scores = np.full(256, 10.0, dtype=np.float32)
+        for small_noise, large_noise in (
+            (-10.0, -1_000.0),
+            (0.0, 0.0),
+            (10.0, 1_000.0),
+        ):
+            scores = np.full(256, 2_000.0, dtype=np.float32)
             scores[40] += small_noise
             scores[50] += large_noise
             score_frames.append((scores, sizes))
-        target_scores = np.full(256, 10.0, dtype=np.float32)
-        target_scores[50] = 100.0
+        target_scores = np.full(256, 2_000.0, dtype=np.float32)
+        target_scores[50] = 10_000.0
         score_frames.append((target_scores, sizes))
 
         angles = np.arange(-60.0, 62.0, 2.0, dtype=np.float32)
@@ -334,6 +338,8 @@ class PmmTrackerStateTests(unittest.TestCase):
             assert tracker.range_indices is not None
             local_40 = int(np.flatnonzero(tracker.range_indices == 40)[0])
             local_50 = int(np.flatnonzero(tracker.range_indices == 50)[0])
+            self.assertTrue(np.all(frozen >= 700.0))
+            self.assertEqual(float(frozen[local_40]), 700.0)
             self.assertGreater(frozen[local_50], frozen[local_40])
 
             result = tracker.update(doppler_cube, range_fft, range_axis)
