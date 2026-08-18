@@ -3,6 +3,7 @@ import json
 import queue
 import tempfile
 import threading
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -262,6 +263,78 @@ class CaponAngleTests(unittest.TestCase):
 
 
 class PmmTrackerStateTests(unittest.TestCase):
+    def test_3d_display_suppresses_tentative_tracks(self) -> None:
+        from rawdatacapture.livedatacapture import _target_track
+
+        tracker = PmmTracker(
+            _mini4_config(),
+            PmmConfig(background_calibration_seconds=0.1),
+        )
+        tentative = replace(
+            tracker.latest_result,
+            state="tentative",
+            range_m=5.0,
+            azimuth_deg=0.0,
+            elevation_deg=0.0,
+        )
+
+        self.assertIsNone(_target_track(tentative))
+        self.assertIsNotNone(_target_track(replace(tentative, state="confirmed")))
+        self.assertIsNotNone(_target_track(replace(tentative, state="coasting")))
+
+    def test_adaptive_thresholds_are_per_range_and_frozen_after_calibration(
+        self,
+    ) -> None:
+        tracker = PmmTracker(
+            _mini4_config(),
+            PmmConfig(
+                background_calibration_seconds=0.3,
+                adaptive_threshold_sigma=6.0,
+                provisional_frames=1,
+                confirmation_window_frames=1,
+                confirmation_hits=1,
+                particle_count=100,
+            ),
+        )
+        range_axis = np.arange(MINI4_NUM_ADC_SAMPLES) * 0.07807095
+        doppler_cube = np.ones((64, 3, 4, 256), dtype=np.complex64)
+        range_fft = np.ones((96, 4, 256), dtype=np.complex64)
+        sizes = np.full(256, 2, dtype=np.int16)
+
+        score_frames = []
+        for small_noise, large_noise in ((-1.0, -10.0), (0.0, 0.0), (1.0, 10.0)):
+            scores = np.full(256, 10.0, dtype=np.float32)
+            scores[40] += small_noise
+            scores[50] += large_noise
+            score_frames.append((scores, sizes))
+        target_scores = np.full(256, 10.0, dtype=np.float32)
+        target_scores[50] = 100.0
+        score_frames.append((target_scores, sizes))
+
+        angles = np.arange(-60.0, 62.0, 2.0, dtype=np.float32)
+        angle_scores = np.ones((61, 61), dtype=np.float32)
+        with patch(
+            "rawdatacapture.pmm.spectrum_folding",
+            side_effect=score_frames,
+        ), patch(
+            "rawdatacapture.pmm.capon_pmm_angle_scores",
+            return_value=(angles, angle_scores),
+        ):
+            for _ in range(3):
+                tracker.update(doppler_cube, range_fft, range_axis)
+            assert tracker.adaptive_thresholds is not None
+            frozen = tracker.adaptive_thresholds.copy()
+            assert tracker.range_indices is not None
+            local_40 = int(np.flatnonzero(tracker.range_indices == 40)[0])
+            local_50 = int(np.flatnonzero(tracker.range_indices == 50)[0])
+            self.assertGreater(frozen[local_50], frozen[local_40])
+
+            result = tracker.update(doppler_cube, range_fft, range_axis)
+
+        np.testing.assert_array_equal(tracker.adaptive_thresholds, frozen)
+        self.assertEqual(result.range_bin, 50)
+        self.assertAlmostEqual(result.threshold, float(frozen[local_50]))
+
     def test_angle_background_is_subtracted_before_angle_paths(self) -> None:
         config = _mini4_config()
         tracker = PmmTracker(

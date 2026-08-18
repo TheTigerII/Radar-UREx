@@ -347,6 +347,7 @@ class RealtimeUavClassifier:
         self.feature_fingerprint = str(dataset["feature_fingerprint"])
         self.feature_version = str(dataset["feature_version"])
         self.score_history: deque[float] = deque(maxlen=SEGMENT_FRAMES)
+        self.pmm_gate_history: deque[bool] = deque(maxlen=SEGMENT_FRAMES)
         self.previous_history_frames = 0
 
     @staticmethod
@@ -446,6 +447,7 @@ class RealtimeUavClassifier:
 
     def reset(self) -> None:
         self.score_history.clear()
+        self.pmm_gate_history.clear()
         self.previous_history_frames = 0
 
     def classify(
@@ -463,15 +465,17 @@ class RealtimeUavClassifier:
         history_frames = int(history.shape[0])
         if history_frames == 0 or history_frames < self.previous_history_frames:
             self.score_history.clear()
+            self.pmm_gate_history.clear()
+        threshold_value = float(threshold)
+        if not math.isfinite(threshold_value):
+            raise ValueError("PMM threshold must be finite")
         if history_frames > 0 and pmm_score is not None:
             score = float(pmm_score)
             if not math.isfinite(score):
                 raise ValueError("PMM score must be finite")
             self.score_history.append(score)
+            self.pmm_gate_history.append(score >= threshold_value)
         self.previous_history_frames = history_frames
-        threshold_value = float(threshold)
-        if not math.isfinite(threshold_value):
-            raise ValueError("PMM threshold must be finite")
         maximum_score = (
             max(self.score_history) if self.score_history else None
         )
@@ -486,7 +490,7 @@ class RealtimeUavClassifier:
                 maximum_pmm_score=maximum_score,
                 threshold=threshold_value,
             )
-        if maximum_score is None or maximum_score < threshold_value:
+        if not any(self.pmm_gate_history):
             return ClassificationResult(
                 status="below_pmm_threshold",
                 label="unknown",

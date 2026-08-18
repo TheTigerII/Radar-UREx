@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from rawdatacapture.pmm import MINI4_DEFAULT_DETECTION_THRESHOLD
+from rawdatacapture.pmm import MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA
 from rawdatacapture import calibrate as radar_calibration
 
 
@@ -154,7 +154,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pmm-detection-threshold",
         type=float,
-        default=MINI4_DEFAULT_DETECTION_THRESHOLD,
+        help="optional fixed-score override; adaptive calibration is the default",
+    )
+    parser.add_argument(
+        "--pmm-adaptive-threshold-sigma",
+        type=float,
+        default=MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
     )
     parser.add_argument("--pmm-history-seconds", type=float, default=3.6)
     parser.add_argument("--pmm-provisional-frames", type=int, default=5)
@@ -365,8 +370,8 @@ def build_capture_command(
         str(args.pmm_folding_size_min),
         "--pmm-folding-size-max",
         str(args.pmm_folding_size_max),
-        "--pmm-detection-threshold",
-        str(args.pmm_detection_threshold),
+        "--pmm-adaptive-threshold-sigma",
+        str(args.pmm_adaptive_threshold_sigma),
         "--pmm-history-seconds",
         str(args.pmm_history_seconds),
         "--pmm-provisional-frames",
@@ -378,6 +383,10 @@ def build_capture_command(
         "--pmm-coast-frames",
         str(args.pmm_coast_frames),
     ]
+    if args.pmm_detection_threshold is not None:
+        command.extend(
+            ("--pmm-detection-threshold", str(args.pmm_detection_threshold))
+        )
     if processed_output is not None and display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
         command.extend(("--processed-output", str(processed_output)))
     if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
@@ -907,7 +916,11 @@ def main() -> int:
     print(
         "PMM tracking: "
         f"calibration={args.pmm_background_calibration_seconds:g}s, "
-        f"threshold={args.pmm_detection_threshold:g}"
+        + (
+            f"fixed threshold={args.pmm_detection_threshold:g}"
+            if args.pmm_detection_threshold is not None
+            else f"adaptive threshold={args.pmm_adaptive_threshold_sigma:g} sigma"
+        )
     )
 
     capture: Optional[subprocess.Popen] = None

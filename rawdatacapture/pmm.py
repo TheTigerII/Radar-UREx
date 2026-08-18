@@ -11,7 +11,7 @@ from scipy import fft as scipy_fft
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
-MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v7"
+MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v8"
 MINI4_NUM_ADC_SAMPLES = 256
 MINI4_NUM_RX_CHANNELS = 4
 MINI4_NUM_LOOPS = 32
@@ -27,7 +27,7 @@ MINI4_FRAME_PERIODICITY_MS = 100.0
 MINI4_DOPPLER_FFT_SIZE = 64
 MINI4_MIN_RANGE_M = 0.3
 MINI4_MAX_RANGE_M = 20.0
-MINI4_DEFAULT_DETECTION_THRESHOLD = 750.0
+MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA = 6.0
 
 TrackState = Literal[
     "calibrating",
@@ -64,7 +64,8 @@ class PmmConfig:
     maximum_target_speed_m_s: float = 4.0
     folding_size_min: int = 2
     folding_size_max: int = 32
-    detection_threshold: float = MINI4_DEFAULT_DETECTION_THRESHOLD
+    detection_threshold: Optional[float] = None
+    adaptive_threshold_sigma: float = MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA
     history_seconds: float = 3.6
     provisional_frames: int = 5
     confirmation_window_frames: int = 10
@@ -92,8 +93,19 @@ class PmmConfig:
                 "PMM folding sizes must be increasing, start at 2 or later, "
                 "and retain at least two folding rows"
             )
-        if self.detection_threshold < 0.0:
-            raise ValueError("PMM detection threshold cannot be negative")
+        if (
+            self.detection_threshold is not None
+            and (
+                not np.isfinite(self.detection_threshold)
+                or self.detection_threshold < 0.0
+            )
+        ):
+            raise ValueError("PMM detection threshold must be finite and non-negative")
+        if (
+            not np.isfinite(self.adaptive_threshold_sigma)
+            or self.adaptive_threshold_sigma <= 0.0
+        ):
+            raise ValueError("PMM adaptive threshold sigma must be finite and positive")
         if self.history_seconds <= 0.0:
             raise ValueError("PMM history duration must be positive")
         if self.provisional_frames < 1:
@@ -586,7 +598,9 @@ class PmmTracker:
             config.provisional_frames,
         )
         self.calibration_sum: Optional[np.ndarray] = None
+        self.calibration_score_samples: list[np.ndarray] = []
         self.background: Optional[np.ndarray] = None
+        self.adaptive_thresholds: Optional[np.ndarray] = None
         self.angle_az_calibration_sum: Optional[np.ndarray] = None
         self.angle_el_calibration_sum: Optional[np.ndarray] = None
         self.angle_az_background: Optional[np.ndarray] = None
@@ -679,6 +693,11 @@ class PmmTracker:
             "tracking_clutter_suppression": (
                 "paper R-PMM background projection subtraction after folding"
             ),
+            "detection_threshold": (
+                "fixed override"
+                if self.config.detection_threshold is not None
+                else "frozen per-range median plus scaled MAD from initial calibration"
+            ),
             "angle_clutter_suppression": (
                 "paper A-PMM background projection subtraction after folding; "
                 "target-free background sampled at each frame's strongest "
@@ -765,7 +784,9 @@ class PmmTracker:
 
     def reset_calibration(self) -> None:
         self.calibration_sum = None
+        self.calibration_score_samples.clear()
         self.background = None
+        self.adaptive_thresholds = None
         self.angle_az_calibration_sum = None
         self.angle_el_calibration_sum = None
         self.angle_az_background = None
@@ -843,6 +864,7 @@ class PmmTracker:
             if self.calibration_sum is None:
                 self.calibration_sum = np.zeros_like(gated_scores, dtype=np.float64)
             self.calibration_sum += gated_scores
+            self.calibration_score_samples.append(gated_scores.copy())
             calibration_local_bin = int(np.argmax(gated_scores))
             calibration_range_bin = int(
                 self.range_indices[calibration_local_bin]
@@ -876,6 +898,39 @@ class PmmTracker:
                 self.background = (
                     self.calibration_sum / self.calibration_frames_seen
                 ).astype(np.float32)
+                if self.config.detection_threshold is None:
+                    calibration_residuals = np.stack(
+                        [
+                            spectral_subtraction(sample, self.background)[0]
+                            for sample in self.calibration_score_samples
+                        ],
+                        axis=0,
+                    )
+                    residual_median = np.median(
+                        calibration_residuals,
+                        axis=0,
+                    )
+                    residual_mad = np.median(
+                        np.abs(calibration_residuals - residual_median),
+                        axis=0,
+                    )
+                    robust_sigma = 1.4826 * residual_mad
+                    numerical_floor = np.maximum(
+                        np.abs(self.background) * 1e-6,
+                        np.finfo(np.float32).eps,
+                    )
+                    self.adaptive_thresholds = np.maximum(
+                        residual_median
+                        + self.config.adaptive_threshold_sigma * robust_sigma,
+                        numerical_floor,
+                    ).astype(np.float32)
+                else:
+                    self.adaptive_thresholds = np.full_like(
+                        self.background,
+                        self.config.detection_threshold,
+                        dtype=np.float32,
+                    )
+                self.calibration_score_samples.clear()
                 assert self.angle_az_calibration_sum is not None
                 assert self.angle_el_calibration_sum is not None
                 self.angle_az_background = (
@@ -894,9 +949,16 @@ class PmmTracker:
             gated_scores,
             self.background,
         )
+        if self.adaptive_thresholds is None:
+            raise RuntimeError("PMM adaptive thresholds are not calibrated")
+        if self.config.detection_threshold is None:
+            path_scores = corrected / self.adaptive_thresholds
+        else:
+            # A constant threshold does not change the relative path ranking.
+            path_scores = corrected
         if self.score_history:
             self.transition_history.append(self.dp_transition_bins)
-        self.score_history.append(corrected)
+        self.score_history.append(path_scores)
         self.folding_size_history.append(raw_sizes[self.range_indices])
         if len(self.score_history) < self.config.provisional_frames:
             self.state = "searching"
@@ -911,8 +973,9 @@ class PmmTracker:
         range_bin = int(self.range_indices[local_bin])
         measured_range_m = float(self.range_axis[range_bin])
         score = float(corrected[local_bin])
+        threshold = float(self.adaptive_thresholds[local_bin])
         folding_size = int(raw_sizes[range_bin])
-        detected = score >= self.config.detection_threshold
+        detected = score >= threshold
         if detected and self.range_filter.initialized:
             previous_range_m = self.range_filter.estimate[0]
             ownership_gate_m = max(
@@ -1069,7 +1132,7 @@ class PmmTracker:
             background_projection_gain=background_gain,
             azimuth_background_projection_gain=azimuth_background_gain,
             elevation_background_projection_gain=elevation_background_gain,
-            threshold=self.config.detection_threshold,
+            threshold=threshold,
             age_frames=self.age_frames,
             hits=self.hits,
             misses=self.misses,
@@ -1098,7 +1161,11 @@ class PmmTracker:
             background_projection_gain=None,
             azimuth_background_projection_gain=None,
             elevation_background_projection_gain=None,
-            threshold=self.config.detection_threshold,
+            threshold=(
+                float(self.config.detection_threshold)
+                if self.config.detection_threshold is not None
+                else 0.0
+            ),
             age_frames=self.age_frames,
             hits=self.hits,
             misses=self.misses,

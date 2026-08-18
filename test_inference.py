@@ -277,6 +277,21 @@ class RealtimeClassifierTests(unittest.TestCase):
             self.assertEqual(result.label, "unknown")
             self.assertIsNone(result.probabilities)
 
+    def test_quality_gate_compares_each_score_with_its_adaptive_threshold(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            weights = Path(directory) / "model_weights"
+            _write_artifacts(weights)
+            classifier = _classifier(weights)
+
+            for frame_count in range(1, SEGMENT_FRAMES + 1):
+                result = classifier.classify(
+                    _history(frame_count),
+                    pmm_score=100.0,
+                    threshold=50.0 if frame_count == 1 else 200.0,
+                )
+
+            self.assertEqual(result.status, "classified")
+
 
 if __name__ == "__main__":
     unittest.main()

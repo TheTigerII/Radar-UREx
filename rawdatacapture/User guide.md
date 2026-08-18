@@ -108,7 +108,7 @@ python run.py --radar-port /dev/ttyUSB0 --display range-doppler \
   --raw-output rawdatacapture/captures/session.bin
 
 python run.py --radar-port /dev/ttyUSB0 \
-  --pmm-detection-threshold 750 \
+  --pmm-adaptive-threshold-sigma 6 \
   --pmm-background-calibration-seconds 30
 
 python run.py --display combined --classification \
@@ -134,7 +134,11 @@ backgrounds used by the paper's projection subtraction.
 - `--pmm-folding-size-min` and `--pmm-folding-size-max`: tested periods;
   defaults are 2 and 32, and the maximum cannot exceed 32 because every
   candidate must retain at least two folding rows.
-- `--pmm-detection-threshold`: linear PMM score threshold; default 750.
+- `--pmm-adaptive-threshold-sigma`: number of robust calibration standard
+  deviations above the per-range residual median; default 6. Thresholds are
+  learned only from startup calibration and remain frozen during tracking.
+- `--pmm-detection-threshold`: optional fixed linear-score override for legacy
+  experiments; omitted by default.
 - `--pmm-history-seconds`: retained range-time history.
 - `--pmm-provisional-frames`: observations before tentative tracking.
 - `--pmm-confirmation-window-frames` and `--pmm-confirmation-hits`: confirmation
@@ -221,7 +225,8 @@ metadata record followed by update records. Look for:
 
 States progress through `calibrating`, `searching`, `tentative`, `confirmed`,
 `coasting`, and `lost`. Only `confirmed` represents a confirmed PMM track; it
-is not a drone-identification result.
+is not a drone-identification result. The 3-D display suppresses tentative
+tracks and shows only confirmed tracks and their short coasting predictions.
 
 When `--raw-output` is supplied, valid complete ADC frames are also saved to
 the given `.bin` file with a JSON metadata sidecar. This is the preferred input
@@ -267,7 +272,7 @@ and installs export packages. Start with the imports cell after installing the
 dependencies above. In Colab, adjust the Drive path in the bootstrap cell and
 then run all cells in order. The committed notebook is unexecuted and does not
 contain weights or metrics. It validates that all input files share the same
-Mini4 profile, feature pipeline, and capture threshold;
+Mini4 profile, feature pipeline, and threshold configuration;
 extracts non-overlapping 36-by-64 Doppler-Time segments; applies the recorded
 PMM threshold; estimates the center-bin DC baseline only from frames whose body
 peak is away from DC; aligns the pre-removal body peak; balances the classes;
@@ -275,13 +280,14 @@ and creates deterministic stratified 70%, 15%, and 15% training, validation,
 and locked-test partitions. Normalization is fitted only on the training
 partition.
 
-Feature version `mini4-pmm-tracking-v7` uses the paper's tracking clutter
+Feature version `mini4-pmm-tracking-v8` uses the paper's tracking clutter
 suppression for both range and angle: non-demeaned Doppler spectra are folded
 first, followed by projection subtraction of the calibrated Range-Time-PMM and
-Angle-Time-PMM backgrounds. It also searches folding sizes 2 through 32.
-Earlier captures and the committed v4 model weights cannot reproduce this
-input and must not be relabelled as v7. Record a new v7 dataset and retrain
-before enabling classification.
+Angle-Time-PMM backgrounds. It learns frozen per-range adaptive thresholds from
+the initial calibration and searches folding sizes 2 through 32. Earlier
+captures and the committed v4 model weights cannot reproduce this input and
+must not be relabelled as v8. Record a new v8 dataset and retrain before
+enabling classification.
 
 Training uses a two-layer, 128-hidden-unit LSTM for 100 epochs with Adam at
 `5e-5` and batch size 10. Validation loss chooses the retained state. The final
@@ -373,10 +379,11 @@ DCA1000 tools, increase the OS receive buffer if permitted, and avoid slow
 storage on the capture path. Queue occupancy and drop counters appear in every
 processed record.
 
-If there are frequent false PMM tracks, collect target-free recordings at the
-actual site and tune the threshold upward. If a Mini 4 Pro is not confirmed,
-collect hover and slow-flight recordings at known distances and inspect the raw
-and subtracted scores before lowering the threshold.
+If there are frequent false PMM tracks, repeat target-free startup calibration
+at the actual site or increase `--pmm-adaptive-threshold-sigma`. If a Mini 4 Pro
+is not confirmed, collect hover and slow-flight recordings at known distances
+and inspect the raw and subtracted scores before decreasing the sigma
+multiplier.
 
 If the display is slow but processing remains healthy, increase
 `--display-update-every` or select `none`.

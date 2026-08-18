@@ -20,7 +20,7 @@ from rawdatacapture.dsp import (
 )
 from rawdatacapture.livedatacapture import RadarCaptureConfig
 from rawdatacapture.pmm import (
-    MINI4_DEFAULT_DETECTION_THRESHOLD,
+    MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
     PmmConfig,
     PmmTracker,
     validate_mini4_profile,
@@ -88,7 +88,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=MINI4_DEFAULT_DETECTION_THRESHOLD,
+        help="optional fixed-score override; adaptive calibration is the default",
+    )
+    parser.add_argument(
+        "--adaptive-threshold-sigma",
+        type=float,
+        default=MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
     )
     return parser.parse_args()
 
@@ -99,6 +104,7 @@ def main() -> None:
     pmm_config = PmmConfig(
         background_calibration_seconds=args.calibration_seconds,
         detection_threshold=args.threshold,
+        adaptive_threshold_sigma=args.adaptive_threshold_sigma,
     )
     output = args.output.open("w", encoding="utf-8") if args.output else None
     try:

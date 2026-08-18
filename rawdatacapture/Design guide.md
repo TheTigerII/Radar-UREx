@@ -135,7 +135,14 @@ is searching.
 
 Startup requires 300 valid target-free frames by default. Their mean PMM
 spectrum becomes the background. Projection-based subtraction estimates the
-background gain and subtracts the projected spectrum. During each target-free
+background gain and subtracts the projected spectrum. The tracker also applies
+that final background to every stored calibration frame, then learns a frozen
+threshold independently for each range bin as the residual median plus six
+scaled median absolute deviations. These thresholds are never updated after
+startup calibration. Adaptive tracking paths use score-to-threshold ratios so
+that a naturally noisy range bin does not win merely because its raw residual
+scale is larger. An optional fixed-score override remains available for
+repeatability with legacy captures. During each target-free
 frame, the strongest range-PMM bin is also passed through the Capon angle
 search. The mean azimuth and elevation PMM marginals become the A-PMM
 backgrounds used for paper-style projection subtraction before angle dynamic
@@ -147,9 +154,10 @@ learned background calibration. A non-monotonic timestamp or a gap greater
 than 1.5 frame periods resets track ownership and histories but preserves the
 learned background.
 
-The code-level default score threshold is 750. It is a site-dependent runtime
-setting rather than a universal physical constant, so target-free and
-controlled-flight recordings are required before deploying it at a new site.
+The default detector uses the frozen adaptive thresholds. The sigma multiplier
+is a site-dependent runtime setting rather than a universal constant, so
+target-free and controlled-flight recordings are required before deploying it
+at a new site.
 
 The paper's value of 30,000 is not used here: it gates complete 3.6-second
 Doppler-Time segments before the paper's identification stage, rather than

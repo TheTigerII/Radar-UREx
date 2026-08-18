@@ -32,7 +32,7 @@ if __package__ in {None, ""}:
         range_resolution_m,
     )
     from rawdatacapture.pmm import (
-        MINI4_DEFAULT_DETECTION_THRESHOLD,
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
         PmmConfig,
         PmmTrackResult,
         PmmTracker,
@@ -50,7 +50,7 @@ else:
         range_resolution_m,
     )
     from .pmm import (
-        MINI4_DEFAULT_DETECTION_THRESHOLD,
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
         PmmConfig,
         PmmTrackResult,
         PmmTracker,
@@ -682,7 +682,10 @@ class ProcessedOutputWriter:
 
 
 def _target_track(result: PmmTrackResult) -> Optional[TargetTrack]:
-    if not result.has_track or result.range_m is None:
+    # Tentative tracks have not passed the temporal confirmation rule. Keeping
+    # them out of the 3-D view prevents isolated noise crossings from flashing
+    # as targets. Coasting is retained only for an already-confirmed track.
+    if result.state not in {"confirmed", "coasting"} or result.range_m is None:
         return None
     azimuth = np.deg2rad(result.azimuth_deg or 0.0)
     elevation = np.deg2rad(result.elevation_deg or 0.0)
@@ -1017,10 +1020,16 @@ def _run_frame_processor(
             calibration_emit_func=worker_emit,
         )
         if tracker is not None:
+            threshold_description = (
+                f"fixed threshold={pmm_config.detection_threshold:g}"
+                if pmm_config.detection_threshold is not None
+                else "adaptive threshold="
+                f"{pmm_config.adaptive_threshold_sigma:g} sigma"
+            )
             worker_emit(
                 "PMM tracking enabled: "
                 f"calibration={pmm_config.background_calibration_seconds:g}s, "
-                f"threshold={pmm_config.detection_threshold:g}, "
+                f"{threshold_description}, "
                 f"folding={pmm_config.folding_size_min}-"
                 f"{pmm_config.folding_size_max}, "
                 f"history={pmm_config.history_seconds:g}s"
@@ -1644,7 +1653,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--pmm-detection-threshold",
         type=float,
-        default=MINI4_DEFAULT_DETECTION_THRESHOLD,
+        help="optional fixed-score override; adaptive calibration is the default",
+    )
+    parser.add_argument(
+        "--pmm-adaptive-threshold-sigma",
+        type=float,
+        default=MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
     )
     parser.add_argument("--pmm-history-seconds", type=float, default=3.6)
     parser.add_argument("--pmm-provisional-frames", type=int, default=5)
@@ -1714,6 +1728,7 @@ def main() -> None:
             folding_size_min=args.pmm_folding_size_min,
             folding_size_max=args.pmm_folding_size_max,
             detection_threshold=args.pmm_detection_threshold,
+            adaptive_threshold_sigma=args.pmm_adaptive_threshold_sigma,
             history_seconds=args.pmm_history_seconds,
             provisional_frames=args.pmm_provisional_frames,
             confirmation_window_frames=(
