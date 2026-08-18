@@ -23,7 +23,7 @@ def _args() -> argparse.Namespace:
         pmm_background_calibration_seconds=30.0,
         pmm_max_target_speed_m_s=4.0,
         pmm_folding_size_min=2,
-        pmm_folding_size_max=20,
+        pmm_folding_size_max=32,
         pmm_detection_threshold=30_000.0,
         pmm_history_seconds=3.6,
         pmm_provisional_frames=5,

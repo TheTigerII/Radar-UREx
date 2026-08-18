@@ -22,6 +22,7 @@ DCA1000 raw ADC
   -> identification branch: Doppler spectrum at tracked range
   -> center-bin DC baseline subtraction and body-peak alignment
   -> 12-element ODS Capon angle search
+  -> calibrated A-PMM projection subtraction
   -> angle continuity tracking and particle smoothing
   -> JSONL and display
 ```
@@ -71,10 +72,10 @@ profile:
 
 The slow-time vectors are Hann-windowed and transformed without complex-mean
 subtraction. As in the paper, tracking suppresses static background only after
-PMM folding by projecting each Range-Time-PMM column onto the target-free
-background spectrum and subtracting that projection. The same non-demeaned
-Doppler spectrum remains available for identification, preserving a hovering
-target's body-velocity peak.
+PMM folding by projecting each Range-Time-PMM or Angle-Time-PMM column onto its
+target-free background spectrum and subtracting that projection. The same
+non-demeaned Doppler spectrum remains available for identification, preserving
+a hovering target's body-velocity peak.
 
 The capture worker rejects any dimension, timing, slope, sampling-rate, TX
 order, or frame-period mismatch. The startup preflight separately validates
@@ -127,15 +128,19 @@ again with a timestamped backup.
 ## PMM extraction and calibration
 
 For every range bin, the linear-magnitude Doppler spectrum is folded for
-integer sizes 2 through 20. Each folding column is averaged as specified by
+integer sizes 2 through 32. Each folding column is averaged as specified by
 Equation 10 in the paper. The maximum score and its folding size are retained.
 The tracker keeps at most 36 frames (3.6 seconds at 10 Hz), including while it
 is searching.
 
 Startup requires 300 valid target-free frames by default. Their mean PMM
 spectrum becomes the background. Projection-based subtraction estimates the
-background gain and subtracts the projected spectrum. Until calibration
-finishes, the only state is `calibrating` and no detection is emitted.
+background gain and subtracts the projected spectrum. During each target-free
+frame, the strongest range-PMM bin is also passed through the Capon angle
+search. The mean azimuth and elevation PMM marginals become the A-PMM
+backgrounds used for paper-style projection subtraction before angle dynamic
+programming. Until calibration finishes, the only state is `calibrating` and
+no detection is emitted.
 The metadata records profile and feature fingerprints for compatibility
 checking. A changed range axis or incompatible Doppler-cube shape resets the
 learned background calibration. A non-monotonic timestamp or a gap greater
@@ -165,10 +170,10 @@ create a `tentative` track.
 A 5,000-particle constant-velocity filter smooths range and estimates radial
 velocity. At the filtered range, Capon beamforming searches the 12-element ODS
 virtual array from -60 to +60 degrees in azimuth and elevation on a 2-degree
-grid. PMM folding, continuity constraints, and particle filters are also
-applied to the angle estimates. Positive elevation and positive display Z both
-mean upward; the ODS vertical antenna coordinate is sign-corrected to maintain
-that convention.
+grid. The folded azimuth and elevation marginals undergo calibrated projection
+subtraction before continuity constraints and particle filters are applied.
+Positive elevation and positive display Z both mean upward; the ODS vertical
+antenna coordinate is sign-corrected to maintain that convention.
 
 Track states are:
 
@@ -191,6 +196,7 @@ and feature fingerprints and PMM settings. Update records contain:
 
 - calibration progress;
 - raw and background-subtracted PMM scores;
+- range, azimuth, and elevation background-projection gains;
 - winning folding size;
 - selected range bin and filtered range;
 - filtered radial velocity, azimuth, and elevation;

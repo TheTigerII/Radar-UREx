@@ -1640,7 +1640,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--pmm-max-target-speed-m-s", type=float, default=4.0)
     parser.add_argument("--pmm-folding-size-min", type=int, default=2)
-    parser.add_argument("--pmm-folding-size-max", type=int, default=20)
+    parser.add_argument("--pmm-folding-size-max", type=int, default=32)
     parser.add_argument(
         "--pmm-detection-threshold",
         type=float,

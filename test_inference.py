@@ -22,7 +22,7 @@ def _runtime_contract() -> dict:
     return {
         "profile_fingerprint": "profile-test",
         "feature_fingerprint": "feature-test",
-        "feature_version": "mini4-pmm-tracking-v6",
+        "feature_version": "mini4-pmm-tracking-v7",
     }
 
 

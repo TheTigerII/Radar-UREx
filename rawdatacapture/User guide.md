@@ -123,13 +123,17 @@ graphical modes use PyQtGraph; the 3D normal modes also use its OpenGL widgets.
 Use `none` for unattended or headless operation.
 
 Keep the monitored area target-free during the first 30 seconds. The status is
-`calibrating` during that period and no detection is emitted.
+`calibrating` during that period and no detection is emitted. This period now
+calibrates both the range-PMM background and the azimuth/elevation A-PMM
+backgrounds used by the paper's projection subtraction.
 
 ## Runtime settings
 
 - `--pmm-background-calibration-seconds`: target-free calibration time.
 - `--pmm-max-target-speed-m-s`: dynamic-programming motion limit.
-- `--pmm-folding-size-min` and `--pmm-folding-size-max`: tested periods.
+- `--pmm-folding-size-min` and `--pmm-folding-size-max`: tested periods;
+  defaults are 2 and 32, and the maximum cannot exceed 32 because every
+  candidate must retain at least two folding rows.
 - `--pmm-detection-threshold`: linear PMM score threshold; default 750.
 - `--pmm-history-seconds`: retained range-time history.
 - `--pmm-provisional-frames`: observations before tentative tracking.
@@ -271,12 +275,13 @@ and creates deterministic stratified 70%, 15%, and 15% training, validation,
 and locked-test partitions. Normalization is fitted only on the training
 partition.
 
-Feature version `mini4-pmm-tracking-v6` uses the paper's tracking clutter
-suppression: non-demeaned Doppler spectra are folded first, followed by
-projection subtraction of the calibrated Range-Time-PMM background. Earlier
-captures and the committed v4 model weights cannot reproduce this input and
-must not be relabelled as v6. Record a new v6 dataset and retrain before enabling
-classification.
+Feature version `mini4-pmm-tracking-v7` uses the paper's tracking clutter
+suppression for both range and angle: non-demeaned Doppler spectra are folded
+first, followed by projection subtraction of the calibrated Range-Time-PMM and
+Angle-Time-PMM backgrounds. It also searches folding sizes 2 through 32.
+Earlier captures and the committed v4 model weights cannot reproduce this
+input and must not be relabelled as v7. Record a new v7 dataset and retrain
+before enabling classification.
 
 Training uses a two-layer, 128-hidden-unit LSTM for 100 epochs with Adam at
 `5e-5` and batch size 10. Validation loss chooses the retained state. The final

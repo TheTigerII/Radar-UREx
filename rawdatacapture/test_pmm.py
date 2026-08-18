@@ -70,6 +70,19 @@ class SpectrumFoldingTests(unittest.TestCase):
         np.testing.assert_allclose(scores, 1.0)
         np.testing.assert_array_equal(sizes, np.full(8, 2))
 
+    def test_default_range_recovers_31_bin_period(self) -> None:
+        spectrum = np.zeros((1, 64), dtype=np.float32)
+        spectrum[0, (1, 32, 63)] = 100.0
+
+        scores, sizes = spectrum_folding(spectrum)
+
+        self.assertEqual(int(sizes[0]), 31)
+        self.assertEqual(float(scores[0]), 100.0)
+
+    def test_tracker_rejects_folding_sizes_with_fewer_than_two_rows(self) -> None:
+        with self.assertRaisesRegex(ValueError, "two folding rows"):
+            PmmConfig(folding_size_max=33)
+
 
 class BackgroundSubtractionTests(unittest.TestCase):
     def test_removes_scaled_static_background_and_keeps_target(self) -> None:
@@ -155,6 +168,27 @@ class Mini4ProfileTests(unittest.TestCase):
 
 
 class CaponAngleTests(unittest.TestCase):
+    def test_static_angle_signal_is_retained_until_apmm_subtraction(self) -> None:
+        config = _mini4_config()
+        range_fft = np.zeros(
+            (MINI4_NUM_CHIRPS, MINI4_NUM_RX_CHANNELS, MINI4_NUM_ADC_SAMPLES),
+            dtype=np.complex64,
+        )
+        range_fft[..., 40] = 1.0
+
+        _, scores = capon_pmm_angle_scores(
+            range_fft,
+            40,
+            config,
+            angle_limit_deg=60.0,
+            angle_step_deg=2.0,
+            folding_size_min=2,
+            folding_size_max=32,
+        )
+
+        self.assertTrue(np.isfinite(scores).all())
+        self.assertGreater(float(scores.max()), 0.0)
+
     def test_recovers_synthetic_ods_direction(self) -> None:
         config = _mini4_config()
         target_bin = 40
@@ -228,6 +262,46 @@ class CaponAngleTests(unittest.TestCase):
 
 
 class PmmTrackerStateTests(unittest.TestCase):
+    def test_angle_background_is_subtracted_before_angle_paths(self) -> None:
+        config = _mini4_config()
+        tracker = PmmTracker(
+            config,
+            PmmConfig(
+                background_calibration_seconds=0.1,
+                detection_threshold=10.0,
+                provisional_frames=1,
+                confirmation_window_frames=1,
+                confirmation_hits=1,
+                particle_count=100,
+            ),
+        )
+        range_axis = np.arange(MINI4_NUM_ADC_SAMPLES) * 0.07807095
+        background = np.ones((64, 3, 4, 256), dtype=np.complex64)
+        target = background.copy()
+        target[::5, ..., 50] = 1_000.0
+        range_fft = np.ones((96, 4, 256), dtype=np.complex64)
+        angles = np.arange(-60.0, 62.0, 2.0, dtype=np.float32)
+        background_angles = np.ones((61, 61), dtype=np.float32)
+        measured_angles = 3.0 * background_angles
+        measured_angles[40, 20] += 20.0
+
+        with patch(
+            "rawdatacapture.pmm.capon_pmm_angle_scores",
+            side_effect=(
+                (angles, background_angles),
+                (angles, measured_angles),
+            ),
+        ):
+            tracker.update(background, range_fft, range_axis)
+            result = tracker.update(target, range_fft, range_axis)
+
+        np.testing.assert_allclose(tracker.angle_az_background, 1.0)
+        np.testing.assert_allclose(tracker.angle_el_background, 1.0)
+        self.assertEqual(int(np.argmax(tracker.angle_az_history[-1])), 20)
+        self.assertEqual(int(np.argmax(tracker.angle_el_history[-1])), 40)
+        self.assertGreater(result.azimuth_background_projection_gain or 0.0, 3.0)
+        self.assertGreater(result.elevation_background_projection_gain or 0.0, 3.0)
+
     def test_searching_retains_history_without_claiming_noise_ownership(
         self,
     ) -> None:
@@ -403,11 +477,15 @@ class PmmTrackerStateTests(unittest.TestCase):
         valid = np.ones((64, 3, 4, 256), dtype=np.complex64)
         tracker.update(valid, range_fft, range_axis)
         self.assertIsNotNone(tracker.background)
+        self.assertIsNotNone(tracker.angle_az_background)
+        self.assertIsNotNone(tracker.angle_el_background)
 
         with self.assertRaisesRegex(ValueError, "Doppler cube mismatch"):
             tracker.update(valid[:-1], range_fft, range_axis)
 
         self.assertIsNone(tracker.background)
+        self.assertIsNone(tracker.angle_az_background)
+        self.assertIsNone(tracker.angle_el_background)
         self.assertEqual(tracker.state, "calibrating")
 
 

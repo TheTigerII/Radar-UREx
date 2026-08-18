@@ -11,7 +11,7 @@ from scipy import fft as scipy_fft
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
-MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v6"
+MINI4_FEATURE_VERSION = "mini4-pmm-tracking-v7"
 MINI4_NUM_ADC_SAMPLES = 256
 MINI4_NUM_RX_CHANNELS = 4
 MINI4_NUM_LOOPS = 32
@@ -63,7 +63,7 @@ class PmmConfig:
     background_calibration_seconds: float = 30.0
     maximum_target_speed_m_s: float = 4.0
     folding_size_min: int = 2
-    folding_size_max: int = 20
+    folding_size_max: int = 32
     detection_threshold: float = MINI4_DEFAULT_DETECTION_THRESHOLD
     history_seconds: float = 3.6
     provisional_frames: int = 5
@@ -82,8 +82,16 @@ class PmmConfig:
             raise ValueError("PMM background calibration duration must be positive")
         if self.maximum_target_speed_m_s <= 0.0:
             raise ValueError("PMM maximum target speed must be positive")
-        if not 2 <= self.folding_size_min <= self.folding_size_max:
-            raise ValueError("PMM folding sizes must be increasing and start at 2")
+        if not (
+            2
+            <= self.folding_size_min
+            <= self.folding_size_max
+            <= MINI4_DOPPLER_FFT_SIZE // 2
+        ):
+            raise ValueError(
+                "PMM folding sizes must be increasing, start at 2 or later, "
+                "and retain at least two folding rows"
+            )
         if self.detection_threshold < 0.0:
             raise ValueError("PMM detection threshold cannot be negative")
         if self.history_seconds <= 0.0:
@@ -122,6 +130,8 @@ class PmmTrackResult:
     pmm_score: Optional[float]
     folding_size: Optional[int]
     background_projection_gain: Optional[float]
+    azimuth_background_projection_gain: Optional[float]
+    elevation_background_projection_gain: Optional[float]
     threshold: float
     age_frames: int
     hits: int
@@ -212,7 +222,7 @@ def validate_mini4_profile(config: PmmRadarConfig) -> None:
 def spectrum_folding(
     spectra: np.ndarray,
     folding_size_min: int = 2,
-    folding_size_max: int = 20,
+    folding_size_max: int = 32,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return mmHawkeye folding scores and winning sizes along the last axis."""
     values = np.asarray(spectra, dtype=np.float32)
@@ -501,7 +511,6 @@ def capon_pmm_angle_scores(
     ).reshape(loops, tx_count * int(config.num_rx_channels))
     coordinates, phase_corrections = _ods_virtual_coordinates(config)
     slow_time *= phase_corrections[np.newaxis, :]
-    slow_time -= slow_time.mean(axis=0, keepdims=True)
     covariance = (slow_time.T @ slow_time.conj()) / max(loops, 1)
     diagonal_loading = max(
         float(np.trace(covariance).real) / covariance.shape[0] * 1e-3,
@@ -578,6 +587,11 @@ class PmmTracker:
         )
         self.calibration_sum: Optional[np.ndarray] = None
         self.background: Optional[np.ndarray] = None
+        self.angle_az_calibration_sum: Optional[np.ndarray] = None
+        self.angle_el_calibration_sum: Optional[np.ndarray] = None
+        self.angle_az_background: Optional[np.ndarray] = None
+        self.angle_el_background: Optional[np.ndarray] = None
+        self.angle_calibration_frames_seen = 0
         self.calibration_frames_seen = 0
         self.score_history: deque[np.ndarray] = deque(
             maxlen=self.history_frames_limit
@@ -665,6 +679,11 @@ class PmmTracker:
             "tracking_clutter_suppression": (
                 "paper R-PMM background projection subtraction after folding"
             ),
+            "angle_clutter_suppression": (
+                "paper A-PMM background projection subtraction after folding; "
+                "target-free background sampled at each frame's strongest "
+                "range-PMM bin"
+            ),
             "identification_dc_removal": (
                 "paper center-bin baseline subtraction before body-peak alignment"
             ),
@@ -747,6 +766,11 @@ class PmmTracker:
     def reset_calibration(self) -> None:
         self.calibration_sum = None
         self.background = None
+        self.angle_az_calibration_sum = None
+        self.angle_el_calibration_sum = None
+        self.angle_az_background = None
+        self.angle_el_background = None
+        self.angle_calibration_frames_seen = 0
         self.calibration_frames_seen = 0
         self.reset_tracking()
         self.state = "calibrating"
@@ -819,10 +843,48 @@ class PmmTracker:
             if self.calibration_sum is None:
                 self.calibration_sum = np.zeros_like(gated_scores, dtype=np.float64)
             self.calibration_sum += gated_scores
+            calibration_local_bin = int(np.argmax(gated_scores))
+            calibration_range_bin = int(
+                self.range_indices[calibration_local_bin]
+            )
+            _, angle_scores = capon_pmm_angle_scores(
+                range_fft,
+                calibration_range_bin,
+                self.radar_config,
+                angle_limit_deg=self.config.angle_limit_deg,
+                angle_step_deg=self.config.angle_step_deg,
+                folding_size_min=self.config.folding_size_min,
+                folding_size_max=self.config.folding_size_max,
+            )
+            angle_az_scores = angle_scores.max(axis=0)
+            angle_el_scores = angle_scores.max(axis=1)
+            if self.angle_az_calibration_sum is None:
+                self.angle_az_calibration_sum = np.zeros_like(
+                    angle_az_scores,
+                    dtype=np.float64,
+                )
+                self.angle_el_calibration_sum = np.zeros_like(
+                    angle_el_scores,
+                    dtype=np.float64,
+                )
+            assert self.angle_el_calibration_sum is not None
+            self.angle_az_calibration_sum += angle_az_scores
+            self.angle_el_calibration_sum += angle_el_scores
+            self.angle_calibration_frames_seen += 1
             self.calibration_frames_seen += 1
             if self.calibration_frames_seen >= self.calibration_frames_required:
                 self.background = (
                     self.calibration_sum / self.calibration_frames_seen
+                ).astype(np.float32)
+                assert self.angle_az_calibration_sum is not None
+                assert self.angle_el_calibration_sum is not None
+                self.angle_az_background = (
+                    self.angle_az_calibration_sum
+                    / self.angle_calibration_frames_seen
+                ).astype(np.float32)
+                self.angle_el_background = (
+                    self.angle_el_calibration_sum
+                    / self.angle_calibration_frames_seen
                 ).astype(np.float32)
                 self.state = "searching"
             self.latest_result = self._empty_result(self.state)
@@ -914,6 +976,8 @@ class PmmTracker:
         self.angle_elapsed_s += self.current_delta_time_s
         azimuth_deg: Optional[float] = None
         elevation_deg: Optional[float] = None
+        azimuth_background_gain: Optional[float] = None
+        elevation_background_gain: Optional[float] = None
         if detected:
             angles, angle_scores = capon_pmm_angle_scores(
                 range_fft,
@@ -924,8 +988,24 @@ class PmmTracker:
                 folding_size_min=self.config.folding_size_min,
                 folding_size_max=self.config.folding_size_max,
             )
-            self.angle_az_history.append(angle_scores.max(axis=0))
-            self.angle_el_history.append(angle_scores.max(axis=1))
+            if (
+                self.angle_az_background is None
+                or self.angle_el_background is None
+            ):
+                raise RuntimeError("PMM angle background is not calibrated")
+            corrected_azimuth, azimuth_background_gain = spectral_subtraction(
+                angle_scores.max(axis=0),
+                self.angle_az_background,
+            )
+            (
+                corrected_elevation,
+                elevation_background_gain,
+            ) = spectral_subtraction(
+                angle_scores.max(axis=1),
+                self.angle_el_background,
+            )
+            self.angle_az_history.append(corrected_azimuth)
+            self.angle_el_history.append(corrected_elevation)
             maximum_angle_step = max(
                 int(
                     np.ceil(
@@ -987,6 +1067,8 @@ class PmmTracker:
             pmm_score=score,
             folding_size=folding_size,
             background_projection_gain=background_gain,
+            azimuth_background_projection_gain=azimuth_background_gain,
+            elevation_background_projection_gain=elevation_background_gain,
             threshold=self.config.detection_threshold,
             age_frames=self.age_frames,
             hits=self.hits,
@@ -1014,6 +1096,8 @@ class PmmTracker:
             pmm_score=None,
             folding_size=None,
             background_projection_gain=None,
+            azimuth_background_projection_gain=None,
+            elevation_background_projection_gain=None,
             threshold=self.config.detection_threshold,
             age_frames=self.age_frames,
             hits=self.hits,
