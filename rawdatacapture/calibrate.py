@@ -20,6 +20,8 @@ from typing import Any, Iterable, Optional
 
 import numpy as np
 
+from .pmm import PmmConfig, capon_pmm_angle_scores
+
 
 CALIBRATION_DISPLAY_MODE = "calibration"
 AZIMUTH_CALIBRATION_DISPLAY_MODE = "azimuth-calibration"
@@ -39,7 +41,6 @@ DEFAULT_ACCEPTED_FRAMES = 64
 DEFAULT_TIMEOUT_SECONDS = 90.0
 DEFAULT_REFERENCE_ANGLE_DEG = 0.0
 DEFAULT_MAX_ANGLE_STD_DEG = 1.0
-ANGLE_FFT_SIZE = 128
 HOST_ANGLE_CALIBRATION_MARKER = "% hostAngleCalibration"
 
 _PROFILE_OVERRIDES = {
@@ -722,76 +723,38 @@ class CalibrationAccumulator:
         )
 
 
-def _build_ods_virtual_antenna_grid(
-    virtual_samples: np.ndarray,
-    radar_config: Any,
-) -> np.ndarray:
-    """Map TDM samples into the ODS planar array with host corrections."""
-
-    samples = np.asarray(virtual_samples, dtype=np.complex128)
-    if samples.shape != (3, 4):
-        raise ValueError("ODS angular calibration requires [3 TX chirps, 4 RX]")
-    tx_masks = tuple(
-        int(value)
-        for value in (
-            getattr(radar_config, "tx_channel_masks", None)
-            or getattr(radar_config, "chirp_tx_masks", ())
-        )
-    )
-    if len(tx_masks) != 3 or sorted(tx_masks) != [1, 2, 4]:
-        raise ValueError("ODS angular calibration requires TX masks 1, 2, and 4")
-    positions = {
-        (1, 1): (3, 0), (1, 2): (2, 0), (1, 3): (2, 1), (1, 4): (3, 1),
-        (2, 1): (3, 2), (2, 2): (2, 2), (2, 3): (2, 3), (2, 4): (3, 3),
-        (3, 1): (1, 2), (3, 2): (0, 2), (3, 3): (0, 3), (3, 4): (1, 3),
-    }
-    fallback_rx_phase = (1.0, -1.0, -1.0, 1.0)
-    configured = getattr(radar_config, "rx_channel_compensation", None)
-    measured = None
-    if configured is not None and len(configured) == 12:
-        candidate = np.asarray(configured, dtype=np.complex128)
-        if np.all(np.isfinite(candidate)) and not np.allclose(candidate, 1.0 + 0.0j):
-            measured = candidate
-    grid = np.zeros((4, 4), dtype=np.complex128)
-    for chirp_index, mask in enumerate(tx_masks):
-        tx_number = int(mask).bit_length()
-        for rx_index in range(4):
-            row, column = positions[(tx_number, rx_index + 1)]
-            correction = (
-                measured[(tx_number - 1) * 4 + rx_index]
-                if measured is not None
-                else fallback_rx_phase[rx_index]
-            )
-            grid[row, column] = correction * samples[chirp_index, rx_index]
-    return grid
-
-
 class AngularCalibrationAccumulator:
     """Estimate an azimuth or elevation offset from a known tripod angle."""
 
-    def __init__(self, radar_config: Any, settings: CalibrationSettings) -> None:
+    def __init__(
+        self,
+        radar_config: Any,
+        settings: CalibrationSettings,
+        pmm_config: Optional[PmmConfig] = None,
+    ) -> None:
         if settings.calibration_type not in {"azimuth", "elevation"}:
             raise ValueError("Angular accumulator requires azimuth or elevation mode")
         self.config = radar_config
         self.settings = settings
+        self.pmm_config = pmm_config or PmmConfig()
         configured_range_axis = radar_config.range_axis_m()
         if configured_range_axis is None:
             raise ValueError("Angular calibration requires a configured range axis")
+        # range_axis_m() is already the physical axis corrected by the
+        # operational profile's range_bias_m. Use it for both reflector-bin
+        # selection and the range reported in the calibration result.
         self.range_axis_m = np.asarray(configured_range_axis, dtype=np.float64)
         self.tx_masks = tuple(int(value) for value in radar_config.chirp_tx_masks)
         self._warmup_seen = 0
         self._accepted_angles: deque[float] = deque(maxlen=settings.accepted_frames)
         self._accepted_ranges: deque[float] = deque(maxlen=settings.accepted_frames)
         self.result: Optional[AngularCalibrationResult] = None
-        bins = np.arange(ANGLE_FFT_SIZE, dtype=np.float64)
-        direction_cosines = np.clip(
-            2.0 * (bins - ANGLE_FFT_SIZE // 2) / ANGLE_FFT_SIZE,
-            -1.0,
-            1.0,
-        )
-        angles = np.rad2deg(np.arcsin(direction_cosines))
-        self.angle_axis_deg = (
-            angles if settings.calibration_type == "azimuth" else -angles
+        self.angle_axis_deg = np.arange(
+            -self.pmm_config.angle_limit_deg,
+            self.pmm_config.angle_limit_deg
+            + self.pmm_config.angle_step_deg * 0.5,
+            self.pmm_config.angle_step_deg,
+            dtype=np.float64,
         )
 
     def _payload(
@@ -816,7 +779,7 @@ class AngularCalibrationAccumulator:
             angle_profile_db=(
                 np.asarray(angle_profile_db, dtype=np.float64)
                 if angle_profile_db is not None
-                else np.full(ANGLE_FFT_SIZE, -120.0, dtype=np.float64)
+                else np.full(self.angle_axis_deg.size, -120.0, dtype=np.float64)
             ),
             reference_angle_deg=self.settings.reference_angle_deg,
             measured_angle_deg=measured_angle_deg,
@@ -927,59 +890,30 @@ class AngularCalibrationAccumulator:
             self.range_axis_m[peak_index] + range_offset * range_step
         )
 
-        virtual_grid = _build_ods_virtual_antenna_grid(
-            zero_doppler[:, :, peak_index], self.config
+        # Reuse the runtime compensated ODS geometry, Capon beamformer,
+        # Doppler FFT, PMM folding, and angle grid. Calibration deliberately
+        # averages stable reflector estimates rather than using tracking's
+        # target-free background and temporal path state.
+        angles, angle_scores = capon_pmm_angle_scores(
+            cube,
+            peak_index,
+            self.config,
+            angle_limit_deg=self.pmm_config.angle_limit_deg,
+            angle_step_deg=self.pmm_config.angle_step_deg,
+            folding_size_min=self.pmm_config.folding_size_min,
+            folding_size_max=self.pmm_config.folding_size_max,
         )
-        angle_response = np.fft.fftshift(
-            np.fft.fft2(
-                virtual_grid,
-                s=(ANGLE_FFT_SIZE, ANGLE_FFT_SIZE),
-                axes=(-2, -1),
-            ),
-            axes=(-2, -1),
-        )
-        magnitude = np.abs(angle_response)
         angle_profile = (
-            np.max(magnitude, axis=0)
+            np.max(angle_scores, axis=0)
             if self.settings.calibration_type == "azimuth"
-            else np.max(magnitude, axis=1)
+            else np.max(angle_scores, axis=1)
         )
         angle_peak_index = int(np.argmax(angle_profile))
-        if angle_peak_index <= 0 or angle_peak_index >= ANGLE_FFT_SIZE - 1:
+        if angle_peak_index <= 0 or angle_peak_index >= angles.size - 1:
             return self._payload(
-                range_profile_db, None, "Angular peak is on the FFT boundary"
+                range_profile_db, None, "Angular peak is on the search-grid boundary"
             )
-        a_left, a_centre, a_right = (
-            float(angle_profile[index])
-            for index in (
-                angle_peak_index - 1,
-                angle_peak_index,
-                angle_peak_index + 1,
-            )
-        )
-        angle_denominator = a_left - 2.0 * a_centre + a_right
-        angle_offset = (
-            0.0
-            if abs(angle_denominator) < np.finfo(float).eps
-            else 0.5 * (a_left - a_right) / angle_denominator
-        )
-        angle_offset = float(np.clip(angle_offset, -0.5, 0.5))
-        direction_cosine = float(
-            np.clip(
-                2.0
-                * (
-                    angle_peak_index
-                    + angle_offset
-                    - ANGLE_FFT_SIZE // 2
-                )
-                / ANGLE_FFT_SIZE,
-                -1.0,
-                1.0,
-            )
-        )
-        measured_angle = math.degrees(math.asin(direction_cosine))
-        if self.settings.calibration_type == "elevation":
-            measured_angle = -measured_angle
+        measured_angle = float(angles[angle_peak_index])
         self._accepted_angles.append(measured_angle)
         self._accepted_ranges.append(measured_range)
         angle_scale = max(float(np.max(angle_profile)), np.finfo(float).tiny)
@@ -1025,10 +959,11 @@ class AngularCalibrationAccumulator:
 def create_calibration_accumulator(
     radar_config: Any,
     settings: CalibrationSettings,
+    pmm_config: Optional[PmmConfig] = None,
 ) -> CalibrationAccumulator | AngularCalibrationAccumulator:
     if settings.calibration_type == "range":
         return CalibrationAccumulator(radar_config, settings)
-    return AngularCalibrationAccumulator(radar_config, settings)
+    return AngularCalibrationAccumulator(radar_config, settings, pmm_config)
 
 
 def run_calibration_display(

@@ -193,7 +193,9 @@ python run.py --display elevation-calibration \
 ```
 
 Angular calibration loads the operational profile's range and RX-channel
-corrections while measuring. Applying the result writes a host-only
+corrections while measuring. It selects the reflector on the bias-corrected
+range axis and uses the same Capon/PMM angle estimator and settings as runtime
+tracking. Applying the result writes a host-only
 `% hostAngleCalibration` comment and preserves the other angular bias. These
 modes produce a calibration report rather than normal PMM JSONL or raw capture
 output. Use the `--calibration-search-window-m`,

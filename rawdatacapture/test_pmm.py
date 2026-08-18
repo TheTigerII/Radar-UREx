@@ -164,8 +164,15 @@ class Mini4ProfileTests(unittest.TestCase):
         range_axis = config.range_axis_m()
         assert range_axis is not None
         self.assertEqual(config.bytes_per_frame, 393_216)
-        self.assertAlmostEqual(float(range_axis[1]), 0.078, delta=0.001)
-        self.assertGreater(float(range_axis[-1]), 19.8)
+        self.assertAlmostEqual(
+            float(range_axis[1] - range_axis[0]),
+            0.078,
+            delta=0.001,
+        )
+        self.assertGreater(
+            float(range_axis[-1]) + config.range_bias_m,
+            19.8,
+        )
 
 
 class CaponAngleTests(unittest.TestCase):

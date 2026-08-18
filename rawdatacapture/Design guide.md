@@ -118,9 +118,11 @@ backup.
 
 Angular calibration uses the operational profile's range bias and RX-channel
 coefficients as host-side corrections while the temporary calibration profile
-runs on the radar. The 12 corrected virtual channels are mapped to the ODS
-planar array, transformed on a 128-by-128 FFT angle grid, and accumulated until
-64 accepted angle estimates have a standard deviation at most 1 degree.
+runs on the radar. The bias-corrected range axis selects the reflector bin.
+That bin is processed by the same compensated ODS geometry, Capon beamformer,
+Doppler FFT, PMM folding range, and angle grid as runtime tracking, and 64
+accepted angle estimates are accumulated to a standard deviation of at most
+1 degree.
 Applying an azimuth or elevation result updates an SDK-safe
 `% hostAngleCalibration` comment while preserving the other angular bias,
 again with a timestamped backup.

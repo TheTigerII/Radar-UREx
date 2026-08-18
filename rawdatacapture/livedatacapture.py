@@ -731,6 +731,7 @@ class DisplayPayloadSink:
         classifier: Optional[Any] = None,
         display_skipped_counter: Optional[Any] = None,
         calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
+        pmm_config: Optional[PmmConfig] = None,
         calibration_complete_event: Optional[Any] = None,
         calibration_emit_func: Optional[EmitFunc] = None,
     ) -> None:
@@ -748,7 +749,7 @@ class DisplayPayloadSink:
         self.timings = ProcessingTimingStats()
         self.calibration_accumulator = (
             radar_calibration.create_calibration_accumulator(
-                config, calibration_settings
+                config, calibration_settings, pmm_config
             )
             if calibration_settings is not None
             else None
@@ -1016,6 +1017,7 @@ def _run_frame_processor(
             classifier,
             display_skipped_counter,
             calibration_settings=calibration_settings,
+            pmm_config=pmm_config,
             calibration_complete_event=calibration_complete_event,
             calibration_emit_func=worker_emit,
         )
