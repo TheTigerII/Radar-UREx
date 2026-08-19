@@ -762,6 +762,10 @@ class PmmWorkerIntegrationTests(unittest.TestCase):
         payload = payload_queue.get_nowait()
         self.assertIsInstance(payload, CombinedDisplayPayload)
         self.assertIn("PMM target", payload.point_cloud.tracking_status)
+        status_rows = payload.point_cloud.tracking_status.splitlines()
+        self.assertEqual(len(status_rows), 2)
+        self.assertIn("calibration", status_rows[0])
+        self.assertTrue(status_rows[1].startswith("score "))
 
 
 if __name__ == "__main__":

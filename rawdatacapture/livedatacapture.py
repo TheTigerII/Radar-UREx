@@ -896,10 +896,10 @@ class DisplayPayloadSink:
                     tracking_status=(
                         f"PMM target — {result.state} | calibration "
                         f"{result.calibration_frames_seen}/"
-                        f"{result.calibration_frames_required} | score "
-                        f"{score_text}/{threshold_text} | range "
-                        f"{range_text} | fold {folding_text}"
+                        f"{result.calibration_frames_required}"
                         + _classification_status_text(classification)
+                        + f"\nscore {score_text}/{threshold_text} | range "
+                        f"{range_text} | fold {folding_text}"
                     ),
                 )
                 payload = (
@@ -1204,7 +1204,9 @@ class _PyQtGraphDisplay:
     def _make_point_panel(self) -> Any:
         panel = self.QtWidgets.QWidget()
         layout = self.QtWidgets.QVBoxLayout(panel)
-        self.point_status = self.QtWidgets.QLabel("PMM target — starting")
+        self.point_status = self.QtWidgets.QLabel(
+            "PMM target — starting\nrange — | fold —"
+        )
         self.point_status.setAlignment(self.QtCore.Qt.AlignmentFlag.AlignCenter)
         self.point_status.setSizePolicy(
             self.QtWidgets.QSizePolicy.Policy.Ignored,
@@ -1213,6 +1215,9 @@ class _PyQtGraphDisplay:
         self.point_status.setStyleSheet(
             "font-family: monospace; font-size: 16px; font-weight: 600; "
             "padding: 6px;"
+        )
+        self.point_status.setMinimumHeight(
+            2 * self.point_status.fontMetrics().lineSpacing() + 16
         )
         view = self.gl.GLViewWidget()
         view.setBackgroundColor((15, 18, 24, 255))
