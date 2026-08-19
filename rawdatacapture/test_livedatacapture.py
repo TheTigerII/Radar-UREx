@@ -2371,10 +2371,10 @@ class ClassificationIntegrationTests(unittest.TestCase):
         self.assertEqual(payload.point_cloud.classification.label, "drone")
         self.assertTrue(inference.closed)
 
-    def test_predicted_track_resets_classification_history(self) -> None:
+    def test_predicted_track_continues_classification_history(self) -> None:
         engine = Mock()
         engine.unknown.return_value = self._result()
-        engine.reset.return_value = self._result()
+        engine.update_feature_step.return_value = self._result()
         sink = DisplayPayloadSink(
             "none",
             1,
@@ -2382,24 +2382,25 @@ class ClassificationIntegrationTests(unittest.TestCase):
             SimpleNamespace(),
             inference_engine=engine,
         )
-        predicted = TargetTrack(
-            position_m=(0.0, 2.0, 0.0),
-            velocity_m_per_update=(0.0, 0.0, 0.0),
-            age_updates=10,
-            hits=9,
-            missed_updates=1,
-            confirmed=True,
-        )
+        for update_index in range(48):
+            track = TargetTrack(
+                position_m=(0.0, 2.0, 0.0),
+                velocity_m_per_update=(0.0, 0.0, 0.0),
+                age_updates=10 + update_index,
+                hits=9 + update_index,
+                missed_updates=1 if update_index % 3 == 2 else 0,
+                confirmed=True,
+            )
+            sink._classify_tracked_target(
+                np.zeros((128, 3, 4, 64), dtype=np.complex64),
+                np.arange(64, dtype=np.float32),
+                track,
+                target_changed=False,
+            )
 
-        sink._classify_tracked_target(
-            np.zeros((128, 3, 4, 64), dtype=np.complex64),
-            np.arange(64, dtype=np.float32),
-            predicted,
-            target_changed=False,
-        )
-
-        engine.reset.assert_called_once_with("predicted_target")
-        engine.update.assert_not_called()
+        engine.reset.assert_not_called()
+        self.assertEqual(engine.update_feature_step.call_count, 48)
+        self.assertIsNotNone(sink.latest_classification_feature)
 
 
 class RangeDisplayBoundsTests(unittest.TestCase):

@@ -354,6 +354,12 @@ position until the first qualified static return takes over. Predicted markers
 are shown smaller and translucent. No static-only
 clutter or arbitrary range fallback can activate micro-Doppler.
 
+Classification continues extracting a feature step at the selected track's
+predicted range during these association-preserving prediction updates. This
+keeps the 48-frame input cadence intact across ordinary detection misses;
+track-related history resets occur only when the selected target is lost or
+ownership changes.
+
 The micro-Doppler branch reshapes the chronological chirps into explicit loop
 and TX-slot axes. It applies independent slow-time FFTs to every TX slot, RX
 channel, and gated range bin using 64-loop Hann windows, a 32-loop hop, and a

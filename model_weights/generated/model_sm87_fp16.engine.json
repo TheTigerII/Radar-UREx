@@ -22,15 +22,15 @@
       8,
       7
     ],
-    "total_memory_bytes": 7849046016,
+    "total_memory_bytes": 7849058304,
     "cuda_runtime_version": 13030,
     "cuda_driver_version": 13020
   },
-  "engine_sha256": "3987b94a16241afdb9942e1e4c5ceab43ad36374ba5e84d50d90c86fc70d0b99",
+  "engine_sha256": "9c3741e815533ad0f95a05112449d884fc8c30b2443f482573283846d5c2b8d9",
   "parity": {
     "windows": 16,
     "label_mismatches": 0,
-    "max_probability_error": 0.0008134376382227804,
+    "max_probability_error": 0.00040414101164512606,
     "tolerance": 0.005
   }
 }
