@@ -9,6 +9,7 @@ from rawdatacapture.livedatacapture import (
     CombinedDisplayPayload,
     PointCloudDisplayPayload,
     TargetTrack,
+    _fixed_width_number,
     _image_levels,
 )
 
@@ -37,6 +38,14 @@ class ImageLevelTests(unittest.TestCase):
     def test_constant_and_non_finite_images_get_valid_levels(self) -> None:
         self.assertEqual(_image_levels(np.ones((2, 2))), (1.0, 2.0))
         self.assertEqual(_image_levels(np.asarray((np.nan, np.inf))), (0.0, 1.0))
+
+    def test_status_numbers_keep_the_same_width(self) -> None:
+        fields = (
+            _fixed_width_number(None),
+            _fixed_width_number(9.0),
+            _fixed_width_number(12_345_678.0),
+        )
+        self.assertEqual({len(field) for field in fields}, {15})
 
 
 @unittest.skipUnless(GUI_AVAILABLE, "PyQtGraph/PySide6 is not installed")
@@ -69,6 +78,11 @@ class PyQtGraphDisplayTests(unittest.TestCase):
             axis = np.linspace(0.3, 20.0, 16, dtype=np.float32)
             display._render((axis, np.arange(16, dtype=np.float32)))
             self.assertEqual(display.range_curve.xData.size, 16)
+            fixed_range = display.range_plot.viewRange()
+            display._render((axis, np.arange(16, dtype=np.float32) * 100.0))
+            self.assertEqual(display.range_plot.viewRange(), fixed_range)
+            self.assertFalse(display.range_plot.getViewBox().mouseEnabled()[0])
+            self.assertFalse(display.range_plot.getViewBox().mouseEnabled()[1])
         finally:
             self._close(display)
 
@@ -94,6 +108,10 @@ class PyQtGraphDisplayTests(unittest.TestCase):
             display._render(payload)
             self.assertEqual(display.target_scatter.pos.shape, (1, 3))
             self.assertIn("confirmed", display.point_status.text())
+            self.assertEqual(
+                display.point_status.sizePolicy().horizontalPolicy(),
+                QtWidgets.QSizePolicy.Policy.Ignored,
+            )
         finally:
             self._close(display)
 

@@ -721,6 +721,13 @@ def _classification_status_text(classification: Optional[dict[str, Any]]) -> str
     return " | class unknown"
 
 
+def _fixed_width_number(value: Optional[float], width: int = 15) -> str:
+    """Format changing status values without moving adjacent label text."""
+    if value is None:
+        return f"{'—':>{width}}"
+    return f"{value:>{width},.0f}"
+
+
 class DisplayPayloadSink:
     def __init__(
         self,
@@ -872,11 +879,8 @@ class DisplayPayloadSink:
                 heatmap = compute_range_doppler_heatmap(range_fft, self.config)
                 payload = (range_axis[gate], heatmap[:, gate])
             else:
-                score_text = (
-                    "—"
-                    if result.pmm_score is None
-                    else f"{result.pmm_score:,.0f}"
-                )
+                score_text = _fixed_width_number(result.pmm_score)
+                threshold_text = _fixed_width_number(result.threshold)
                 range_text = (
                     "—"
                     if result.range_m is None
@@ -893,7 +897,7 @@ class DisplayPayloadSink:
                         f"PMM target — {result.state} | calibration "
                         f"{result.calibration_frames_seen}/"
                         f"{result.calibration_frames_required} | score "
-                        f"{score_text}/{result.threshold:,.0f} | range "
+                        f"{score_text}/{threshold_text} | range "
                         f"{range_text} | fold {folding_text}"
                         + _classification_status_text(classification)
                     ),
@@ -1121,7 +1125,9 @@ class _PyQtGraphDisplay:
         self.app.setApplicationName("Mini4 PMM Tracker")
         self.app.setQuitOnLastWindowClosed(True)
         self.window: Any = None
+        self.range_plot: Any = None
         self.range_curve: Any = None
+        self._range_y_axis_locked = False
         self.range_doppler_image: Any = None
         self.point_status: Any = None
         self.target_scatter: Any = None
@@ -1141,7 +1147,9 @@ class _PyQtGraphDisplay:
             plot.setLabel("bottom", "Range", units="m")
             plot.setLabel("left", "Linear magnitude")
             plot.setXRange(0.3, self.max_range_m, padding=0.0)
+            plot.setMouseEnabled(x=False, y=False)
             plot.showGrid(x=True, y=True, alpha=0.25)
+            self.range_plot = plot
             self.range_curve = plot.plot(
                 pen=self.pg.mkPen("#55d6ff", width=2)
             )
@@ -1198,8 +1206,13 @@ class _PyQtGraphDisplay:
         layout = self.QtWidgets.QVBoxLayout(panel)
         self.point_status = self.QtWidgets.QLabel("PMM target — starting")
         self.point_status.setAlignment(self.QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.point_status.setSizePolicy(
+            self.QtWidgets.QSizePolicy.Policy.Ignored,
+            self.QtWidgets.QSizePolicy.Policy.Preferred,
+        )
         self.point_status.setStyleSheet(
-            "font-size: 16px; font-weight: 600; padding: 6px;"
+            "font-family: monospace; font-size: 16px; font-weight: 600; "
+            "padding: 6px;"
         )
         view = self.gl.GLViewWidget()
         view.setBackgroundColor((15, 18, 24, 255))
@@ -1258,10 +1271,18 @@ class _PyQtGraphDisplay:
     def _render(self, payload: Any) -> None:
         if self.mode == "range":
             range_axis, values = payload
+            values = np.asarray(values, dtype=np.float32)
             self.range_curve.setData(
                 np.asarray(range_axis, dtype=np.float32),
-                np.asarray(values, dtype=np.float32),
+                values,
             )
+            if not self._range_y_axis_locked:
+                finite = values[np.isfinite(values)]
+                if finite.size:
+                    upper = max(float(np.max(finite)) * 1.05, 1.0)
+                    self.range_plot.setYRange(0.0, upper, padding=0.0)
+                    self.range_plot.disableAutoRange()
+                    self._range_y_axis_locked = True
             return
         if self.mode == "range-doppler":
             range_axis, heatmap = payload
