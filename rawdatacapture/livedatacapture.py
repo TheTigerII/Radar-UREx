@@ -1681,7 +1681,6 @@ class DisplayPayloadSink:
         self._last_classification_signature: Optional[
             tuple[str, Optional[str]]
         ] = None
-        self._classification_owner_position_m: Optional[np.ndarray] = None
         self._classification_executor: Optional[
             ThreadPoolExecutor
         ] = (
@@ -2259,36 +2258,19 @@ class DisplayPayloadSink:
         defer: bool = False,
     ) -> Optional[Future[InferenceResult]]:
         if target_track is None:
-            self._classification_owner_position_m = None
             self.latest_classification_feature = None
             if self.inference_engine is not None:
                 self._set_classification(
                     self.inference_engine.reset("no_confirmed_target")
                 )
             return None
-        target_position_m = np.asarray(
-            target_track.position_m,
-            dtype=np.float64,
-        )
-        if self._classification_owner_position_m is not None:
-            target_changed = target_changed or (
-                float(
-                    np.linalg.norm(
-                        target_position_m
-                        - self._classification_owner_position_m
-                    )
-                )
-                > MICRO_DOPPLER_HISTORY_ASSOCIATION_DISTANCE_M
-            )
         if target_changed:
-            self._classification_owner_position_m = target_position_m.copy()
             self.latest_classification_feature = None
             if self.inference_engine is not None:
                 self._set_classification(
                     self.inference_engine.reset("target_changed")
                 )
             return None
-        self._classification_owner_position_m = target_position_m.copy()
         return self._classify_fixed_range(
             doppler_cube,
             range_axis_m,

@@ -358,7 +358,10 @@ Classification continues extracting a feature step at the selected track's
 predicted range during these association-preserving prediction updates. This
 keeps the 48-frame input cadence intact across ordinary detection misses;
 track-related history resets occur only when the selected target is lost or
-ownership changes.
+the gap-aware micro-Doppler ownership check reports a distant reacquisition.
+Classification does not apply a second 3D-distance check during uninterrupted
+tracking because angle estimates can jump at dynamic-to-static handoffs while
+the selected range and target identity remain continuous.
 
 The micro-Doppler branch reshapes the chronological chirps into explicit loop
 and TX-slot axes. It applies independent slow-time FFTs to every TX slot, RX

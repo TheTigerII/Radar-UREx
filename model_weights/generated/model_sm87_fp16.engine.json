@@ -9,10 +9,10 @@
   ],
   "workspace_bytes": 268435456,
   "precision_policy": "tensorrt_fp16_auto_tactics_v2",
-  "onnx_sha256": "349dd2fd8f34b7cfdd061c2e3efb00e78d3bf6043ef786f7d7a9d56dfb8d592f",
-  "parity_data_sha256": "c0d68c2c6725fc68be2f4f5eb99b06f320a9f4dd515441ea1b38b05bbe04211d",
-  "calibration_sha256": "ba279d4c85936b888bff5f7b6125f244b97a4ccfea9df6615de151831b8a4a43",
-  "model_card_sha256": "9d77b9196fecf77d461d624fbde5f44acf0d9b77b3c303a1e540480ff03a8be2",
+  "onnx_sha256": "2abc5bdf01bd5149941260fd6d302083546e14bc18a651a2f0ac62a8f2b63d0e",
+  "parity_data_sha256": "495d97a5ce05688c04704f88aad11984df1eac6c9bcbb747e4c9ae1e4e9241e5",
+  "calibration_sha256": "24193358f5384eb71e213d9b7729f1251d341d2b6dbdae7c74fc2892fbd1f190",
+  "model_card_sha256": "8e2d83c2c7b58f01dc63c0abad6d1799effa83fe38f2865825f501aeef474c1b",
   "profile_sha256": "5f89423fbeb8717ea2595750d3f709ecae283021272b6ca7c99a63802192f470",
   "tensorrt_version": "10.16.2.10",
   "gpu": {
@@ -22,15 +22,15 @@
       8,
       7
     ],
-    "total_memory_bytes": 7849058304,
+    "total_memory_bytes": 7849050112,
     "cuda_runtime_version": 13030,
     "cuda_driver_version": 13020
   },
-  "engine_sha256": "9c3741e815533ad0f95a05112449d884fc8c30b2443f482573283846d5c2b8d9",
+  "engine_sha256": "bf533d56e5ea21b72f7d237fa72bb212c3ceb5991cbee297d6f2dc73bcca0276",
   "parity": {
-    "windows": 16,
+    "windows": 128,
     "label_mismatches": 0,
-    "max_probability_error": 0.00040414101164512606,
+    "max_probability_error": 0.00258172570936685,
     "tolerance": 0.005
   }
 }

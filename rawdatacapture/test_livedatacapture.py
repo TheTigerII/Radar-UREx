@@ -2384,7 +2384,11 @@ class ClassificationIntegrationTests(unittest.TestCase):
         )
         for update_index in range(48):
             track = TargetTrack(
-                position_m=(0.0, 2.0, 0.0),
+                position_m=(
+                    0.0,
+                    2.0,
+                    1.0 if update_index % 2 else -1.0,
+                ),
                 velocity_m_per_update=(0.0, 0.0, 0.0),
                 age_updates=10 + update_index,
                 hits=9 + update_index,
@@ -2401,6 +2405,36 @@ class ClassificationIntegrationTests(unittest.TestCase):
         engine.reset.assert_not_called()
         self.assertEqual(engine.update_feature_step.call_count, 48)
         self.assertIsNotNone(sink.latest_classification_feature)
+
+    def test_confirmed_owner_change_resets_classification_history(self) -> None:
+        engine = Mock()
+        engine.unknown.return_value = self._result()
+        engine.reset.return_value = self._result()
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            inference_engine=engine,
+        )
+        track = TargetTrack(
+            position_m=(0.0, 2.0, 0.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=10,
+            hits=10,
+            missed_updates=0,
+            confirmed=True,
+        )
+
+        sink._classify_tracked_target(
+            np.zeros((128, 3, 4, 64), dtype=np.complex64),
+            np.arange(64, dtype=np.float32),
+            track,
+            target_changed=True,
+        )
+
+        engine.reset.assert_called_once_with("target_changed")
+        engine.update_feature_step.assert_not_called()
 
 
 class RangeDisplayBoundsTests(unittest.TestCase):
