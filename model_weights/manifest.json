@@ -2,39 +2,39 @@
   "architecture": "depthwise-separable residual 2D CNN",
   "parameters": 230337,
   "mmhawkeye_lstm_parameters": 231682,
-  "best_epoch": 1,
+  "best_epoch": 3,
   "validation_pr_auc": 1.0,
-  "threshold": 0.45757298392010914,
+  "threshold": 0.6924721992625822,
   "window_test_metrics": {
-    "samples": 16,
-    "threshold": 0.45757298392010914,
-    "recall": 1.0,
+    "samples": 153,
+    "threshold": 0.6924721992625822,
+    "recall": 0.9375,
     "precision": 1.0,
-    "f1": 1.0,
+    "f1": 0.967741935483871,
     "pr_auc": 1.0,
     "roc_auc": 1.0,
-    "brier_score": 0.058933155588522274,
+    "brier_score": 0.029448797119786988,
     "confusion_matrix_tn_fp_fn_tp": [
-      8,
+      73,
       0,
-      0,
-      8
+      5,
+      75
     ]
   },
   "source_aggregated_test_window_metrics": {
-    "samples": 6,
-    "threshold": 0.45757298392010914,
+    "samples": 12,
+    "threshold": 0.6924721992625822,
     "recall": 1.0,
     "precision": 1.0,
     "f1": 1.0,
     "pr_auc": 1.0,
     "roc_auc": 1.0,
-    "brier_score": 0.04194030210189358,
+    "brier_score": 0.0032402436526255247,
     "confusion_matrix_tn_fp_fn_tp": [
-      3,
+      6,
       0,
       0,
-      3
+      6
     ]
   },
   "feature_version": "iwr6843-micro-doppler-v5-three-range-bin",
@@ -54,10 +54,10 @@
     "validation": 0.15,
     "test": 0.15
   },
-  "dataset_manifest_sha256": "342778d1f1affe160194b3502101b64f93090c6df262a1ca135486fb8d462517",
+  "dataset_manifest_sha256": "74e13cf0f6c0ab65aa4c7a575b344fd8191ba2e6092f1672c158add2e4d177b7",
   "compatible_profile_sha256": "5f89423fbeb8717ea2595750d3f709ecae283021272b6ca7c99a63802192f470",
-  "onnx_sha256": "349dd2fd8f34b7cfdd061c2e3efb00e78d3bf6043ef786f7d7a9d56dfb8d592f",
-  "parity_data_sha256": "c0d68c2c6725fc68be2f4f5eb99b06f320a9f4dd515441ea1b38b05bbe04211d",
+  "onnx_sha256": "2abc5bdf01bd5149941260fd6d302083546e14bc18a651a2f0ac62a8f2b63d0e",
+  "parity_data_sha256": "495d97a5ce05688c04704f88aad11984df1eac6c9bcbb747e4c9ae1e4e9241e5",
   "deployment_backend": "TensorRT FP16 on Jetson; PyTorch CPU fallback",
   "deployment_status": "native_iwr6843_three_range_bin_cnn"
 }
