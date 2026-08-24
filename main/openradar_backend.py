@@ -1,4 +1,4 @@
-"""Adapters between this project's cube layout and OpenRadar's DSP APIs."""
+"""Local DSP kernels plus the project's OpenRadar compatibility check."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def validate_openradar_backend() -> str:
 
 
 def range_fft(adc_cube: np.ndarray) -> np.ndarray:
-    """Run OpenRadar's Hann-windowed range FFT."""
+    """Run the local SciPy Hann-windowed range FFT."""
     if adc_cube.ndim != 3:
         raise ValueError("ADC cube must have shape [chirp, rx, sample]")
     windowed = np.asarray(adc_cube, dtype=np.complex64) * _hann_window(
@@ -53,7 +53,7 @@ def doppler_fft(
     *,
     num_tx_antennas: int,
 ) -> np.ndarray:
-    """Return OpenRadar Doppler output as [doppler, tx, rx, range]."""
+    """Return the local SciPy Doppler output as [doppler, tx, rx, range]."""
     if num_tx_antennas <= 0:
         raise ValueError("num_tx_antennas must be positive")
     if range_cube.shape[0] % num_tx_antennas:

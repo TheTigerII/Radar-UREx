@@ -8,6 +8,7 @@ from main.startup import (
     PreflightValidator,
     RuntimeOptions,
     _build_dca1000_packet_payload,
+    _iter_sdk_cli_profile_commands,
 )
 
 
@@ -65,6 +66,20 @@ class DCA1000PacketDelayTests(unittest.TestCase):
         setup = json.loads(setup_path.read_text(encoding="utf-8"))
 
         self.assertEqual(setup["DCA1000Config"]["packetDelay_us"], 50)
+
+
+class SdkProfileCommandTests(unittest.TestCase):
+    def test_repository_profile_does_not_send_host_angle_metadata(self) -> None:
+        profile_path = (
+            Path(__file__).resolve().parent.parent / "profiles" / "profile.cfg"
+        )
+
+        commands = list(_iter_sdk_cli_profile_commands(profile_path))
+
+        self.assertIn("sensorStart", commands)
+        self.assertFalse(
+            any(command.startswith("hostAngleCalibration") for command in commands)
+        )
 
 
 if __name__ == "__main__":

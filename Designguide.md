@@ -1,4 +1,4 @@
-# Live Raw ADC Capture Design
+# Radar Capture and Processing Design
 
 This document describes the code currently implemented for live raw ADC capture
 from a TI IWR6843ISK-ODS through a DCA1000EVM. It is an implementation guide,
@@ -40,6 +40,178 @@ pressed, `main/run.py` stops `startup.py` first so `sensorStop` and DCA1000
 The programs can also be run manually in two terminals. `startup.py` does not
 embed the real capture receiver: its `--capture-backend` currently supports
 only `dry-run`.
+
+## `main/` Package File Reference
+
+The `main` directory contains the complete runtime package. The files and their
+boundaries are:
+
+| File | Responsibility and important contracts |
+| --- | --- |
+| `main/__init__.py` | Marks `main` as the radar capture, processing, calibration, and inference package. It exports no names and performs no initialization. |
+| `main/run.py` | Recommended operator-facing entry point. It gathers interactive choices when arguments are omitted, resolves the radar command UART, creates output paths, launches `livedatacapture.py` before `startup.py`, relays capture readiness, and shuts the hardware controller down before the data plane. It also owns the end-to-end range, azimuth, and elevation calibration workflow. Its `main()` returns a process exit code. |
+| `main/startup.py` | Hardware control plane. It loads the radar and DCA1000 configuration, runs preflight checks, sends DCA1000 commands over UDP, sends SDK CLI commands over the radar UART, and enforces the arm-before-`sensorStart` sequence. Its internal capture backend is deliberately dry-run only. Its `main()` returns an exit code. |
+| `main/livedatacapture.py` | Live data plane and largest orchestration module. It parses `.cfg`/JSON capture dimensions, receives and assembles DCA1000 UDP data, starts the DSP, optional rotor-classification, and GUI processes, tracks losses and drops, and writes raw, metadata, processed JSONL, and terminal-log output. It can be run directly, but does not configure or stop the hardware. |
+| `main/dsp.py` | Hardware-independent numerical processing and state. It converts LVDS frame bytes, computes range/Doppler transforms, performs dynamic and static detection, maps the ODS virtual antenna, estimates XYZ, clusters points, maintains clutter/static reference maps, computes both micro-Doppler variants, and estimates rotor RPM. It has no command-line entry point. |
+| `main/openradar_backend.py` | Local SciPy range FFT, TDM Doppler FFT, and vectorized OS-CFAR kernels, plus the early OpenRadar import/compatibility check used by capture startup. Cached Hann windows, CFAR indices, and scale factors are kept here. Despite the filename, live arrays are not passed into OpenRadar. |
+| `main/calibrate.py` | Calibration domain layer. It validates and generates temporary raw-LVDS profiles, accumulates range/channel or angular observations, applies stability gates, serializes calibration reports, atomically updates the operational profile with backups, and supplies the calibration GUI child process. It has no standalone CLI; `run.py` and `livedatacapture.py` integrate it. |
+| `main/inference.py` | Shared CNN feature contract and CPU/PyTorch backend. It creates one `[2, 64]` feature step from a selected three-bin range gate, retains 48 steps, validates the checkpoint/calibration/model-card/profile fingerprint, normalizes the `[2, 48, 64]` window, and returns calibrated `drone`, `not_drone`, or `unknown` results. It has no CLI. |
+| `main/tensorrt_inference.py` | CUDA/TensorRT FP16 backend and device selector. It owns pinned host/device buffers and one CUDA stream, builds or validates the cached engine against ONNX, artifact, profile, TensorRT, and GPU metadata, requires parity within 0.005 probability with no label changes, benchmarks the engine, and implements the same stateful inference interface as the CPU backend. `auto` selects CUDA on Jetson and CPU elsewhere; requested CUDA failures are fatal rather than silently falling back. |
+
+The primary module dependencies are:
+
+```text
+run.py
+  +-- calibrate.py
+  +-- subprocess: livedatacapture.py
+  `-- subprocess: startup.py
+
+startup.py
+  `-- livedatacapture.py (configuration data types and parsers only)
+
+livedatacapture.py
+  +-- dsp.py
+  +-- calibrate.py
+  +-- inference.py
+  +-- tensorrt_inference.py
+  `-- openradar_backend.py (dependency preflight)
+
+dsp.py
+  `-- openradar_backend.py (local FFT and CFAR kernels)
+
+tensorrt_inference.py
+  `-- inference.py (feature, result, and artifact contracts)
+```
+
+`run.py`, `startup.py`, and `livedatacapture.py` support direct script
+execution. The remaining files are library modules and should be imported
+through the `main` package. Optional dependencies are loaded only on the paths
+that need them: PySerial for direct radar control, PyQtGraph/PySide6 for live
+displays, PyTorch/joblib for CPU classification, and TensorRT/CUDA Python for
+CUDA classification. SciPy and NumPy are core DSP dependencies. OpenRadar is
+validated at capture startup for compatibility and test parity, although the
+hot FFT and CFAR paths are local.
+
+## Startup Control Plane
+
+`main/startup.py` configures the radar and DCA1000 but does not receive raw ADC
+packets. Use `main/run.py` for the integrated workflow or start
+`livedatacapture.py` separately before starting the control plane.
+
+### Responsibilities and backends
+
+The control plane parses radar dimensions from a mmWave Studio JSON or SDK CLI
+`.cfg`, parses board/DCA1000 settings from `setup.json`, validates the inputs,
+configures both devices, defers `sensorStart` until recording is armed, and
+attempts `sensorStop` and `RECORD_STOP` during shutdown. It does not flash
+firmware. `--load-firmware` only requires the configured MSS/BSS paths and
+reports them through the dry-run radar backend.
+
+Radar backends:
+
+- `dry-run` (default) reports the intended radar operations.
+- `direct-serial` opens the SDK CLI UART with PySerial, sends active commands
+  from `--sdk-profile` other than `sensorStart`, and sends the deferred start
+  only after the DCA1000 is armed. The profile must contain `sensorStart`;
+  blank lines and `%`/`#` comments are ignored. Responses complete on `Done`,
+  `Error`, the `mmwDemo:/>` prompt, `Ignored`, or `Skipped`. An error response
+  fails normal startup; shutdown permits an error from `sensorStop` so the
+  remaining cleanup can continue.
+
+DCA1000 backends:
+
+- `dry-run` (default) reports the intended configuration and arm operations.
+- `direct-udp` binds the local DCA1000 control port (4096 by default) and sends
+  commands to `192.168.33.180:4096`. Each acknowledgement is validated with
+  the configured timeout and retry count.
+
+Direct UDP sends the following commands in order:
+
+```text
+SYSTEM_CONNECT
+RESET_FPGA
+CONFIG_FPGA_GEN
+CONFIG_RECORD
+RECORD_START
+```
+
+If record start succeeded, shutdown sends `RECORD_STOP`. The FPGA and record
+payloads are derived from the capture/setup configuration; `setup.json` can
+provide hexadecimal overrides under `directUdpDCA1000.payloads`.
+
+The only `--capture-backend` is `dry-run`. It advances orchestration state and
+reports the expected address and frame size, but never binds the data port,
+receives data, saves frames, or drives a display. Running `startup.py` alone
+therefore starts a streaming sensor without a real data consumer.
+
+### Configuration selection and preflight
+
+Standalone defaults are `profiles/mmwave.json`, `profiles/setup.json`, and
+`profiles/profile.cfg` for `--config`, `--setup`, and `--sdk-profile`
+respectively. If `--radar-backend direct-serial` is selected while `--config`
+still equals its JSON default, the SDK profile is also used as the dimension
+source. Normally the same `.cfg` should be supplied for both options, which is
+what `run.py` does.
+
+Preflight validates:
+
+- positive ADC sample, RX, chirp, and frame-byte dimensions;
+- exactly two LVDS lanes;
+- DCA1000 capture-hardware selection and, when present, a packet delay from
+  5 to 500 us;
+- data and DCA1000 control ports;
+- a radar control port and positive baud rate from the CLI overrides or
+  `setup.json` (the current implementation requires these even for dry-run);
+- an existing SDK profile containing `sensorStart` for direct serial;
+- existing MSS/BSS firmware paths only when `--load-firmware` is selected; and
+- the ability to bind `host_ip:data_port`, unless
+  `--skip-socket-preflight` is used.
+
+The socket check is a short probe and closes immediately. In a two-terminal
+workflow the real receiver already owns the port, so the control plane must be
+given `--skip-socket-preflight`.
+
+### Orchestration and shutdown
+
+The startup state machine is:
+
+```text
+1. load configs                 -> CONFIGS_LOADED
+2. run preflight                -> PREFLIGHT_PASSED
+3. configure DCA1000            -> DCA1000_READY
+4. configure radar, defer start -> RADAR_READY
+5. start dry-run receiver       -> RECEIVER_READY
+6. arm DCA1000, readiness delay -> DCA1000_ARMED
+7. send sensorStart             -> RADAR_STREAMING
+```
+
+`--preflight-only` stops after step 2 without configuring hardware. A normal
+standalone run then waits for Ctrl+C. Every exit after startup has begun enters
+`STOPPING` and attempts cleanup in this order:
+
+```text
+radar sensor stop and serial close
+DCA1000 record stop and control-socket close
+dry-run capture close
+```
+
+Cleanup continues after an individual failure, reports the accumulated errors,
+and finishes in `STOPPED`.
+
+In the integrated workflow, `run.py` starts `livedatacapture.py` first and
+waits for the capture-ready line produced only after the UDP socket, frame
+processor, requested GUI, and optional rotor post-processor are ready. The
+normal timeout is 30 seconds and the CUDA/TensorRT path receives 300 seconds
+for a first-run engine build and parity validation. `run.py` then invokes the
+real serial and UDP backends with `--skip-socket-preflight`, using the same
+`.cfg` for capture dimensions and SDK commands. On a deadline, Ctrl+C, or child
+exit, it stops `startup.py` before `livedatacapture.py`.
+
+The control plane currently has no firmware-flashing implementation, no real
+capture backend, and only state-transition health reporting. Direct serial
+assumes compatible SDK CLI firmware is already running. DCA1000 control also
+depends on its firmware accepting the generated or overridden payloads;
+packet/frame health is reported by `livedatacapture.py`.
 
 ## Capture Data Flow
 
@@ -293,12 +465,13 @@ implementation does not determine whether those calibration updates are
 target-free, so the operator must keep the target absent until calibration is
 complete. Each live change map is corrected by its per-range median to remove
 common receiver-gain drift. The corrected instantaneous change is thresholded
-without a temporal EMA. By default, a detection must exceed twice the learned
-cell variation, with no additional absolute dB floor. The reference and noise
-estimates remain fixed after calibration. Range/FOV gating occurs before local-maximum
-testing; when the threshold produces no candidates, the full 3D maximum scan
-is skipped. The remaining cells are capped at the 256 strongest before XYZ
-conversion and DBSCAN. Returned raw candidates are
+without a temporal EMA. A detection must exceed twice the learned cell
+variation. Direct `livedatacapture.py` use defaults the additional absolute
+floor to 0 dB; the recommended `run.py` launcher passes 3 dB by default. The
+reference and noise estimates remain fixed after calibration. Range/FOV gating
+occurs before local-maximum testing; when the threshold produces no candidates,
+the full 3D maximum scan is skipped. The remaining cells are capped at the 256
+strongest before XYZ conversion and DBSCAN. Returned raw candidates are
 `[x, y, z, magnitude_db, change_db]`.
 
 Raw static candidates are diagnostic activity, not targets. The static tracker
@@ -454,6 +627,51 @@ Velocity bins use the configured start frequency and same-TX chirp interval. An
 irregular-time Lomb-Scargle periodogram runs at a limited cadence over the
 two-second blade-flash history. Search bounds come from the configured RPM
 range and blade count; separated peaks become per-rotor RPM estimates.
+
+### Classification backends
+
+`inference.py` defines the feature and result contract shared by both inference
+backends. For each update, the selected range bin and its immediate neighbors
+form a three-bin target gate. Separated bins on both sides form a background
+gate. Target and background powers are averaged over TX, RX, and range, and the
+centered Doppler axis is power-averaged to 64 bins. The two feature channels
+are `log1p(target_power)` and the log target-to-background difference. A
+48-update history produces the model input with shape `[2, 48, 64]`.
+
+The CPU `DroneBirdInference` backend requires PyTorch 2.6 or newer but earlier
+than 3.0, joblib, and the following files in the artifact directory:
+
+```text
+model_state.pt       CNN architecture and state dictionary
+calibration.joblib   clipping, normalization, probability calibration, threshold
+manifest.json        model card and compatibility metadata
+```
+
+Initialization rejects a mismatched feature version, architecture, input
+shape, three-bin gate contract, normalized profile fingerprint, radar
+dimensions, or TX schedule. The deployed model specifically requires 64 ADC
+samples, four RX channels, 384 chirps, 128 loops, three chirps per loop, and TX
+masks `(1, 4, 2)`. Invalid feature steps and inference errors clear the history
+and return `unknown`; a complete valid history produces a calibrated drone
+probability and thresholded label.
+
+`tensorrt_inference.py` implements the same stateful interface with TensorRT
+FP16 and float32 model I/O. In addition to the shared calibration and manifest,
+it requires `model.onnx` and `parity.npz`. It imports the Jetson system
+TensorRT package when necessary, identifies the CUDA device, and uses pinned
+host buffers, device buffers, and one CUDA stream. A missing engine is built
+under `<artifact-directory>/generated/`; an existing engine must match its
+hashes, TensorRT version, GPU compatibility fields, and parity record. Stale
+metadata can be refreshed only after the existing engine passes parity. Parity permits
+at most 0.005 absolute probability error and no changed labels. A cached engine
+that cannot load or fails parity is rejected with instructions to remove it so
+the next run can rebuild it. Initialization also records 20 warm-up and 200
+measured inference runs with p50, p95, and maximum latency.
+
+Device `auto` resolves to TensorRT/CUDA on Jetson and PyTorch/CPU elsewhere.
+There is no silent CUDA-to-CPU fallback. In dedicated rotor mode, enabled
+classification and JSON serialization run in `RotorPostProcessor`; in other
+classified modes the frame processor owns the selected backend.
 
 ## Processed and Raw Recording
 

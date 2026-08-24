@@ -1795,7 +1795,7 @@ def os_cfar_2d(
     range_training_cells: int,
     doppler_training_cells: int,
 ) -> np.ndarray:
-    """Run OpenRadar OS-CFAR on a [doppler, range] power map."""
+    """Run the local vectorized OS-CFAR on a [doppler, range] power map."""
     return openradar_os_cfar_2d(
         power_map,
         false_alarm_rate=false_alarm_rate,

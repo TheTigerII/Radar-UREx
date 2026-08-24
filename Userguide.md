@@ -1,7 +1,8 @@
-# Live Raw ADC Capture User Guide
+# Radar Capture and Hardware Control User Guide
 
-This guide explains `livedatacapture.py` and the integrated `main/run.py` launcher
-for an IWR6843ISK-ODS connected to a DCA1000EVM.
+This guide explains the integrated `main/run.py` launcher, the
+`livedatacapture.py` data plane, and the `startup.py` hardware control plane for
+an IWR6843ISK-ODS connected to a DCA1000EVM.
 
 ## Prerequisites
 
@@ -10,6 +11,12 @@ for an IWR6843ISK-ODS connected to a DCA1000EVM.
 - PC Ethernet interface configured as `192.168.33.30/24` by default.
 - DCA1000 reachable at `192.168.33.180`.
 - Radar running SDK CLI firmware when using `profile.cfg` and direct serial.
+- Radar booted in the functional mode required by that firmware. For a Rev C
+  IWR6843ISK/IWR6843ISK-ODS, the bundled TI user guide lists S1.1 through S1.6
+  as Off, Off, On, On, Off, don't-care (`00110X`). Confirm the board revision
+  before changing switches; SOP state is sampled at reset.
+- Radar command UART known or discoverable, such as `COM4` on Windows or
+  `/dev/ttyUSB0` on Linux.
 - `profile.cfg` must enable ADC LVDS streaming, for example:
 
 ```text
@@ -26,7 +33,7 @@ before the first run. On Linux:
 sudo apt-get install libxcb-cursor0
 python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install \
-  "numpy<2" scipy pyserial "scikit-learn>=1.4,<2" \
+  "numpy<2" scipy pyserial "scikit-learn==1.6.1" \
   "pyqtgraph>=0.13.7,<0.15" "PySide6>=6.7,<7" "PyOpenGL>=3.1.7"
 .venv/bin/python -m pip install \
   "openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94"
@@ -37,16 +44,20 @@ On Windows PowerShell:
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install `
-  'numpy<2' scipy pyserial 'scikit-learn>=1.4,<2' `
+  'numpy<2' scipy pyserial 'scikit-learn==1.6.1' `
   'pyqtgraph>=0.13.7,<0.15' 'PySide6>=6.7,<7' 'PyOpenGL>=3.1.7'
 .venv\Scripts\python -m pip install `
   'openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94'
 ```
 
-These bounds and the OpenRadar commit are the tested installation baseline;
-the application itself does not enforce package version strings at runtime.
-Use the same commands when recreating an environment to minimize numerical and
-model-serialization differences.
+These bounds and the OpenRadar commit are the tested installation baseline.
+The scikit-learn pin matches the version that serialized the bundled
+`calibration.joblib`; using another version can produce a model-persistence
+warning or incompatible behavior, as described in scikit-learn's
+[model-persistence guidance](https://scikit-learn.org/stable/model_persistence.html).
+The application itself enforces the PyTorch range but does not enforce the
+other package versions at runtime. Use the same commands when recreating an
+environment to minimize numerical differences.
 
 `libxcb-cursor0` is required for PySide6 windows on an X11 desktop.
 Display startup checks this before capture and reports an installation command
@@ -98,16 +109,22 @@ backend. Training and ONNX export happen in Colab or on the training
 workstation, not on the Jetson. The notebook exports to
 `training_output/micro_doppler_cnn/`. Copy `model_state.pt`, `model.onnx`,
 `manifest.json`, `calibration.joblib`, and `parity.npz` into the repository's
-`model_weights/` directory on the Jetson, then install the Jetson-native
-TensorRT runtime once:
+`model_weights/` directory on the Jetson. In the `--system-site-packages`
+environment described above, install the Jetson-native TensorRT bindings and
+CUDA Python runtime. These package names follow NVIDIA's current
+[TensorRT Debian installation](https://docs.nvidia.com/deeplearning/tensorrt/latest/installing-tensorrt/install-debian.html)
+and [CUDA Python installation](https://nvidia.github.io/cuda-python/cuda-bindings/latest/install.html)
+guides:
 
 ```bash
-./scripts/setup_jetson_tensorrt.sh
+sudo apt-get update
+sudo apt-get install tensorrt python3-libnvinfer
+.venv/bin/python -m pip install cuda-python
 ```
 
 The launcher builds and caches a fixed-batch-one TensorRT FP16 engine from the
-training-exported `model.onnx` on first use. TensorRT selects optimized
-Orin tactics, then the launcher validates the engine against the small
+training-exported `model.onnx` on first use. TensorRT selects tactics for the
+detected Jetson GPU, then the launcher validates the engine against the small
 training-exported `parity.npz` reference set. A label mismatch
 or calibrated-probability error above `5e-3` aborts startup. Later runs verify
 the ONNX, parity data, calibration, model card, radar profile, TensorRT/CUDA,
@@ -148,9 +165,10 @@ micro-Doppler image in one window.
    timestamped `calibrationoutput` output default; pass
    `--no-classification` when that is not wanted. Raw ADC recording is disabled
    unless `--raw-output` is explicitly given.
-6. When enabled, runs the trained CNN after 48 consecutive valid tracked
-   frames, displays `DRONE`, `NOT_DRONE`, or `UNKNOWN`, and saves the calibrated
-   probability.
+6. When enabled, runs the trained CNN after 48 valid feature steps for one
+   continuously owned tracked target, or the fixed range gate in dedicated
+   rotor mode. It displays `DRONE`, `NOT_DRONE`, or `UNKNOWN` and saves the
+   calibrated probability.
 7. Starts `startup.py` with direct serial radar control and direct UDP DCA1000
    control.
 8. Stops hardware control before capture when the duration expires or Ctrl+C
@@ -193,6 +211,189 @@ python3 main/run.py --radar-port /dev/ttyUSB0
 
 All display modes default to processing every valid frame. Override this with
 `--display-update-every N`.
+
+## Hardware Control with `startup.py`
+
+`main/startup.py` configures SDK CLI firmware over the radar command UART and
+can configure the DCA1000 over UDP. It does not receive, display, or save ADC
+data. For normal capture, use `main/run.py`; invoke `startup.py` directly for
+preflight, isolated control testing, or a manual two-terminal workflow. `%`/`#`
+comments and legacy unprefixed `hostAngleCalibration` metadata are not sent to
+SDK CLI firmware.
+
+### Preflight only
+
+Check the direct-serial inputs without sending device commands:
+
+```powershell
+python main\startup.py `
+  --radar-backend direct-serial `
+  --dca-backend dry-run `
+  --preflight-only `
+  --radar-port COM4 `
+  --radar-baud 115200
+```
+
+Preflight validates radar dimensions, two-lane LVDS support, DCA1000 settings,
+ports, the SDK profile and its required `sensorStart`, and the ability to bind
+the capture address. Do not add `--skip-socket-preflight` unless another
+receiver already owns that address or the bind probe is deliberately being
+bypassed. When direct serial is selected and `--config` remains at its default,
+the `--sdk-profile` (normally `profiles/profile.cfg`) is automatically used as
+the frame-dimension source.
+
+A successful preflight reports these states, then the `finally` cleanup moves
+the state machine through `stopping` and `stopped` without configuring hardware:
+
+```text
+startup state: idle -> configs_loaded
+startup state: configs_loaded -> preflight_passed
+Startup preflight passed.
+startup state: preflight_passed -> stopping
+startup state: stopping -> stopped
+```
+
+### Isolated hardware-control tests
+
+This command really configures and starts the radar but simulates DCA1000
+control. It is useful for UART testing, not raw ADC recording:
+
+```powershell
+python main\startup.py `
+  --radar-backend direct-serial `
+  --dca-backend dry-run `
+  --radar-port COM4 `
+  --radar-baud 115200
+```
+
+Press Ctrl+C to send `sensorStop` and close the UART. To test both real control
+paths, select direct UDP as well:
+
+```powershell
+python main\startup.py `
+  --radar-backend direct-serial `
+  --dca-backend direct-udp `
+  --radar-port COM4 `
+  --radar-baud 115200
+```
+
+The second command sends DCA1000 configuration and record commands and starts
+the radar, but still has no ADC receiver. Use it only when another receiver is
+ready or when intentionally testing the control plane.
+
+### Manual two-terminal capture
+
+Start the receiver in Terminal 1 before configuring the hardware. This example
+disables classification so model loading cannot prevent the receiver from
+becoming ready:
+
+```powershell
+python main\livedatacapture.py `
+  --config .\profiles\profile.cfg `
+  --setup .\profiles\setup.json `
+  --host-ip 192.168.33.30 `
+  --data-port 4098 `
+  --display range `
+  --no-classification `
+  --raw-output .\calibrationoutput\manual.bin
+```
+
+Terminal 2 configures the hardware. The skip flag is required because Terminal
+1 already owns UDP port 4098:
+
+```powershell
+python main\startup.py `
+  --config .\profiles\profile.cfg `
+  --sdk-profile .\profiles\profile.cfg `
+  --setup .\profiles\setup.json `
+  --radar-backend direct-serial `
+  --dca-backend direct-udp `
+  --skip-socket-preflight `
+  --radar-port COM4 `
+  --radar-baud 115200 `
+  --radar-command-timeout 10
+```
+
+Stop Terminal 2 first so it attempts `sensorStop` and `RECORD_STOP`. Then stop
+Terminal 1 so its queued frames drain and raw metadata is finalized.
+
+### Startup states and direct-control overrides
+
+A full successful `startup.py` run transitions through:
+
+```text
+configs_loaded
+preflight_passed
+dca1000_ready
+radar_ready
+receiver_ready
+dca1000_armed
+radar_streaming
+```
+
+Here `receiver_ready` refers only to `startup.py`'s dry-run capture backend; it
+does not prove that `livedatacapture.py` is running. The integrated `run.py`
+launcher separately waits for the real receiver, frame processor, requested
+display, and optional rotor post-processor before it starts the hardware.
+
+Useful options when invoking `startup.py` directly are:
+
+- `--radar-command-timeout 10`: wait longer for each SDK CLI response.
+- `--radar-command-delay 0.05`: wait between SDK CLI commands.
+- `--radar-line-ending lf`: use LF instead of the default CRLF.
+- `--dca-ip ADDRESS --dca-config-port PORT`: override the DCA1000 control
+  endpoint, which defaults to `192.168.33.180:4096`.
+- `--dca-timeout 3`: acknowledgement timeout for each DCA command attempt.
+- `--dca-retries 5`: retries after the initial DCA command attempt.
+- `--readiness-delay 0.5`: delay between DCA record arm and `sensorStart`.
+- `--sdk-profile PATH --config PATH`: explicitly align the command profile and
+  frame-dimension source.
+- `--load-firmware`: require configured MSS/BSS firmware paths during
+  preflight. There is no flashing backend; dry-run only reports the paths.
+
+`--capture-backend` currently accepts only `dry-run`. It changes control-plane
+state and reports the expected data address, but it never starts a real
+receiver.
+
+Show the complete control-plane interface with:
+
+```powershell
+python main\startup.py --help
+```
+
+## Linux Host Setup
+
+The virtual environment should use `--system-site-packages` on Jetson so it can
+see NVIDIA's system TensorRT binding. Grant serial access, then log out and back
+in so the new group membership takes effect:
+
+```bash
+sudo usermod -a -G dialout $USER
+```
+
+Configure the DCA1000-facing interface, replacing `eth0` with the correct
+wired interface. If the address is already present, do not add it again:
+
+```bash
+sudo ip addr add 192.168.33.30/24 dev eth0
+sudo ip link set eth0 up
+```
+
+Find and test command-UART candidates:
+
+```bash
+ls /dev/ttyUSB* /dev/ttyACM*
+.venv/bin/python -m serial.tools.miniterm /dev/ttyUSB0 115200
+```
+
+The SDK CLI port normally shows `mmwDemo:/>` after Enter. Exit miniterm before
+running the application so it releases the port. A headless integrated example
+that avoids GUI and model-runtime requirements is:
+
+```bash
+.venv/bin/python main/run.py --radar-port /dev/ttyUSB0 \
+  --display none --no-classification
+```
 
 ## Range, Channel, and Angle Calibration
 
@@ -275,6 +476,22 @@ python main\livedatacapture.py `
 Both SDK CLI `.cfg` and mmWave Studio `.json` radar configs are supported. XML
 is not supported.
 
+Less common direct-receiver controls include:
+
+- `--host-compensation-profile PATH` to import range, channel, and host-angle
+  corrections from an operational profile without sending it to the radar;
+- `--classification --classification-artifacts PATH` to enable classification
+  explicitly and select a non-default artifact directory;
+- `--micro-doppler-range-half-width-bins N` to change the dedicated rotor
+  range-gate width;
+- `--static-detection` to explicitly select the default-enabled static branch;
+- `--buffer-size` to set the maximum bytes requested from one UDP datagram and
+  `--socket-timeout` to set the interruptible socket-poll interval; and
+- `--display-pause` to set the GUI event-loop polling interval.
+
+The defaults are usually appropriate. Use `livedatacapture.py --help` for their
+types and current default values.
+
 ## Displays
 
 ### Range profile
@@ -321,10 +538,11 @@ scene fixed and leave the target absent for startup calibration. The first
 the warm-up and calibration progress, then `Static reference ready (fixed)`.
 The detector learns normal per-angle-cell variation, applies a per-range power
 floor, and removes common receiver-gain drift. It applies the threshold to each
-update's instantaneous change without temporal smoothing. By default, a cell
-must exceed twice its learned noise variation; there is no additional absolute
-dB floor. The reference and learned noise estimates remain fixed after
-calibration by default, so later scene changes are not absorbed.
+update's instantaneous change without temporal smoothing. A cell must exceed
+twice its learned noise variation. Direct `livedatacapture.py` use defaults the
+additional absolute floor to 0 dB, while the recommended `main/run.py` launcher
+passes 3 dB by default. The reference and learned noise estimates remain fixed
+after calibration by default, so later scene changes are not absorbed.
 
 Raw changes do not become displayed static targets by themselves. A confirmed
 measured dynamic track arms rather than starts handoff; no additional minimum
@@ -351,8 +569,8 @@ are shown as orange squares; its center is shown as a cyan diamond. Transient
 and static-only clutter is suppressed.
 
 Static angle processing remains full rate: it runs for every processed
-point-cloud update with the complete 32-by-32 angle FFT. Temporal smoothing
-can delay a new static point by a few frames. Objects present during
+point-cloud update with the complete 32-by-32 angle FFT. Detection uses the
+instantaneous corrected change without a temporal EMA. Objects present during
 calibration become part of the reference and are not reported as changes.
 Calibration counts updates that actually reach point-cloud processing, so
 packet/frame loss makes it take longer than 180 physical frames.
@@ -394,7 +612,8 @@ Use `--static-warmup-frames`, `--static-reference-frames`,
 `--static-min-change-db` to tune calibration, adaptation, validation, and the
 absolute sensitivity floor. Defaults are 30 warm-up frames, 150 reference
 frames, a fixed reference (zero adaptation rate), one same-frame cluster member,
-and no additional dB floor beyond twice the learned noise. Set a nonzero
+and a 3 dB absolute floor when using `main/run.py`. Direct
+`livedatacapture.py` defaults that floor to 0 dB. Set a nonzero
 `--static-background-update-rate` to opt into adaptation.
 Set `--static-cluster-min-samples 3` to require three spatially adjacent
 candidates in the qualifying handoff update instead of one local maximum. The
@@ -668,6 +887,40 @@ confirm that the 32-frame queue is active and inspect the final per-stage
 timings. Increasing the queue further only absorbs short bursts; sustained
 total-frame p95 above the 33.33 ms frame period requires profiling the reported
 stage rather than lowering the configured radar rate.
+
+## Hardware-Control Troubleshooting
+
+### DCA1000 `SYSTEM_CONNECT` timeout
+
+- Confirm the host address is `192.168.33.30/24` and the DCA1000 address is
+  `192.168.33.180`.
+- Confirm the direct Ethernet connection, board power, and UDP port 4096.
+- Close mmWave Studio or other TI DCA tools that may own the control port.
+- Increase `--dca-timeout` or `--dca-retries` only after checking the network.
+
+### Socket preflight bind failure
+
+If `livedatacapture.py` already owns `192.168.33.30:4098`, pass
+`--skip-socket-preflight` to `startup.py`. Otherwise, the error usually means
+the host address is not assigned to the selected interface or another receiver
+already owns the port.
+
+### Radar serial timeout
+
+- Verify compatible SDK CLI firmware, functional SOP mode, and a reset after
+  changing the mode.
+- Select the command UART rather than a logger or high-speed data UART.
+- Close miniterm and any other program using the port.
+- Confirm the baud rate and try `--radar-command-timeout 10`.
+- Try `--radar-line-ending lf` if the prompt does not respond to CRLF.
+
+### Capture window remains empty
+
+- Confirm `livedatacapture.py` reached its listening/ready message before
+  hardware startup.
+- Confirm `profile.cfg` enables raw LVDS ADC streaming.
+- Ensure capture dimensions and SDK commands come from the same profile.
+- Check packet-loss, byte-gap, stream-resync, and processing-drop counters.
 
 ## Packet-Loss Troubleshooting
 

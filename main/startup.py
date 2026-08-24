@@ -802,8 +802,14 @@ def _parse_dca1000_setup(
 def _iter_sdk_cli_profile_commands(profile_path: Path) -> Iterable[str]:
     for raw_line in profile_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.split("%", 1)[0].split("#", 1)[0].strip()
-        if line:
-            yield line
+        if not line:
+            continue
+        # Older profiles stored host-only angle calibration without a comment
+        # prefix. Preserve those files and their model fingerprints, but never
+        # send the metadata token to SDK CLI firmware.
+        if line.split(maxsplit=1)[0] == "hostAngleCalibration":
+            continue
+        yield line
 
 
 def _radar_control_port(config: StartupConfig, options: RuntimeOptions) -> str:
@@ -1145,7 +1151,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--load-firmware",
         action="store_true",
-        help="Require MSS/BSS firmware paths and include firmware loading in startup.",
+        help=(
+            "Require MSS/BSS firmware paths during preflight. No firmware "
+            "flashing backend is implemented."
+        ),
     )
     parser.add_argument(
         "--skip-socket-preflight",

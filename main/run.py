@@ -280,8 +280,8 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_STATIC_CLUSTER_MIN_SAMPLES,
         help=(
             "Minimum same-frame points in a static handoff cluster. "
-            "Defaults to 1; temporal tracking still requires 3 consecutive "
-            "associated updates."
+            "Defaults to 1; a motion-qualified handoff confirms on the first "
+            "associated static return."
         ),
     )
     parser.add_argument(
