@@ -706,6 +706,379 @@ Terminal messages are appended to `livedatacapture.log` by default. Raw files
 and logs have no rotation or size limit, so long deployments must monitor disk
 space externally.
 
+## Automated Test Case Reference
+
+The test suite contains 221 cases in `testcodes/`. Run all of them from the
+repository root with `QT_QPA_PLATFORM=offscreen python -m pytest -q`. The
+following inventory documents every collected case by file and test class.
+
+### `test_calibrate.py` (15 cases)
+
+`CalibrationProfileTests`:
+
+- `test_discovered_profile_dimensions_and_timing` — verifies calibration discovers the profile's dimensions and frame timing.
+- `test_peak_prominence_gate_is_disabled_by_default` — verifies the optional range-peak prominence gate defaults to disabled.
+- `test_runtime_profile_changes_only_required_commands` — ensures runtime calibration rewrites only the required profile commands.
+- `test_angular_runtime_keeps_firmware_neutral_and_imports_host_compensation` — ensures angular calibration leaves firmware commands neutral while loading host-side corrections.
+- `test_duplicate_required_command_is_rejected` — rejects profiles containing duplicate commands that calibration must edit uniquely.
+- `test_disabled_runtime_lvds_is_rejected` — rejects calibration profiles without enabled runtime LVDS output.
+- `test_missing_antennas_and_invalid_target_window_are_rejected` — rejects incomplete antenna schedules and invalid target search windows.
+
+`CalibrationAlgorithmTests`:
+
+- `test_recovers_bias_equalization_and_physical_tx_order` — recovers synthetic range bias, channel equalization, and physical TX ordering.
+- `test_normal_dsp_uses_measured_coefficients_by_physical_tx` — confirms normal DSP applies measured coefficients to the matching physical transmitter.
+- `test_azimuth_calibration_recovers_known_offset` — recovers a known synthetic azimuth correction.
+- `test_elevation_calibration_uses_positive_up_angle_convention` — verifies positive elevation means upward under the project coordinate convention.
+
+`CalibrationResultSerializationTests`:
+
+- `test_command_uses_ti_fixed_decimal_format_without_scientific_notation` — serializes TI compensation values in fixed-decimal CLI syntax.
+
+`CalibrationApplyTests`:
+
+- `test_apply_creates_backup_and_replaces_one_line` — creates a backup and replaces exactly one target profile line.
+- `test_applied_line_drives_normal_range_and_angle_processing` — proves an applied calibration is consumed by normal range and angle processing.
+- `test_angular_apply_preserves_other_axis_and_is_parsed_by_normal_dsp` — updates one angular axis without losing the other and confirms normal parsing.
+
+### `test_dsp_kernels.py` (55 cases)
+
+`AdaptiveClutterMapTests`:
+
+- `test_default_minimum_snr_is_three_db` — verifies the default normalized detection floor is 3 dB.
+- `test_normalizes_background_after_warmup_and_preserves_new_target` — learns background power and retains a subsequently introduced target.
+- `test_detection_protection_prevents_target_absorption` — prevents protected detections from entering the adaptive clutter map.
+- `test_map_is_frozen_after_warmup_by_default` — confirms default clutter adaptation stops after warm-up.
+- `test_shape_change_resets_warmup` — restarts clutter learning when the input shape changes.
+
+`StaticSceneMapTests`:
+
+- `test_async_reference_finalization_does_not_block_frame_processing` — finalizes the static reference asynchronously without stalling frame processing.
+- `test_default_threshold_uses_twice_learned_noise_without_db_floor` — checks the default learned-noise multiplier and absence of an unintended dB floor.
+- `test_reference_is_frozen_after_calibration_by_default` — confirms the calibrated static reference is immutable by default.
+- `test_frozen_reference_reports_new_static_change_immediately` — detects a new static change against the frozen reference without adaptation delay.
+- `test_common_gain_drift_and_weak_reference_cells_are_suppressed` — suppresses common gain changes and unreliable low-power reference cells.
+- `test_calibration_variability_raises_per_cell_detection_limit` — raises thresholds for cells that were noisy during calibration.
+- `test_default_learned_noise_threshold_uses_two_times_noise` — verifies the default per-cell threshold is twice learned noise variation.
+- `test_target_present_during_calibration_is_part_of_reference` — treats objects present during calibration as background.
+- `test_warmup_frames_are_discarded_before_calibration` — excludes warm-up samples from reference construction.
+- `test_adaptive_background_absorbs_unprotected_drift` — gradually absorbs persistent unprotected background drift.
+- `test_protected_background_change_remains_detectable` — keeps a protected changed cell out of background adaptation.
+- `test_released_target_is_eventually_absorbed` — allows a formerly protected target to enter the background after release.
+- `test_shape_change_restarts_static_warmup_and_calibration` — resets both static warm-up and calibration for a new cube shape.
+- `test_static_target_protection_mask_uses_range_and_angle_cells` — protects the configured neighborhood in range, azimuth, and elevation.
+- `test_static_angle_power_integrates_centered_doppler_neighbors` — sums power from the centered Doppler bin and its neighbors.
+- `test_static_angle_power_matches_full_precision_32_point_fft` — compares optimized static-angle power with a full-precision 32-point reference FFT.
+- `test_candidate_local_maxima_matches_full_cube_filter` — matches candidate-only local maxima with full-cube filtering.
+- `test_static_points_separate_changes_at_same_range_by_angle` — resolves static changes at one range into distinct angular points.
+- `test_point_detection_uses_normalized_power_and_updates_map` — uses clutter-normalized power for detections and updates the map afterward.
+- `test_minimum_snr_gate_rejects_normalized_background` — rejects normalized background cells below the minimum SNR.
+
+`BatchedAngleFftTests`:
+
+- `test_batched_virtual_grids_match_single_cell_mapping` — makes batched virtual-array construction match per-cell mapping.
+- `test_zero_virtual_arrays_point_forward` — maps an all-zero virtual array to the defined forward direction.
+
+`PointCloudCandidateOrderingTests`:
+
+- `test_unlimited_points_bypass_power_sorting` — preserves detection order when no point cap is requested.
+- `test_finite_point_cap_keeps_strongest_first` — retains the strongest detections when a finite cap is applied.
+
+`DopplerPeakMaskTests`:
+
+- `test_preserves_adjacent_range_peaks` — does not suppress peaks merely because they occupy adjacent range bins.
+- `test_rejects_weaker_cyclic_doppler_neighbor` — removes a cell weaker than a cyclic neighboring Doppler bin.
+
+`MicroDopplerSpectrogramTests`:
+
+- `test_per_tx_stft_uses_64_loop_window_and_32_loop_hop` — verifies the combined-mode per-TX STFT window and hop contract.
+
+`RotorMicroDopplerTests`:
+
+- `test_single_tx_profile_has_expected_velocity_span` — derives the expected velocity extent for a single-TX profile.
+- `test_three_tx_profile_processes_each_tx_at_its_physical_slow_time_rate` — uses the physical same-TX sampling interval in a three-TX schedule.
+- `test_weighted_mean_rejects_static_body_and_preserves_tone` — cancels stationary body energy while preserving a moving tone.
+- `test_deep_cancellation_nulls_cannot_blank_visible_ridges` — caps the adaptive gate so cancellation nulls cannot erase valid ridges.
+- `test_adaptive_gate_blanks_complex_noise` — suppresses complex noise with the adaptive relative-power gate.
+- `test_lower_tail_noise_gate_ignores_positive_blade_ridge` — keeps positive blade returns from biasing the noise estimate.
+- `test_support_filter_preserves_ridge_peak_and_blanks_isolated_cell` — retains supported ridges and rejects isolated time-frequency cells.
+- `test_gap_aware_rpm_estimate_is_within_five_percent` — estimates RPM within five percent despite sampling gaps.
+- `test_gap_aware_rpm_estimate_includes_upper_search_boundary` — permits a valid solution at the maximum configured RPM.
+- `test_tip_speed_alias_warning_uses_eighty_percent_margin` — raises the alias diagnostic at the 80-percent velocity margin.
+
+`FrameDecodingTests`:
+
+- `test_decodes_two_lane_iq_directly_to_complex64` — decodes two-lane LVDS IQ samples directly into complex64 values.
+- `test_channel_interleave_transposes_sample_and_receiver_axes` — reconstructs channel-interleaved data with correct sample/RX axes.
+
+`PointCloudClusteringTests`:
+
+- `test_dbscan_returns_cluster_centers_and_ignores_noise` — returns DBSCAN centers while excluding noise-labelled points.
+- `test_zero_radius_disables_clustering` — treats a zero neighborhood radius as clustering disabled.
+- `test_small_cloud_dbscan_matches_sklearn` — makes the local small-cloud DBSCAN path agree with scikit-learn.
+- `test_cluster_labels_identify_exact_returned_members` — associates returned centers with their exact point members.
+- `test_static_sized_cloud_does_not_enter_sklearn_path` — keeps normal static clouds on the optimized local clustering path.
+
+`OsCfarParameterTests`:
+
+- `test_scale_matches_requested_false_alarm_rate` — validates the OS-CFAR scale against its requested false-alarm probability.
+- `test_vectorized_windows_exclude_cut_and_guard_cells` — verifies vectorized training windows omit the CUT and guard cells.
+- `test_vectorized_thresholds_support_doppler_axis` — applies the threshold kernel correctly along the Doppler axis.
+
+`DspKernelTests`:
+
+- `test_range_and_doppler_cube_layouts` — verifies range and explicit TX/RX Doppler output shapes.
+- `test_optimized_ffts_match_numpy_reference` — compares optimized complex64 FFTs with independent NumPy calculations.
+- `test_os_cfar_detects_an_isolated_strong_cell` — detects an isolated high-power cell with two-dimensional OS-CFAR.
+
+### `test_inference.py` (11 cases)
+
+`FeatureExtractionTests`:
+
+- `test_reduces_centered_doppler_by_power_averaging` — reduces centered Doppler bins using power rather than complex-amplitude averaging.
+- `test_feature_step_matches_notebook_power_formula` — keeps live feature extraction identical to the training notebook formula.
+- `test_rejects_edge_gate_and_non_finite_cube` — rejects incomplete range gates and non-finite Doppler data.
+- `test_profile_hash_is_independent_of_crlf` — normalizes line endings before computing the profile compatibility hash.
+
+`StatefulInferenceTests`:
+
+- `test_waits_for_48_steps_then_returns_drone` — returns warm-up results until a complete 48-step window can classify a drone.
+- `test_probability_below_threshold_is_not_drone` — labels calibrated probabilities below threshold as non-drone.
+- `test_precomputed_feature_steps_match_cube_update_history` — makes precomputed feature input agree with live cube updates.
+- `test_invalid_shape_resets_accumulated_history` — clears state after receiving an invalid feature shape.
+
+`ArtifactContractTests`:
+
+- `test_accepts_current_profile_and_artifact_contract` — accepts the deployed model bundle with the current radar profile.
+- `test_rejects_incompatible_profile_fingerprint` — rejects artifacts trained for a different normalized profile.
+- `test_rejects_old_two_bin_target_gate_contract` — rejects obsolete artifacts using the former two-bin target gate.
+
+### `test_livedatacapture.py` (90 cases)
+
+`FrameBufferTests`:
+
+- `test_packet_gap_within_one_frame_is_marked_invalid` — marks a partially assembled frame invalid when a packet gap occurs inside it.
+- `test_gap_larger_than_one_frame_resynchronizes_without_padding` — resynchronizes after a large gap without fabricating padding bytes.
+- `test_memoryview_payload_is_assembled_without_a_slice_copy` — accepts memoryview payloads without introducing a slice copy.
+
+`UdpPacketReceiverTests`:
+
+- `test_receiver_preserves_datagram_order` — enqueues received datagrams in arrival order.
+- `test_receiver_counts_bounded_queue_drops` — records drops when the bounded packet queue is full.
+
+`FrameDiagnosticsTests`:
+
+- `test_valid_frame_does_not_emit_routine_diagnostics` — keeps successful frames silent during normal operation.
+- `test_error_snapshot_ignores_success_counters` — excludes successful-work counters from the error-change snapshot.
+- `test_errors_are_reported_immediately_on_each_counter_change` — emits diagnostics whenever an error counter changes.
+- `test_capture_summary_separates_valid_and_queued_frames` — reports valid assembly separately from processor enqueue success.
+- `test_graceful_processor_stop_does_not_discard_a_queued_frame` — drains work queued before the shutdown sentinel.
+- `test_latest_payload_replacement_is_counted` — counts display payloads replaced by the latest-only queue.
+
+`RotorDisplayPayloadSinkTests`:
+
+- `test_dedicated_mode_accepts_proven_three_tx_profile_and_bypasses_point_cloud` — accepts the verified three-TX rotor profile without invoking point-cloud DSP.
+- `test_rotor_frame_worker_initializes_with_three_tx_profile` — initializes the rotor worker using the three-transmitter contract.
+- `test_rotor_frame_worker_processes_three_tx_frame` — produces a rotor result from a valid three-TX frame.
+
+`RotorPostprocessorTests`:
+
+- `test_postprocessor_preserves_frame_order_and_classification_alignment` — keeps asynchronous classification and serialization aligned with frame order.
+
+`ProcessedOutputWriterTests`:
+
+- `test_writes_metadata_point_cloud_and_micro_doppler_jsonl` — writes the metadata record and combined-mode point/micro-Doppler fields.
+- `test_writes_structured_rotor_micro_doppler_result` — serializes the dedicated rotor result schema.
+
+`PointCloudBoundsTests`:
+
+- `test_display_defaults_are_ten_meters_and_sixty_degrees` — verifies default range and angular display bounds.
+- `test_point_cloud_axes_match_ten_meter_sixty_degree_fov` — configures 3D axes for the default range and field of view.
+- `test_direction_cosine_gate_rejects_points_beyond_sixty_degrees` — rejects points outside the ±60-degree angular gate.
+- `test_range_limit_includes_every_range_bin` — includes every bin within the selected radial limit.
+- `test_draw_updates_points_and_cluster_centers` — updates dynamic points and cluster-center artists.
+- `test_draw_updates_tracked_target_marker` — updates the measured target marker.
+- `test_draw_keeps_predicted_target_marker_visible` — retains a translucent marker during prediction-only tracking.
+- `test_draw_updates_static_points_and_calibration_indicator` — updates static points and reference-calibration status.
+- `test_draw_shows_ready_classification` — renders a completed classification result.
+- `test_draw_shows_classification_warmup` — renders classifier history warm-up status.
+
+`SingleTargetTrackerTests`:
+
+- `test_acquires_strongest_then_follows_nearest_candidate` — acquires the strongest target and subsequently associates the nearest candidate.
+- `test_nearest_policy_acquires_nearest_candidate` — supports nearest-first initial acquisition policy.
+- `test_coasts_through_miss_and_reassociates` — predicts through a miss and reassociates a returning target.
+- `test_drops_track_after_missed_update_limit` — removes a track after its configured miss limit.
+- `test_cluster_candidates_use_assigned_point_magnitude` — derives cluster candidate strength from assigned member points.
+
+`MotionHandoffQualifierTests`:
+
+- `test_healthy_dynamic_track_does_not_open_handoff` — avoids static handoff while dynamic measurements remain healthy.
+- `test_confirmed_dynamic_track_opens_only_after_dynamic_misses` — opens handoff only after a confirmed moving track begins missing.
+- `test_dynamic_reacquisition_cancels_active_handoff` — cancels pending static handoff when dynamic tracking resumes.
+- `test_unconfirmed_and_predicted_tracks_do_not_arm_handoff` — prevents tentative or prediction-only tracks from authorizing handoff.
+- `test_motion_protection_releases_after_configured_misses` — releases the protected motion region after the configured miss count.
+
+`TrackedDisplayPayloadTests`:
+
+- `test_static_tracker_uses_one_hit_handoff_and_two_second_coast` — applies one-hit authorized handoff and the two-second static coast interval.
+- `test_combined_display_uses_tracked_range_for_micro_doppler` — centers combined-mode micro-Doppler on the tracked target range.
+- `test_processed_writer_runs_without_a_display_queue` — continues processed JSONL output when no display queue exists.
+- `test_unqualified_static_clusters_cannot_override_dynamic_track` — prevents static clutter without motion qualification from taking ownership.
+- `test_motion_qualified_cluster_hands_off_exact_members_only` — transfers ownership to the qualified cluster and exposes only its members.
+- `test_first_qualified_static_maximum_completes_handoff` — permits the first qualified static maximum to complete an authorized handoff.
+- `test_stopped_dynamic_target_transitions_without_selection_gap` — moves from dynamic to static ownership without dropping target selection.
+- `test_strict_static_cluster_override_rejects_single_maximum` — rejects an isolated static maximum when strict cluster ownership is required.
+- `test_static_maximum_outside_handoff_gate_is_rejected` — rejects static candidates beyond the last dynamic-position gate.
+- `test_static_handoff_selects_cluster_nearest_dynamic_position` — selects the eligible cluster nearest the last dynamic position.
+- `test_disabling_static_detection_skips_static_processing` — bypasses the entire static branch when disabled.
+- `test_static_detection_runs_on_every_point_cloud_update` — executes static detection at full point-cloud cadence.
+- `test_ready_static_detection_sleeps_without_handoff_or_track` — avoids unnecessary static clustering when no track or handoff exists.
+- `test_static_clustering_is_localized_to_handoff` — restricts static clustering to the active handoff neighborhood.
+- `test_micro_doppler_history_survives_brief_track_gap` — retains spectrogram history through a short selection gap.
+- `test_micro_doppler_history_survives_nearby_static_handoff` — preserves history across a spatially nearby dynamic-to-static handoff.
+- `test_micro_doppler_history_survives_continuous_large_motion` — retains history during uninterrupted ownership despite large displacement.
+- `test_micro_doppler_history_resets_for_distant_reacquisition` — resets history when reacquisition is spatially distant.
+- `test_micro_doppler_history_expires_after_long_gap` — resets history after exceeding the allowed update gap.
+- `test_micro_doppler_history_accepts_thirty_update_gap` — treats exactly 30 missing updates as recoverable.
+
+`ClassificationIntegrationTests`:
+
+- `test_fixed_range_is_converted_to_nearest_range_bin` — maps a physical fixed gate to its nearest configured range bin.
+- `test_native_feature_is_available_without_a_trained_classifier` — emits native feature steps even when no classifier is loaded.
+- `test_combined_mode_overlaps_classification_with_micro_doppler` — overlaps classification work with the next combined-mode DSP update.
+- `test_predicted_track_continues_classification_history` — keeps classifier history during association-preserving prediction.
+- `test_confirmed_owner_change_resets_classification_history` — clears history when a genuinely different target takes ownership.
+
+`RangeDisplayBoundsTests`:
+
+- `test_range_profile_uses_ten_meter_default_limit` — limits the default range-profile axis to 10 m.
+- `test_range_doppler_uses_ten_meter_default_limit` — limits the default range-Doppler image to 10 m.
+
+`MicroDopplerDisplayTests`:
+
+- `test_shared_magnitude_colorbar_starts_at_sixty_db` — fixes the shared magnitude scale's lower bound at 60 dB.
+- `test_combined_point_cloud_keeps_full_rate_rendering` — keeps combined-mode rendering enabled for every consumed update.
+- `test_live_history_keeps_150_stft_windows` — bounds the live spectrogram history at 150 windows.
+- `test_stft_uses_64_loop_window_and_32_loop_hop` — verifies combined-mode STFT window and hop constants.
+- `test_live_range_gate_uses_five_bins` — verifies the live visualization range gate spans five bins.
+- `test_draw_sets_centered_doppler_and_history_axes` — updates centered velocity and historical time extents correctly.
+- `test_blitted_draw_does_not_mutate_static_axes` — keeps fixed axes unchanged during incremental drawing.
+- `test_event_rate_counts_units_after_initial_timestamp` — computes event rates only after establishing the first timestamp.
+- `test_rate_indicator_formats_display_rate` — formats a measured display update rate for the status label.
+- `test_rate_indicator_shows_measurement_pending` — shows a pending state before enough events exist for a rate.
+- `test_dedicated_rotor_defaults_prioritize_flash_timing` — verifies dedicated-mode defaults preserve blade-flash time resolution.
+- `test_rotor_time_resolution_separates_max_rpm_blade_passages` — confirms the STFT hop resolves blade passages at maximum RPM.
+- `test_rotor_display_frame_includes_notch_overlay_bounds` — includes the clutter-notch limits in the display payload.
+- `test_turbo_lookup_table_is_compact_uint8_rgb` — builds a 256-entry uint8 RGB Turbo lookup table.
+- `test_rotor_colorization_produces_finite_direct_rgba_image` — converts rotor power directly into finite contiguous RGBA pixels.
+- `test_rotor_display_process_dispatches_to_pyqtgraph` — routes dedicated rotor display startup to the PyQtGraph implementation.
+- `test_range_display_process_dispatches_to_pyqtgraph` — routes range display startup to the PyQtGraph implementation.
+- `test_display_startup_status_reports_ready_backend` — reports the visible GUI backend through the startup-status channel.
+- `test_rotor_qt_arguments_exclude_radar_display_option` — prevents the radar `--display` option from reaching Qt's parser.
+- `test_rotor_dependency_error_explains_missing_pyqtgraph` — provides an actionable error when PyQtGraph is unavailable.
+- `test_rotor_dependency_error_explains_missing_xcb_cursor` — provides the native package remedy for a missing XCB cursor library.
+- `test_rotor_raster_is_bounded_and_max_pooling_preserves_flashes` — bounds raster width while retaining short flashes during max pooling.
+- `test_rotor_raster_defaults_to_active_acquisition_span` — derives the default display span from active sampling time.
+- `test_rotor_display_concatenates_only_active_window_intervals` — removes inactive frame gaps from display-only time coordinates.
+- `test_rotor_display_fills_time_gaps_from_nearest_spectrum` — fills display raster gaps using the nearest measured spectrum.
+- `test_gap_aware_series_inserts_nan_at_frame_gap` — inserts NaN separators into analysis series across capture gaps.
+
+### `test_run.py` (34 cases)
+
+`ChooseDurationMinutesTests`:
+
+- `test_blank_input_uses_five_minute_default` — uses five minutes when the duration prompt is left blank.
+- `test_zero_means_unlimited` — interprets zero duration as no automatic stop.
+- `test_cli_value_skips_prompt` — honors a supplied duration without prompting.
+- `test_negative_cli_value_is_rejected` — rejects negative durations.
+- `test_non_finite_cli_value_is_rejected` — rejects NaN and infinite durations.
+
+`ChooseMicroDopplerRangeTests`:
+
+- `test_blank_input_uses_2_15_meter_default` — uses the 2.15 m default fixed range.
+- `test_explicit_positive_range_skips_prompt` — accepts a positive CLI range without prompting.
+- `test_invalid_explicit_range_is_rejected` — rejects non-positive or non-finite fixed ranges.
+
+`ChooseDisplayTests`:
+
+- `test_blank_input_uses_combined_display_default` — selects combined point-cloud/micro-Doppler mode by default.
+- `test_combined_display_menu_choice` — maps the combined menu selection correctly.
+- `test_combined_display_is_a_cli_choice` — exposes combined mode through argument parsing.
+- `test_dedicated_rotor_display_is_a_cli_choice` — exposes dedicated rotor mode through argument parsing.
+- `test_calibration_is_menu_option_seven` — keeps range calibration assigned to menu option seven.
+- `test_angular_calibrations_are_menu_options_eight_and_nine` — maps azimuth and elevation calibration to options eight and nine.
+- `test_dedicated_rotor_defaults_match_current_drone` — keeps rotor defaults aligned with the current aircraft configuration.
+
+`ChooseLiveClassificationTests`:
+
+- `test_blank_input_disables_classification_by_default` — defaults the interactive classification choice to disabled.
+- `test_yes_enables_classification` — recognizes affirmative interactive input.
+- `test_explicit_cli_value_skips_prompt` — honors an explicit classification flag without prompting.
+
+`ChooseDatasetOutputDirectoryTests`:
+
+- `test_blank_input_uses_dataset_root` — stores captures under the dataset root by default.
+- `test_uav_and_others_choices` — maps labelled UAV and non-UAV directory selections.
+- `test_option_three_uses_dataset_root` — maps the third menu option to the unlabelled dataset root.
+
+`CaptureCommandTests`:
+
+- `test_calibration_command_disables_normal_processing` — constructs calibration capture without ordinary detection/classification work.
+- `test_processed_output_is_default_and_raw_output_is_opt_in` — enables processed JSONL by default and raw ADC only when requested.
+- `test_rotor_command_forwards_gate_and_estimator_settings` — forwards dedicated rotor range, geometry, and RPM options.
+
+`SubprocessEnvironmentTests`:
+
+- `test_linux_vnc_environment_defaults_to_display_zero` — supplies `DISPLAY=:0` for the supported Linux VNC environment when unset.
+- `test_existing_display_environment_is_preserved` — does not overwrite an explicitly configured display server.
+
+`ClassificationResultChannelTests`:
+
+- `test_relay_extracts_structured_result_and_forwards_other_logs` — parses classification messages while relaying unrelated output.
+- `test_relay_reports_capture_readiness` — recognizes and signals the capture-ready marker.
+- `test_wait_for_capture_ready_stops_when_capture_exits` — fails readiness waiting when the capture child terminates.
+- `test_wait_for_capture_ready_accepts_ready_capture` — succeeds after a live child emits readiness.
+- `test_explicit_cuda_allows_first_engine_build` — grants the longer startup window for an explicit CUDA build.
+- `test_cpu_classification_keeps_normal_startup_timeout` — retains the normal timeout for CPU classification.
+- `test_auto_uses_gpu_timeout_on_jetson` — uses the extended engine-build timeout for automatic Jetson CUDA selection.
+- `test_report_drains_ready_classification_without_printing` — consumes ready classification results without duplicate console output.
+
+### `test_startup.py` (5 cases)
+
+`DCA1000PacketDelayTests`:
+
+- `test_supported_packet_delay_boundaries_are_accepted` — accepts both documented DCA1000 packet-delay limits.
+- `test_packet_delay_outside_hardware_range_is_rejected` — rejects delays outside the FPGA-supported range.
+- `test_fifty_microseconds_encodes_to_6250_fpga_cycles` — converts 50 microseconds into the expected 6,250 cycles.
+- `test_repository_setup_uses_fifty_microseconds` — verifies the committed capture setup selects the validated delay.
+
+`SdkProfileCommandTests`:
+
+- `test_repository_profile_does_not_send_host_angle_metadata` — keeps host-only angular compensation out of radar CLI commands.
+
+### `test_tensorrt_inference.py` (11 cases)
+
+`DeviceResolutionTests`:
+
+- `test_auto_requires_cuda_on_jetson` — resolves automatic device selection to CUDA on Jetson.
+- `test_auto_uses_cpu_off_jetson` — resolves automatic selection to CPU on other hosts.
+- `test_cuda_creation_does_not_fall_back` — makes requested CUDA failures fatal rather than silently selecting CPU.
+- `test_cuda_creation_forwards_progress_callback` — forwards engine-build status through the supplied callback.
+
+`EngineCacheTests`:
+
+- `test_fp16_probability_tolerance_accepts_small_calibrated_drift` — accepts FP16 parity drift within the 0.005 calibrated-probability limit.
+- `test_cache_requires_matching_engine_hash_and_parity` — requires both engine identity and successful parity metadata.
+- `test_cache_ignores_volatile_reported_total_gpu_memory` — excludes changing free/total-memory reporting from compatibility identity.
+- `test_existing_engine_is_validated_without_recompiling` — validates and reuses an acceptable existing engine.
+- `test_engine_is_compiled_only_when_cache_file_is_absent` — builds TensorRT only when no engine cache exists.
+- `test_parity_uses_training_export_without_pytorch` — validates against exported parity data without loading PyTorch.
+
+`StatefulTensorRTTests`:
+
+- `test_feature_history_runs_tensor_rt_at_step_48` — invokes TensorRT when the 48th valid feature step completes the window.
+
 ## Current Limitations
 
 - No packet reordering; only duplicate and overlap handling.
