@@ -3,6 +3,4 @@ __pycache__/
 *.py[cod]
 /tmp/classification_features*.npz
 /training_output/
-*.engine
 dataset/*
-calibrationoutput/*

@@ -1,0 +1,16 @@
+{
+  "calibration_type": "elevation",
+  "target_distance_m": 2.58,
+  "search_window_m": 0.2,
+  "reference_angle_deg": 0.0,
+  "measured_angle_deg": 0.46875,
+  "angle_bias_deg": 0.46875,
+  "accepted_frames": 64,
+  "angle_std_deg": 0.9837547649185746,
+  "measured_range_m": 2.5927843406878717,
+  "tx_order": [
+    1,
+    4,
+    2
+  ]
+}
