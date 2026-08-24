@@ -12,17 +12,9 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
 
 try:
-    from .openradar_backend import (
-        os_cfar_2d as openradar_os_cfar_2d,
-        doppler_fft as openradar_doppler_fft,
-        range_fft as openradar_range_fft,
-    )
+    from . import dsp_kernels
 except ImportError:
-    from openradar_backend import (
-        os_cfar_2d as openradar_os_cfar_2d,
-        doppler_fft as openradar_doppler_fft,
-        range_fft as openradar_range_fft,
-    )
+    import dsp_kernels
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
@@ -580,7 +572,7 @@ def range_axis_m(config: RadarDspConfig) -> Optional[np.ndarray]:
 
 
 def compute_range_fft(radar_cube: np.ndarray) -> np.ndarray:
-    return openradar_range_fft(radar_cube)
+    return dsp_kernels.range_fft(radar_cube)
 
 
 def compute_range_profile(range_fft: np.ndarray) -> np.ndarray:
@@ -605,7 +597,7 @@ def compute_range_doppler_fft(
     if loops * chirps_per_loop != range_fft.shape[0]:
         chirps_per_loop = 1
 
-    return openradar_doppler_fft(
+    return dsp_kernels.doppler_fft(
         range_fft,
         num_tx_antennas=chirps_per_loop,
     )
@@ -1796,7 +1788,7 @@ def os_cfar_2d(
     doppler_training_cells: int,
 ) -> np.ndarray:
     """Run the local vectorized OS-CFAR on a [doppler, range] power map."""
-    return openradar_os_cfar_2d(
+    return dsp_kernels.os_cfar_2d(
         power_map,
         false_alarm_rate=false_alarm_rate,
         range_guard_cells=range_guard_cells,

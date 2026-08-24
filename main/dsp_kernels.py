@@ -1,37 +1,11 @@
-"""Local DSP kernels plus the project's OpenRadar compatibility check."""
+"""Optimized local FFT and ordered-statistic CFAR kernels."""
 
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
-from typing import Any
 
 import numpy as np
 from scipy import fft as scipy_fft
-
-
-OPENRADAR_INSTALL_HINT = (
-    "OpenRadar DSP is required. Create the project virtual environment as "
-    "described in 'User guide.md', install the capture "
-    "dependencies listed there, and run the application with that "
-    "environment's Python."
-)
-
-
-@lru_cache(maxsize=1)
-def _openradar_dsp() -> Any:
-    try:
-        import mmwave.dsp as openradar_dsp
-    except (ImportError, ModuleNotFoundError) as exc:
-        raise RuntimeError(f"{OPENRADAR_INSTALL_HINT} Import error: {exc}") from exc
-    return openradar_dsp
-
-
-def validate_openradar_backend() -> str:
-    """Import OpenRadar early and return a useful backend description."""
-    openradar_dsp = _openradar_dsp()
-    module_path = Path(openradar_dsp.__file__).resolve()
-    return f"OpenRadar ({module_path})"
 
 
 def range_fft(adc_cube: np.ndarray) -> np.ndarray:
@@ -113,8 +87,9 @@ def os_cfar_2d(
 
     def os_parameters(training_cells_per_side: int) -> tuple[int, float]:
         total_training_cells = 2 * training_cells_per_side
-        # Use the conventional 75th-percentile ordered statistic. OpenRadar's
-        # rank is zero-based, while the Pfa calculation uses a one-based rank.
+        # Use the conventional 75th-percentile ordered statistic. NumPy's
+        # partition index is zero-based, while the Pfa calculation uses a
+        # one-based rank.
         rank = max(1, int(np.ceil(0.75 * total_training_cells)))
         return rank - 1, _os_scale(total_training_cells, rank, pfa)
 

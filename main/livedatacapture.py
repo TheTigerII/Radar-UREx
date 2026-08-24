@@ -50,7 +50,6 @@ if __package__ in {None, ""}:
         static_target_protection_mask,
     )
     from main import calibrate as radar_calibration
-    from main.openradar_backend import validate_openradar_backend
     from main.inference import (
         DOPPLER_BINS,
         FEATURE_VERSION,
@@ -93,7 +92,6 @@ else:
         static_target_protection_mask,
     )
     from . import calibrate as radar_calibration
-    from .openradar_backend import validate_openradar_backend
     from .inference import (
         DOPPLER_BINS,
         FEATURE_VERSION,
@@ -6181,11 +6179,7 @@ def main() -> None:
                     "configured range axis"
                 )
         emit(f"Loaded radar config: {config}")
-        try:
-            dsp_backend = validate_openradar_backend()
-        except RuntimeError as exc:
-            raise CaptureStartupError(str(exc)) from exc
-        emit(f"DSP backend: {dsp_backend}")
+        emit("DSP backend: local SciPy/NumPy kernels")
         setup_config = CaptureSetupConfig.from_file(args.setup)
         emit(f"Loaded capture setup: {setup_config}")
 

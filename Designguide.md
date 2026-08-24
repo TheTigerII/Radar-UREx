@@ -5,15 +5,12 @@ from a TI IWR6843ISK-ODS through a DCA1000EVM. It is an implementation guide,
 not a description of TI UART TLV output or mmWave Studio post-processing.
 
 Range FFT, TDM separation, and Doppler FFT use local complex64 SciPy kernels in
-`openradar_backend.py`. Tests compare them with the pinned OpenRadar
-implementation when that package is installed, and capture startup imports
-OpenRadar as a compatibility/dependency check; live FFT calls do not delegate
-their arrays to OpenRadar. Hann windows are cached, and the unused OpenRadar
-complex128/log-magnitude intermediates are not created. OS-CFAR uses a local
-vectorized ordered-window implementation with cached training indices and
-scale factors. Raw DCA1000 decoding and the
-IWR6843ISK-ODS-specific planar antenna mapping remain local because OpenRadar's
-generic XYZ implementation assumes a different virtual antenna layout.
+`dsp_kernels.py`. Independent NumPy-reference tests verify their layout and
+numerical results. Hann windows are cached, complex64 precision is preserved,
+and no unused log-magnitude intermediate is created. OS-CFAR uses a vectorized
+ordered-window implementation with cached training indices and scale factors.
+Raw DCA1000 decoding and the IWR6843ISK-ODS-specific planar antenna mapping are
+also implemented locally.
 All live displays run with PyQtGraph/PySide6 in an isolated display process.
 Range and spectrogram modes use `PlotItem`/`ImageItem`; point-cloud modes use
 PyQtGraph's OpenGL view.
@@ -53,7 +50,7 @@ boundaries are:
 | `main/startup.py` | Hardware control plane. It loads the radar and DCA1000 configuration, runs preflight checks, sends DCA1000 commands over UDP, sends SDK CLI commands over the radar UART, and enforces the arm-before-`sensorStart` sequence. Its internal capture backend is deliberately dry-run only. Its `main()` returns an exit code. |
 | `main/livedatacapture.py` | Live data plane and largest orchestration module. It parses `.cfg`/JSON capture dimensions, receives and assembles DCA1000 UDP data, starts the DSP, optional rotor-classification, and GUI processes, tracks losses and drops, and writes raw, metadata, processed JSONL, and terminal-log output. It can be run directly, but does not configure or stop the hardware. |
 | `main/dsp.py` | Hardware-independent numerical processing and state. It converts LVDS frame bytes, computes range/Doppler transforms, performs dynamic and static detection, maps the ODS virtual antenna, estimates XYZ, clusters points, maintains clutter/static reference maps, computes both micro-Doppler variants, and estimates rotor RPM. It has no command-line entry point. |
-| `main/openradar_backend.py` | Local SciPy range FFT, TDM Doppler FFT, and vectorized OS-CFAR kernels, plus the early OpenRadar import/compatibility check used by capture startup. Cached Hann windows, CFAR indices, and scale factors are kept here. Despite the filename, live arrays are not passed into OpenRadar. |
+| `main/dsp_kernels.py` | Optimized local SciPy range FFT, TDM Doppler FFT, and vectorized OS-CFAR kernels. It caches Hann windows, CFAR indices, and scale factors. |
 | `main/calibrate.py` | Calibration domain layer. It validates and generates temporary raw-LVDS profiles, accumulates range/channel or angular observations, applies stability gates, serializes calibration reports, atomically updates the operational profile with backups, and supplies the calibration GUI child process. It has no standalone CLI; `run.py` and `livedatacapture.py` integrate it. |
 | `main/inference.py` | Shared CNN feature contract and CPU/PyTorch backend. It creates one `[2, 64]` feature step from a selected three-bin range gate, retains 48 steps, validates the checkpoint/calibration/model-card/profile fingerprint, normalizes the `[2, 48, 64]` window, and returns calibrated `drone`, `not_drone`, or `unknown` results. It has no CLI. |
 | `main/tensorrt_inference.py` | CUDA/TensorRT FP16 backend and device selector. It owns pinned host/device buffers and one CUDA stream, builds or validates the cached engine against ONNX, artifact, profile, TensorRT, and GPU metadata, requires parity within 0.005 probability with no label changes, benchmarks the engine, and implements the same stateful inference interface as the CPU backend. `auto` selects CUDA on Jetson and CPU elsewhere; requested CUDA failures are fatal rather than silently falling back. |
@@ -73,11 +70,10 @@ livedatacapture.py
   +-- dsp.py
   +-- calibrate.py
   +-- inference.py
-  +-- tensorrt_inference.py
-  `-- openradar_backend.py (dependency preflight)
+  `-- tensorrt_inference.py
 
 dsp.py
-  `-- openradar_backend.py (local FFT and CFAR kernels)
+  `-- dsp_kernels.py (local FFT and CFAR kernels)
 
 tensorrt_inference.py
   `-- inference.py (feature, result, and artifact contracts)
@@ -88,9 +84,8 @@ execution. The remaining files are library modules and should be imported
 through the `main` package. Optional dependencies are loaded only on the paths
 that need them: PySerial for direct radar control, PyQtGraph/PySide6 for live
 displays, PyTorch/joblib for CPU classification, and TensorRT/CUDA Python for
-CUDA classification. SciPy and NumPy are core DSP dependencies. OpenRadar is
-validated at capture startup for compatibility and test parity, although the
-hot FFT and CFAR paths are local.
+CUDA classification. SciPy and NumPy are core DSP dependencies. All hot FFT and
+CFAR paths are local and require no external radar-DSP package.
 
 ## Startup Control Plane
 

@@ -32,7 +32,7 @@ from main.dsp import (
     rotor_velocity_alias_diagnostic,
     static_target_protection_mask,
 )
-from main.openradar_backend import (
+from main.dsp_kernels import (
     _os_scale,
     _os_thresholds_along_axis,
     doppler_fft,
@@ -41,7 +41,6 @@ from main.openradar_backend import (
 )
 
 
-OPENRADAR_AVAILABLE = importlib.util.find_spec("mmwave") is not None
 SKLEARN_AVAILABLE = importlib.util.find_spec("sklearn") is not None
 
 
@@ -1165,8 +1164,7 @@ class OsCfarParameterTests(unittest.TestCase):
         self.assertEqual(thresholds[5, 0], 7.0)
 
 
-@unittest.skipUnless(OPENRADAR_AVAILABLE, "OpenRadar is not installed")
-class OpenRadarBackendTests(unittest.TestCase):
+class DspKernelTests(unittest.TestCase):
     def test_range_and_doppler_cube_layouts(self) -> None:
         rng = np.random.default_rng(7)
         adc_cube = (
@@ -1180,30 +1178,27 @@ class OpenRadarBackendTests(unittest.TestCase):
         self.assertEqual(range_cube.shape, (6, 4, 8))
         self.assertEqual(doppler_cube.shape, (2, 3, 4, 8))
 
-    def test_optimized_ffts_match_openradar_hann_processing(self) -> None:
-        import mmwave.dsp as openradar_dsp
-
+    def test_optimized_ffts_match_numpy_reference(self) -> None:
         rng = np.random.default_rng(73)
         adc_cube = (
             rng.normal(size=(12, 4, 16))
             + 1j * rng.normal(size=(12, 4, 16))
         ).astype(np.complex64)
-        expected_range = openradar_dsp.range_processing(
-            adc_cube,
-            window_type_1d=openradar_dsp.Window.HANNING,
+        range_window = np.hanning(adc_cube.shape[-1]).astype(np.float32)
+        expected_range = np.fft.fft(
+            adc_cube * range_window[np.newaxis, np.newaxis, :],
+            axis=-1,
         )
         actual_range = range_fft(adc_cube)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            _unused, expected_aoa = openradar_dsp.doppler_processing(
-                expected_range,
-                num_tx_antennas=3,
-                clutter_removal_enabled=False,
-                interleaved=True,
-                window_type_2d=openradar_dsp.Window.HANNING,
-                accumulate=False,
-            )
+
+        explicit_cube = actual_range.reshape((4, 3, 4, 16))
+        doppler_window = np.hanning(4).astype(np.float32)
         expected_doppler = np.fft.fftshift(
-            expected_aoa.transpose(2, 1, 0).reshape((4, 3, 4, 16)),
+            np.fft.fft(
+                explicit_cube
+                * doppler_window[:, np.newaxis, np.newaxis, np.newaxis],
+                axis=0,
+            ),
             axes=0,
         )
         actual_doppler = doppler_fft(actual_range, num_tx_antennas=3)

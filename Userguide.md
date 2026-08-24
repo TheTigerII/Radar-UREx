@@ -7,7 +7,6 @@ an IWR6843ISK-ODS connected to a DCA1000EVM.
 ## Prerequisites
 
 - Python 3 with the capture dependencies installed as shown below.
-- Git, which pip uses to install the pinned OpenRadar dependency.
 - PC Ethernet interface configured as `192.168.33.30/24` by default.
 - DCA1000 reachable at `192.168.33.180`.
 - Radar running SDK CLI firmware when using `profile.cfg` and direct serial.
@@ -35,8 +34,6 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install \
   "numpy<2" scipy pyserial "scikit-learn==1.6.1" \
   "pyqtgraph>=0.13.7,<0.15" "PySide6>=6.7,<7" "PyOpenGL>=3.1.7"
-.venv/bin/python -m pip install \
-  "openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94"
 ```
 
 On Windows PowerShell:
@@ -46,12 +43,10 @@ python -m venv .venv
 .venv\Scripts\python -m pip install `
   'numpy<2' scipy pyserial 'scikit-learn==1.6.1' `
   'pyqtgraph>=0.13.7,<0.15' 'PySide6>=6.7,<7' 'PyOpenGL>=3.1.7'
-.venv\Scripts\python -m pip install `
-  'openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94'
 ```
 
-These bounds and the OpenRadar commit are the tested installation baseline.
-The scikit-learn pin matches the version that serialized the bundled
+These package bounds are the tested installation baseline. The scikit-learn
+pin matches the version that serialized the bundled
 `calibration.joblib`; using another version can produce a model-persistence
 warning or incompatible behavior, as described in scikit-learn's
 [model-persistence guidance](https://scikit-learn.org/stable/model_persistence.html).
@@ -134,12 +129,10 @@ this one-time GPU build. CUDA/TensorRT failure never silently falls back to
 CPU; use `--classification-device cpu` only as an explicit diagnostic override
 when PyTorch is installed.
 
-Capture startup imports OpenRadar as a dependency/compatibility check. Live
-range and Doppler FFTs use local complex64 SciPy kernels that tests compare with
-the pinned OpenRadar implementation when it is installed. OS-CFAR is also a
-vectorized local implementation for real-time performance. The IWR6843ISK-ODS
-planar-array coordinate mapping remains in the local DSP adapter because
-OpenRadar's supplied XYZ helper targets the AWR1843 virtual antenna layout.
+Live range and Doppler FFTs use local complex64 SciPy kernels checked against
+independent NumPy reference calculations. OS-CFAR is a vectorized local
+implementation for real-time performance. The IWR6843ISK-ODS planar-array
+coordinate mapping is also local and specific to this radar's antenna layout.
 All live views use PyQtGraph with the PySide6 Qt binding. Range and
 range-Doppler views use native 2D plot/image items, 3D point clouds use
 PyQtGraph OpenGL, and combined mode places the OpenGL point cloud and

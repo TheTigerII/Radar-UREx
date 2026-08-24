@@ -18,6 +18,10 @@ python -m pip --version
 
 Both commands should resolve to paths under this repository's `.venv`.
 
+The environment audited on 24 August 2026 uses Python 3.12.3 and pip 26.2.1.
+The version table below records the versions that were actually imported by
+that environment, not merely the versions requested from pip.
+
 ## Direct project packages
 
 These are all third-party packages imported by the Python source and training
@@ -25,7 +29,7 @@ notebook, plus the Jupyter application used to run the notebook. Python
 standard-library modules and packages installed only as transitive dependencies
 are not listed.
 
-| Package installed with pip | Imported or used as | Purpose | Installed version |
+| Distribution or system package | Imported or used as | Purpose | Installed version |
 | --- | --- | --- | --- |
 | `numpy` | `numpy` | Array processing and radar data structures | 1.26.4 |
 | `scipy` | `scipy.fft` | Range and Doppler FFT processing | 1.11.4 |
@@ -33,30 +37,40 @@ are not listed.
 | `pyqtgraph` | `pyqtgraph` | Live plots and 3D visualization | 0.14.0 |
 | `PySide6` | `PySide6` and `pyqtgraph.Qt` | Qt GUI backend | 6.11.1 |
 | `PyOpenGL` | `OpenGL` and `pyqtgraph.opengl` | OpenGL support for 3D views | 3.1.7 |
-| `torch` | `torch` | Live classifier inference and model training | 2.13.0 |
-| `scikit-learn` | `sklearn` | Training metrics and dataset splitting | 1.9.0 |
+| `torch` | `torch` | Live classifier inference and model training | 2.13.0+cu130 (distribution 2.13.0) |
+| `scikit-learn` | `sklearn` | Calibration loading, DBSCAN, training metrics, and dataset splitting | 1.6.1 |
 | `matplotlib` | `matplotlib` | Training plots | 3.6.3 |
 | `onnx` | `onnx` | Model export and parity validation | 1.22.0 |
 | `joblib` | `joblib` | Load and save classifier calibration artifacts | 1.5.3 |
-| `openradar` | `mmwave.dsp` | OpenRadar DSP backend validation | 1.0.0 (pin: `65bcd628`) |
 | `jupyter` | `jupyter` command | Notebook application bundle | 1.1.1 |
 | `jupyterlab` | `jupyter lab` command | UI used to open `classification.ipynb` | 4.6.3 |
 | `pytest` | `pytest` | Automated test runner used below | 7.4.4 |
+| `cuda-bindings` | `cuda.bindings.runtime` | CUDA APIs for the Jetson TensorRT backend | 13.3.1 |
+| `TensorRT` (JetPack package) | `tensorrt` | FP16 classifier build and inference on Jetson | 10.16.2.10 |
+
+The GUI also needs the native XCB cursor and OpenGL libraries. The audited host
+has `libxcb-cursor0` 0.1.4-1build1 and `libgl1` 1.7.0-1build1. On Ubuntu or
+Jetson Linux, install the native prerequisites with:
+
+```bash
+sudo apt install libxcb-cursor0 libgl1
+```
 
 The rebuilt environment uses `--system-site-packages`, as recommended for the
 Jetson deployment. Consequently, NumPy, SciPy, pyserial, PyOpenGL, and
 Matplotlib currently resolve from the compatible system Python installation,
-as does `pytest`; most other packages, including OpenRadar, are stored directly
-under `.venv`. Use the `.venv` Python interpreter so both package locations are
-available.
+as does `pytest`; most other packages are stored directly under `.venv`.
+TensorRT 10.16.2.10 resolves from the JetPack system packages, while CUDA
+bindings 13.3.1 resolve from `.venv`. Use the `.venv` Python interpreter so
+both package locations are available.
 
-The environment audit originally found one missing runtime dependency:
-`openradar`. It is now installed from the repository's pinned revision and is
-imported as `mmwave.dsp` in `rawdatacapture/openradar_backend.py`. Keep using
-the pin rather than an unversioned package so that its DSP API remains
-reproducible. `joblib` and `pytest` currently resolve through other/system
-packages, but they are listed explicitly because the project uses them
-directly.
+`scikit-learn` must remain at 1.6.1 while using the bundled
+`model_weights/calibration.joblib`: that is the version which serialized the
+calibrator. Loading it with a different version produces an
+`InconsistentVersionWarning` and is not a supported deployment configuration.
+`joblib` and `pytest` are listed explicitly because the project uses them
+directly even when another package or the system installation also provides
+them.
 
 The notebook's `google.colab` import is only for mounting Google Drive when the
 notebook runs in Colab. Skip that first cell when running locally; it is not a
@@ -67,19 +81,16 @@ notebook runs in Colab. Skip that first cell when running locally; it is not a
 From the repository root:
 
 ```bash
-git --version
 python3 -m venv --clear --system-site-packages .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
+python -m pip install "pip==26.2.1"
 python -m pip install \
-  "numpy<3" "scipy<2" \
-  "pyqtgraph>=0.14,<0.15" "PySide6>=6.8,<7" "PyOpenGL>=3.1,<4" \
-  pyserial torch "scikit-learn>=1.4,<2" matplotlib onnx joblib jupyter pytest \
-  "openradar @ git+https://github.com/PreSenseRadar/OpenRadar.git@65bcd6287af31685acf8b0c32f4505e0f6faab94"
+  "numpy==1.26.4" "scipy==1.11.4" "pyserial==3.5" \
+  "pyqtgraph==0.14.0" "PySide6==6.11.1" "PyOpenGL==3.1.7" \
+  "torch==2.13.0" "scikit-learn==1.6.1" "matplotlib==3.6.3" \
+  "onnx==1.22.0" "joblib==1.5.3" "jupyter==1.1.1" \
+  "jupyterlab==4.6.3" "pytest==7.4.4"
 ```
-
-Git is required because the pinned OpenRadar dependency is installed directly
-from its upstream repository.
 
 PyTorch is platform-specific. On a Jetson with JetPack, prefer NVIDIA's
 supported PyTorch wheel for that JetPack release if GPU inference or training
@@ -89,10 +100,17 @@ driver and JetPack combination.
 
 GPU inference on Jetson additionally uses NVIDIA's TensorRT Python bindings and
 the CUDA runtime bindings. Install the TensorRT packages that match JetPack
-(the application recommends the `python3-libnvinfer` and `libnvinfer-bin` apt
-packages) and install `cuda-python` if `from cuda.bindings import runtime` does
-not import. These packages are optional on non-Jetson hosts, where the
-application uses the PyTorch CPU backend.
+(the audited host uses `python3-libnvinfer` and `libnvinfer-bin`, both at
+10.16.2.10), then install the CUDA binding used by this environment:
+
+```bash
+python -m pip install "cuda-bindings==13.3.1"
+```
+
+The `cuda-python` metapackage is also valid when it supplies the
+`cuda.bindings.runtime` module. TensorRT and CUDA bindings are required when
+`--classification-device cuda` is selected and optional on non-Jetson hosts,
+where the application can use the PyTorch CPU backend.
 
 ## Verify the installation
 
@@ -100,19 +118,58 @@ Check every direct dependency:
 
 ```bash
 python - <<'PY'
+from importlib import metadata
+from pathlib import Path
+import warnings
+
+import joblib
 import matplotlib
 import numpy
 import onnx
-import joblib
 import pyqtgraph
 import pyqtgraph.opengl
 import scipy
 import serial
 import sklearn
 import torch
-import mmwave.dsp
 from OpenGL import GL
 from PySide6 import QtCore, QtWidgets
+from sklearn.exceptions import InconsistentVersionWarning
+
+expected = {
+    "numpy": "1.26.4",
+    "scipy": "1.11.4",
+    "pyserial": "3.5",
+    "pyqtgraph": "0.14.0",
+    "PySide6": "6.11.1",
+    "PyOpenGL": "3.1.7",
+    "torch": "2.13.0",
+    "scikit-learn": "1.6.1",
+    "matplotlib": "3.6.3",
+    "onnx": "1.22.0",
+    "joblib": "1.5.3",
+    "jupyter": "1.1.1",
+    "jupyterlab": "4.6.3",
+    "pytest": "7.4.4",
+}
+for package, wanted in expected.items():
+    found = metadata.version(package)
+    if found != wanted:
+        raise RuntimeError(f"{package}: expected {wanted}, found {found}")
+    print(f"{package}=={found}")
+
+warnings.simplefilter("error", InconsistentVersionWarning)
+joblib.load("model_weights/calibration.joblib")
+
+if Path("/proc/device-tree/model").is_file():
+    from cuda.bindings import runtime as cudart
+    import tensorrt
+    if metadata.version("cuda-bindings") != "13.3.1":
+        raise RuntimeError("Expected cuda-bindings 13.3.1")
+    if tensorrt.__version__ != "10.16.2.10":
+        raise RuntimeError("Expected TensorRT 10.16.2.10")
+    print(f"cuda-bindings=={metadata.version('cuda-bindings')}")
+    print(f"TensorRT=={tensorrt.__version__}")
 
 print("All direct project dependencies imported successfully.")
 print("CUDA available:", torch.cuda.is_available())
@@ -130,7 +187,7 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 Start live capture from the repository root:
 
 ```bash
-python run.py --display combined
+python -m main.run --display point-cloud-micro-doppler
 ```
 
 Start the training notebook:
@@ -140,4 +197,4 @@ jupyter lab classification.ipynb
 ```
 
 For radar wiring, capture modes, calibration, output fields, training, and
-replay details, see [`rawdatacapture/User guide.md`](rawdatacapture/User%20guide.md).
+replay details, see [`Userguide.md`](Userguide.md).
