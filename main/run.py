@@ -340,6 +340,25 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--inference-logging",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Write a per-attempt live inference evaluation JSONL. When "
+            "omitted and classification is enabled, prompt with default no."
+        ),
+    )
+    parser.add_argument(
+        "--inference-log",
+        type=Path,
+        help="Custom evaluation JSONL path; supplying it enables logging.",
+    )
+    parser.add_argument(
+        "--evaluation-label",
+        choices=("drone", "not_drone", "unlabeled"),
+        help="Run-level ground truth; prompts when logging is enabled and omitted.",
+    )
+    parser.add_argument(
         "--raw-output",
         type=Path,
         help="Optional raw ADC output. Raw recording is disabled by default.",
@@ -405,6 +424,46 @@ def choose_live_classification(classification_arg: Optional[bool]) -> bool:
         if choice in {"y", "yes"}:
             return True
         print("Enter y for yes or n for no.")
+
+
+def choose_inference_logging(
+    logging_arg: Optional[bool],
+    log_path: Optional[Path] = None,
+) -> bool:
+    if logging_arg is False and log_path is not None:
+        raise ValueError(
+            "--inference-log cannot be combined with --no-inference-logging"
+        )
+    if log_path is not None:
+        return True
+    if logging_arg is not None:
+        return bool(logging_arg)
+    while True:
+        choice = input(
+            "Enable live inference evaluation log? [y/N]: "
+        ).strip().lower()
+        if choice in {"", "n", "no"}:
+            return False
+        if choice in {"y", "yes"}:
+            return True
+        print("Enter y for yes or n for no.")
+
+
+def choose_evaluation_label(label_arg: Optional[str]) -> str:
+    if label_arg is not None:
+        return label_arg
+    while True:
+        choice = input(
+            "Evaluation ground truth (drone/not_drone/unlabeled) "
+            "[unlabeled]: "
+        ).strip().lower().replace("-", "_")
+        if choice in {"", "unlabeled", "none"}:
+            return "unlabeled"
+        if choice in {"drone", "uav"}:
+            return "drone"
+        if choice in {"not_drone", "notdrone", "non_drone", "others"}:
+            return "not_drone"
+        print("Enter drone, not_drone, or unlabeled.")
 
 
 def choose_dataset_output_directory() -> Path:
@@ -890,6 +949,20 @@ def build_capture_command(
                 str(getattr(args, "classification_device", "auto")),
             )
         )
+        inference_logging = bool(getattr(args, "inference_logging", False))
+        inference_log = getattr(args, "inference_log", None)
+        if inference_logging or inference_log is not None:
+            command.extend(
+                (
+                    "--inference-logging",
+                    "--evaluation-label",
+                    str(getattr(args, "evaluation_label", "unlabeled")),
+                )
+            )
+            if inference_log is not None:
+                command.extend(("--inference-log", str(inference_log)))
+        else:
+            command.append("--no-inference-logging")
     else:
         command.append("--no-classification")
     if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
@@ -1291,7 +1364,17 @@ def run_calibration_mode(
 def main() -> int:
     args = parse_args()
     display = choose_display(args.display)
-    if display == "point-cloud-micro-doppler":
+    if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        if args.inference_logging is True or args.inference_log is not None:
+            print(
+                "Inference logging is unavailable in calibration modes.",
+                file=sys.stderr,
+            )
+            return 2
+        args.classification = False
+        args.inference_logging = False
+        args.evaluation_label = "unlabeled"
+    elif display == "point-cloud-micro-doppler":
         args.classification = choose_live_classification(args.classification)
         if args.processed_output is None:
             args.processed_output = default_processed_output(
@@ -1301,6 +1384,29 @@ def main() -> int:
         # Preserve the historical default outside the newly prompted combined
         # data-collection workflow.
         args.classification = True
+    if args.classification:
+        try:
+            args.inference_logging = choose_inference_logging(
+                args.inference_logging,
+                args.inference_log,
+            )
+        except ValueError as exc:
+            print(f"Invalid inference logging options: {exc}", file=sys.stderr)
+            return 2
+        args.evaluation_label = (
+            choose_evaluation_label(args.evaluation_label)
+            if args.inference_logging
+            else "unlabeled"
+        )
+    else:
+        if args.inference_logging is True or args.inference_log is not None:
+            print(
+                "Inference logging requires classification to be enabled.",
+                file=sys.stderr,
+            )
+            return 2
+        args.inference_logging = False
+        args.evaluation_label = "unlabeled"
     if display == "micro-doppler":
         try:
             args.micro_doppler_range_m = choose_micro_doppler_range_m(
@@ -1337,6 +1443,13 @@ def main() -> int:
         raw_output.parent.mkdir(parents=True, exist_ok=True)
     if not args.classification_artifacts.is_absolute():
         args.classification_artifacts = ROOT / args.classification_artifacts
+    if args.inference_log is not None:
+        args.inference_log = (
+            args.inference_log
+            if args.inference_log.is_absolute()
+            else ROOT / args.inference_log
+        )
+        args.inference_log.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Display mode: {display}")
     duration_text = (
@@ -1352,6 +1465,14 @@ def main() -> int:
             f"enabled ({args.classification_artifacts}, "
             f"device={args.classification_device})"
             if args.classification
+            else "disabled"
+        )
+    )
+    print(
+        "Inference evaluation log: "
+        + (
+            str(args.inference_log or "enabled (timestamped under log/)")
+            if args.inference_logging
             else "disabled"
         )
     )

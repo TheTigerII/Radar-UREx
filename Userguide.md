@@ -475,6 +475,8 @@ Less common direct-receiver controls include:
   corrections from an operational profile without sending it to the radar;
 - `--classification --classification-artifacts PATH` to enable classification
   explicitly and select a non-default artifact directory;
+- `--inference-logging --evaluation-label LABEL` to opt into a timestamped
+  live-inference evaluation log, or `--inference-log PATH` to select its path;
 - `--micro-doppler-range-half-width-bins N` to change the dedicated rotor
   range-gate width;
 - `--static-detection` to explicitly select the default-enabled static branch;
@@ -808,6 +810,80 @@ the records already saved. A 1 MiB userspace write buffer reduces per-frame
 disk overhead, so an abnormal termination may leave the newest buffered
 records unwritten. Processed output is generated even when `--display none`
 is used.
+
+## Optional Live Inference Evaluation Log
+
+Inference evaluation logging is off by default. When classification is enabled,
+the integrated launcher asks:
+
+```text
+Enable live inference evaluation log? [y/N]:
+```
+
+Blank input keeps it disabled and no evaluation file or ground-truth prompt is
+created. Answer `y` and select `drone`, `not_drone`, or `unlabeled` as the truth
+for the complete run. For unattended use:
+
+```powershell
+python main/run.py `
+  --classification `
+  --inference-logging `
+  --evaluation-label drone
+```
+
+The default file is `log/live_inference_<timestamp>.jsonl`. Select another
+location with:
+
+```powershell
+python main/run.py `
+  --classification `
+  --inference-log .\log\outdoor_non_drone.jsonl `
+  --evaluation-label not_drone
+```
+
+Supplying `--inference-log` enables the feature. Do not combine it with
+`--no-inference-logging`. Logging also cannot be enabled with
+`--no-classification`. Direct `livedatacapture.py` never prompts and uses the
+same explicit flags.
+
+The JSONL begins with metadata describing the run, radar frame period,
+classifier/backend, threshold, profile, artifact hashes, and compatibility
+fingerprint. Every inference attempt then records:
+
+- frame index, capture timestamp, processing timestamp, and elapsed times;
+- `p_drone`, predicted label, predicted-class confidence, threshold, status,
+  reason, and correctness when labeled;
+- classification latency and selected target range/source; and
+- the classifier's 48-step history before and after the attempt.
+
+The history metadata identifies append/reset operations, empty/warming/ready
+state, reset reason and timestamp, discarded steps, reset sequence, history
+generation, and frames since reset. Target loss/change, invalid feature/range,
+invalid probability, and inference-error resets therefore remain distinguishable.
+Repeated reset requests while history is already empty are recorded but do not
+claim discarded frames.
+
+On orderly shutdown, a run summary provides ready-decision accuracy, drone and
+non-drone class accuracy, confusion matrix, precision/recall/F1, balanced
+accuracy, coverage, operational correctness, class and unknown durations,
+confidence/latency distributions, Brier score, log loss, temporal segments,
+label changes, and reset/recovery statistics. Drone class accuracy is drone
+recall (`TP / (TP + FN)`); non-drone class accuracy is non-drone recall
+(`TN / (TN + FP)`). Unknown/warm-up attempts are excluded from ready-decision
+accuracy but included in coverage and operational correctness.
+
+An aggregate summary follows the run summary. It uses only completed labeled
+logs in the same directory with matching format, model artifacts, profile,
+threshold, backend, and precision. Both class scores, AUROC, and PR-AUC require
+compatible runs for both truth classes. Unsupported values are `null` with an
+explanation. `unlabeled` runs retain confidence, duration, latency, reset, and
+coverage measurements but are excluded from accuracy aggregation.
+
+Each evaluation line is flushed immediately. A crash can omit the final
+summaries, but all complete inference lines remain readable; incomplete logs
+are not included in later aggregate scores. The 48-frame windows overlap, so
+frame results are correlated. Use the session-majority result alongside
+frame-weighted metrics when comparing runs of different lengths.
 
 ## Optional Raw Frames
 

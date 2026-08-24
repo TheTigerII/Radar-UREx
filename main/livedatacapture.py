@@ -63,6 +63,10 @@ if __package__ in {None, ""}:
         create_inference_engine,
         resolve_classification_device,
     )
+    from main.classification_evaluation import (
+        ClassificationEvaluationLogger,
+        default_inference_log_path,
+    )
 else:
     from .dsp import (
         AdaptiveClutterMap,
@@ -104,6 +108,10 @@ else:
     from .tensorrt_inference import (
         create_inference_engine,
         resolve_classification_device,
+    )
+    from .classification_evaluation import (
+        ClassificationEvaluationLogger,
+        default_inference_log_path,
     )
 
 
@@ -194,6 +202,23 @@ class RotorPostprocessItem:
     save_update: bool
     feature_step: np.ndarray
     rotor_result: MicroDopplerResult
+    captured_at_s: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class ClassificationAttempt:
+    """One inference update plus the history state needed for evaluation."""
+
+    result: InferenceResult
+    valid_steps_before: int
+    latency_s: float
+    reset_requested: bool
+    reset_reason: Optional[str]
+    steps_cleared: int
+    frame_index: int
+    captured_at_s: Optional[float]
+    target_range_m: Optional[float]
+    target_source: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -1573,6 +1598,7 @@ class DisplayPayloadSink:
         rotor_rpm_max: float = DEFAULT_ROTOR_RPM_MAX,
         inference_engine: Optional[DroneBirdInference] = None,
         classification_emit_func: Optional[EmitFunc] = None,
+        evaluation_logger: Optional[ClassificationEvaluationLogger] = None,
         rotor_post_queue: Optional[mp.Queue] = None,
         rotor_post_failure_event: Optional[Any] = None,
         rotor_post_queue_high_water: Optional[Any] = None,
@@ -1682,6 +1708,8 @@ class DisplayPayloadSink:
         self.last_rotor_estimate_time_s: Optional[float] = None
         self.inference_engine = inference_engine
         self.classification_emit = classification_emit_func
+        self.evaluation_logger = evaluation_logger
+        self.current_captured_at_s: Optional[float] = None
         self.latest_classification: Optional[InferenceResult] = (
             inference_engine.unknown("no_target")
             if inference_engine is not None
@@ -1720,6 +1748,7 @@ class DisplayPayloadSink:
         *,
         captured_at_s: Optional[float] = None,
     ) -> None:
+        self.current_captured_at_s = captured_at_s
         if self.calibration_accumulator is not None:
             payload = self.calibration_accumulator.update(range_fft)
             if self.payload_queue is not None:
@@ -1820,6 +1849,7 @@ class DisplayPayloadSink:
                         save_update=publish_update,
                         feature_step=feature_step,
                         rotor_result=frame_result,
+                        captured_at_s=captured_at_s,
                     )
                 )
             elif self.inference_engine is not None:
@@ -1836,6 +1866,7 @@ class DisplayPayloadSink:
                     doppler_cube,
                     range_axis_m,
                     self.micro_doppler_range_m,
+                    target_source="fixed_range_gate",
                 )
             if not publish_update:
                 return
@@ -2192,6 +2223,7 @@ class DisplayPayloadSink:
             target_track,
             target_changed=target_changed,
             defer=True,
+            target_source=point_cloud.target_source,
         )
         if not build_micro_doppler:
             self._finish_deferred_classification(classification_future)
@@ -2267,19 +2299,23 @@ class DisplayPayloadSink:
         *,
         target_changed: bool,
         defer: bool = False,
-    ) -> Optional[Future[InferenceResult]]:
+        target_source: Optional[str] = None,
+    ) -> Optional[Future[ClassificationAttempt]]:
         if target_track is None:
             self.latest_classification_feature = None
             if self.inference_engine is not None:
-                self._set_classification(
-                    self.inference_engine.reset("no_confirmed_target")
+                self._reset_classification(
+                    "no_confirmed_target",
+                    target_source=target_source,
                 )
             return None
         if target_changed:
             self.latest_classification_feature = None
             if self.inference_engine is not None:
-                self._set_classification(
-                    self.inference_engine.reset("target_changed")
+                self._reset_classification(
+                    "target_changed",
+                    target_range_m=target_track.range_m,
+                    target_source=target_source,
                 )
             return None
         return self._classify_fixed_range(
@@ -2287,6 +2323,7 @@ class DisplayPayloadSink:
             range_axis_m,
             target_track.range_m,
             defer=defer,
+            target_source=target_source,
         )
 
     def _classify_fixed_range(
@@ -2296,7 +2333,8 @@ class DisplayPayloadSink:
         target_range_m: Optional[float],
         *,
         defer: bool = False,
-    ) -> Optional[Future[InferenceResult]]:
+        target_source: Optional[str] = None,
+    ) -> Optional[Future[ClassificationAttempt]]:
         self.latest_classification_feature = None
         range_axis = (
             np.asarray(range_axis_m, dtype=np.float64)
@@ -2310,8 +2348,10 @@ class DisplayPayloadSink:
             or not np.isfinite(range_axis).all()
         ):
             if self.inference_engine is not None:
-                self._set_classification(
-                    self.inference_engine.reset("invalid_target_range")
+                self._reset_classification(
+                    "invalid_target_range",
+                    target_range_m=target_range_m,
+                    target_source=target_source,
                 )
             return None
         target_range_bin = int(
@@ -2324,8 +2364,10 @@ class DisplayPayloadSink:
             )
         except (TypeError, ValueError) as exc:
             if self.inference_engine is not None:
-                self._set_classification(
-                    self.inference_engine.reset(f"invalid_feature_step:{exc}")
+                self._reset_classification(
+                    f"invalid_feature_step:{exc}",
+                    target_range_m=target_range_m,
+                    target_source=target_source,
                 )
             return None
         self.latest_classification_feature = feature_step
@@ -2334,33 +2376,116 @@ class DisplayPayloadSink:
                 return self._classification_executor.submit(
                     self._update_feature_step_timed,
                     feature_step,
+                    target_range_m,
+                    target_source,
                 )
-            self._set_classification(
-                self.inference_engine.update_feature_step(feature_step)
+            self._set_classification_attempt(
+                self._update_feature_step_timed(
+                    feature_step,
+                    target_range_m,
+                    target_source,
+                )
             )
         return None
 
     def _update_feature_step_timed(
         self,
         feature_step: np.ndarray,
-    ) -> InferenceResult:
+        target_range_m: Optional[float] = None,
+        target_source: Optional[str] = None,
+    ) -> ClassificationAttempt:
         if self.inference_engine is None:
             raise RuntimeError("Classification engine is unavailable")
+        valid_steps_before = self._inference_valid_steps()
         classification_started = time.perf_counter()
         result = self.inference_engine.update_feature_step(feature_step)
+        latency_s = time.perf_counter() - classification_started
         self.timings.add(
             "classification",
-            time.perf_counter() - classification_started,
+            latency_s,
         )
-        return result
+        reset_requested = bool(
+            result.status != "ready"
+            and result.valid_steps == 0
+            and result.reason != "insufficient_history"
+        )
+        return ClassificationAttempt(
+            result=result,
+            valid_steps_before=valid_steps_before,
+            latency_s=latency_s,
+            reset_requested=reset_requested,
+            reset_reason=result.reason if reset_requested else None,
+            steps_cleared=(valid_steps_before + 1 if reset_requested else 0),
+            frame_index=self.frame_count,
+            captured_at_s=self.current_captured_at_s,
+            target_range_m=target_range_m,
+            target_source=target_source,
+        )
 
     def _finish_deferred_classification(
         self,
-        future: Optional[Future[InferenceResult]],
+        future: Optional[Future[ClassificationAttempt]],
     ) -> None:
         if future is None:
             return
-        self._set_classification(future.result())
+        self._set_classification_attempt(future.result())
+
+    def _reset_classification(
+        self,
+        reason: str,
+        *,
+        target_range_m: Optional[float] = None,
+        target_source: Optional[str] = None,
+    ) -> None:
+        if self.inference_engine is None:
+            return
+        valid_steps_before = self._inference_valid_steps()
+        started = time.perf_counter()
+        result = self.inference_engine.reset(reason)
+        self._set_classification_attempt(
+            ClassificationAttempt(
+                result=result,
+                valid_steps_before=valid_steps_before,
+                latency_s=time.perf_counter() - started,
+                reset_requested=True,
+                reset_reason=reason,
+                steps_cleared=valid_steps_before,
+                frame_index=self.frame_count,
+                captured_at_s=self.current_captured_at_s,
+                target_range_m=target_range_m,
+                target_source=target_source,
+            )
+        )
+
+    def _set_classification_attempt(
+        self,
+        attempt: ClassificationAttempt,
+    ) -> None:
+        result = attempt.result
+        if self.evaluation_logger is not None:
+            self.evaluation_logger.record(
+                result,
+                frame_index=attempt.frame_index,
+                captured_at_s=attempt.captured_at_s,
+                valid_steps_before=attempt.valid_steps_before,
+                reset_requested=attempt.reset_requested,
+                reset_reason=attempt.reset_reason,
+                steps_cleared=attempt.steps_cleared,
+                classification_latency_s=attempt.latency_s,
+                target_range_m=attempt.target_range_m,
+                target_source=attempt.target_source,
+            )
+        self._set_classification(result)
+
+    def _inference_valid_steps(self) -> int:
+        if self.inference_engine is None:
+            return 0
+        value = getattr(self.inference_engine, "valid_steps", None)
+        if isinstance(value, (int, np.integer)):
+            return max(int(value), 0)
+        if self.latest_classification is not None:
+            return max(int(self.latest_classification.valid_steps), 0)
+        return 0
 
     def _set_classification(self, result: InferenceResult) -> None:
         self.latest_classification = result
@@ -4445,6 +4570,48 @@ def _rotor_processing_metadata(
     }
 
 
+def _format_optional_metric(value: Any) -> str:
+    return "n/a" if value is None else f"{float(value):.4f}"
+
+
+def _emit_evaluation_summary(
+    emit_func: EmitFunc,
+    output_path: Path,
+    run_summary: dict[str, Any],
+    aggregate_summary: dict[str, Any],
+) -> None:
+    run_metrics = run_summary.get("metrics", {})
+    aggregate_metrics = aggregate_summary.get("metrics", {})
+    run_resets = run_metrics.get("history_resets", {})
+    run_drone_accuracy = run_metrics.get("drone", {}).get("class_accuracy")
+    run_not_drone_accuracy = run_metrics.get("not_drone", {}).get(
+        "class_accuracy"
+    )
+    aggregate_drone_accuracy = aggregate_metrics.get("drone", {}).get(
+        "class_accuracy"
+    )
+    aggregate_not_drone_accuracy = aggregate_metrics.get("not_drone", {}).get(
+        "class_accuracy"
+    )
+    emit_func(f"Inference evaluation log: {output_path}")
+    emit_func(
+        "Inference evaluation summary: "
+        f"accuracy={_format_optional_metric(run_metrics.get('overall_accuracy'))}, "
+        f"drone={_format_optional_metric(run_drone_accuracy)}, "
+        f"not_drone={_format_optional_metric(run_not_drone_accuracy)}, "
+        f"coverage={_format_optional_metric(run_metrics.get('readiness_coverage'))}, "
+        f"resets={int(run_resets.get('count', 0))}, "
+        f"effective_resets={int(run_resets.get('effective_count', 0))}"
+    )
+    emit_func(
+        "Aggregate inference evaluation: "
+        f"runs={int(aggregate_summary.get('included_runs', 0))}, "
+        f"accuracy={_format_optional_metric(aggregate_metrics.get('overall_accuracy'))}, "
+        f"drone={_format_optional_metric(aggregate_drone_accuracy)}, "
+        f"not_drone={_format_optional_metric(aggregate_not_drone_accuracy)}"
+    )
+
+
 def _run_rotor_postprocessor(
     config: RadarCaptureConfig,
     post_queue: mp.Queue,
@@ -4464,6 +4631,8 @@ def _run_rotor_postprocessor(
     rotor_radius_m: Optional[float],
     rotor_rpm_min: float,
     rotor_rpm_max: float,
+    inference_log: Optional[Path] = None,
+    evaluation_label: str = "unlabeled",
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -4472,8 +4641,11 @@ def _run_rotor_postprocessor(
 
     ready_reported = False
     inference_engine: Optional[Any] = None
+    evaluation_logger: Optional[ClassificationEvaluationLogger] = None
     processed_writer: Optional[ProcessedOutputWriter] = None
     timings = ProcessingTimingStats()
+    termination_status = "completed"
+    previous_valid_steps = 0
     try:
         inference_engine = create_inference_engine(
             classification_artifact_dir,
@@ -4501,6 +4673,20 @@ def _run_rotor_postprocessor(
             ),
             classification_metadata=inference_engine.metadata,
         )
+        if inference_log is not None:
+            evaluation_logger = ClassificationEvaluationLogger(
+                inference_log,
+                ground_truth=evaluation_label,
+                frame_period_s=(
+                    float(config.frame_periodicity_ms) * 1e-3
+                    if config.frame_periodicity_ms is not None
+                    else None
+                ),
+                classifier_metadata=inference_engine.metadata,
+                artifact_dir=classification_artifact_dir,
+                profile_path=classification_profile_path,
+                emit_func=worker_emit,
+            )
         metadata = inference_engine.metadata
         backend = metadata.get("backend", "pytorch")
         device = metadata.get("device", "cpu")
@@ -4533,14 +4719,39 @@ def _run_rotor_postprocessor(
                     f"Unexpected rotor post-processing item: {type(item).__name__}"
                 )
             total_started = time.perf_counter()
+            valid_steps_before = previous_valid_steps
             inference_started = time.perf_counter()
             classification = inference_engine.update_feature_step(
                 item.feature_step
             )
+            previous_valid_steps = int(classification.valid_steps)
+            classification_latency_s = time.perf_counter() - inference_started
             timings.add(
                 "classification",
-                time.perf_counter() - inference_started,
+                classification_latency_s,
             )
+            reset_requested = bool(
+                classification.status != "ready"
+                and classification.valid_steps == 0
+                and classification.reason != "insufficient_history"
+            )
+            if evaluation_logger is not None:
+                evaluation_logger.record(
+                    classification,
+                    frame_index=item.frame_index,
+                    captured_at_s=item.captured_at_s,
+                    valid_steps_before=valid_steps_before,
+                    reset_requested=reset_requested,
+                    reset_reason=(
+                        classification.reason if reset_requested else None
+                    ),
+                    steps_cleared=(
+                        valid_steps_before + 1 if reset_requested else 0
+                    ),
+                    classification_latency_s=classification_latency_s,
+                    target_range_m=item.rotor_result.selected_range_m,
+                    target_source="fixed_range_gate",
+                )
             if item.save_update and processed_writer.enabled:
                 result = item.rotor_result
                 serialization_started = time.perf_counter()
@@ -4571,6 +4782,7 @@ def _run_rotor_postprocessor(
             timings.add("total", time.perf_counter() - total_started)
             _increment_shared_counter(postprocessed_frames_counter)
     except Exception as exc:
+        termination_status = "failed"
         failure_event.set()
         message = (
             "Rotor post-processor failed: "
@@ -4588,6 +4800,16 @@ def _run_rotor_postprocessor(
     finally:
         if processed_writer is not None:
             processed_writer.close()
+        if evaluation_logger is not None:
+            run_summary, aggregate_summary = evaluation_logger.close(
+                termination_status
+            )
+            _emit_evaluation_summary(
+                worker_emit,
+                evaluation_logger.output_path,
+                run_summary,
+                aggregate_summary,
+            )
         if inference_engine is not None and hasattr(inference_engine, "close"):
             inference_engine.close()
         worker_emit(
@@ -4641,6 +4863,8 @@ def _run_frame_processor_impl(
     startup_status_queue: Optional[mp.Queue] = None,
     calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
     calibration_complete_event: Optional[Any] = None,
+    inference_log: Optional[Path] = None,
+    evaluation_label: str = "unlabeled",
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -4653,6 +4877,7 @@ def _run_frame_processor_impl(
         and rotor_post_queue is not None
     )
     inference_engine = None
+    evaluation_logger: Optional[ClassificationEvaluationLogger] = None
     if classification_enabled and not use_rotor_postprocess:
         if (
             classification_artifact_dir is None
@@ -4675,6 +4900,20 @@ def _run_frame_processor_impl(
             f"threshold={inference_engine.threshold:.6f}, "
             "negative_training_class=bionic_bird"
         )
+        if inference_log is not None:
+            evaluation_logger = ClassificationEvaluationLogger(
+                inference_log,
+                ground_truth=evaluation_label,
+                frame_period_s=(
+                    float(config.frame_periodicity_ms) * 1e-3
+                    if config.frame_periodicity_ms is not None
+                    else None
+                ),
+                classifier_metadata=inference_engine.metadata,
+                artifact_dir=classification_artifact_dir,
+                profile_path=classification_profile_path,
+                emit_func=worker_emit,
+            )
 
     raw_writer = RawFrameWriter(raw_output, raw_metadata, config, worker_emit)
     processed_writer = ProcessedOutputWriter(
@@ -4739,6 +4978,7 @@ def _run_frame_processor_impl(
         rotor_rpm_min=rotor_rpm_min,
         rotor_rpm_max=rotor_rpm_max,
         inference_engine=inference_engine,
+        evaluation_logger=evaluation_logger,
         rotor_post_queue=(rotor_post_queue if use_rotor_postprocess else None),
         rotor_post_failure_event=(
             rotor_post_failure_event if use_rotor_postprocess else None
@@ -4816,6 +5056,7 @@ def _run_frame_processor_impl(
         )
 
     try:
+        termination_status = "completed"
         while True:
             frame = frame_queue.get()
             if frame is None:
@@ -4826,6 +5067,7 @@ def _run_frame_processor_impl(
     except KeyboardInterrupt:
         pass
     except Exception as exc:
+        termination_status = "failed"
         if rotor_post_failure_event is not None:
             rotor_post_failure_event.set()
         worker_emit(f"Frame processor stopped after error: {exc!r}")
@@ -4843,6 +5085,16 @@ def _run_frame_processor_impl(
         raw_writer.close()
         processed_writer.close()
         display.close()
+        if evaluation_logger is not None:
+            run_summary, aggregate_summary = evaluation_logger.close(
+                termination_status
+            )
+            _emit_evaluation_summary(
+                worker_emit,
+                evaluation_logger.output_path,
+                run_summary,
+                aggregate_summary,
+            )
         worker_emit(display.format_static_summary())
         worker_emit(display.timings.format_summary())
 
@@ -5178,6 +5430,29 @@ def parse_args() -> argparse.Namespace:
             "Inference device. On Jetson, auto requires the TensorRT CUDA "
             "backend and never silently falls back to CPU."
         ),
+    )
+    parser.add_argument(
+        "--inference-logging",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Write a per-attempt live inference evaluation JSONL. Disabled "
+            "by default; --inference-log also enables it."
+        ),
+    )
+    parser.add_argument(
+        "--inference-log",
+        type=Path,
+        help=(
+            "Evaluation JSONL path. Supplying a path enables inference "
+            "logging; otherwise an enabled log is created under log/."
+        ),
+    )
+    parser.add_argument(
+        "--evaluation-label",
+        choices=("drone", "not_drone", "unlabeled"),
+        default="unlabeled",
+        help="Run-level ground truth used for evaluation metrics.",
     )
     parser.add_argument(
         "--display",
@@ -6056,6 +6331,30 @@ def main() -> None:
                 calibration_type=calibration_type,
                 reference_angle_deg=args.calibration_angle_deg,
             )
+        if args.inference_logging is False and args.inference_log is not None:
+            raise CaptureStartupError(
+                "--inference-log cannot be combined with "
+                "--no-inference-logging"
+            )
+        inference_logging_enabled = bool(
+            args.inference_logging is True or args.inference_log is not None
+        )
+        if inference_logging_enabled and not args.classification:
+            raise CaptureStartupError(
+                "Inference logging requires classification to be enabled"
+            )
+        resolved_inference_log = None
+        if inference_logging_enabled:
+            resolved_inference_log = (
+                _resolve_output_path(args.inference_log)
+                if args.inference_log is not None
+                else default_inference_log_path()
+            )
+            emit(
+                "Inference evaluation logging enabled: "
+                f"path={resolved_inference_log}, "
+                f"ground_truth={args.evaluation_label}"
+            )
         if args.classification and importlib.util.find_spec("torch") is None:
             raise CaptureStartupError(
                 "CNN classification requires PyTorch 2.6 or newer; install "
@@ -6220,6 +6519,8 @@ def main() -> None:
                     ),
                     max(args.rotor_rpm_min, 1.0),
                     max(args.rotor_rpm_max, args.rotor_rpm_min + 1.0),
+                    resolved_inference_log,
+                    args.evaluation_label,
                 ),
                 name="RotorPostProcessor",
             )
@@ -6304,6 +6605,12 @@ def main() -> None:
                 processor_status_queue,
                 calibration_settings,
                 calibration_complete_event,
+                (
+                    None
+                    if use_rotor_postprocess
+                    else resolved_inference_log
+                ),
+                args.evaluation_label,
             ),
             name="RadarFrameProcessor",
         )

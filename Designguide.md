@@ -54,6 +54,7 @@ boundaries are:
 | `main/calibrate.py` | Calibration domain layer. It validates and generates temporary raw-LVDS profiles, accumulates range/channel or angular observations, applies stability gates, serializes calibration reports, atomically updates the operational profile with backups, and supplies the calibration GUI child process. It has no standalone CLI; `run.py` and `livedatacapture.py` integrate it. |
 | `main/inference.py` | Shared CNN feature contract and CPU/PyTorch backend. It creates one `[2, 64]` feature step from a selected three-bin range gate, retains 48 steps, validates the checkpoint/calibration/model-card/profile fingerprint, normalizes the `[2, 48, 64]` window, and returns calibrated `drone`, `not_drone`, or `unknown` results. It has no CLI. |
 | `main/tensorrt_inference.py` | CUDA/TensorRT FP16 backend and device selector. It owns pinned host/device buffers and one CUDA stream, builds or validates the cached engine against ONNX, artifact, profile, TensorRT, and GPU metadata, requires parity within 0.005 probability with no label changes, benchmarks the engine, and implements the same stateful inference interface as the CPU backend. `auto` selects CUDA on Jetson and CPU elsewhere; requested CUDA failures are fatal rather than silently falling back. |
+| `main/classification_evaluation.py` | Optional live-inference evaluation logger. It streams versioned per-attempt JSONL, records the 48-step history lifecycle and reset metadata, computes run-level classification, confidence, duration, latency, stability, and recovery metrics, fingerprints compatible deployments, and aggregates completed labeled logs. It has no CLI and is instantiated by `livedatacapture.py` only when explicitly enabled. |
 
 The primary module dependencies are:
 
@@ -70,7 +71,8 @@ livedatacapture.py
   +-- dsp.py
   +-- calibrate.py
   +-- inference.py
-  `-- tensorrt_inference.py
+  +-- tensorrt_inference.py
+  `-- classification_evaluation.py
 
 dsp.py
   `-- dsp_kernels.py (local FFT and CFAR kernels)
@@ -668,6 +670,48 @@ There is no silent CUDA-to-CPU fallback. In dedicated rotor mode, enabled
 classification and JSON serialization run in `RotorPostProcessor`; in other
 classified modes the frame processor owns the selected backend.
 
+## Optional Live Inference Evaluation
+
+Inference evaluation is independent of the version-5 processed-data writer and
+is disabled by default. The integrated launcher prompts `Enable live inference
+evaluation log? [y/N]:` only after classification has been enabled. Direct
+capture remains non-interactive. `--inference-logging` selects a timestamped
+`log/live_inference_*.jsonl`; `--inference-log PATH` selects a path and also
+enables the feature. `--evaluation-label` supplies the constant run truth as
+`drone`, `not_drone`, or `unlabeled`. Logging without classification, or an
+explicitly disabled log combined with a path, is rejected.
+
+`ClassificationEvaluationLogger` is created in the process that owns
+inference: `RadarFrameProcessor` for normal/deferred modes or
+`RotorPostProcessor` for dedicated rotor mode. It receives results directly,
+not through the one-second-throttled terminal relay. Each valid processing
+attempt therefore produces one flushed JSON line with frame/capture identity,
+probability, predicted confidence, correctness, inference latency, target
+context, and the complete `InferenceResult`.
+
+The nested `history` object records append versus reset, empty/warming/ready
+state, valid steps before and after the operation, reset reason, discarded
+steps, reset sequence, history generation, and attempts since reset. Every
+reset request increments its sequence. A generation changes only when history
+was actually discarded or target ownership changed, so repeated no-target
+resets remain observable without claiming that frames were lost. Capture and
+processing timestamps are both retained; class durations use the configured
+frame period, and resets, unknown outcomes, and frame-index gaps break temporal
+segments.
+
+On orderly worker shutdown the logger appends a run summary and then an
+aggregate summary. Ready labeled decisions supply confusion-matrix accuracy,
+per-class recall/precision/F1, balanced accuracy, Brier score, and log loss;
+coverage and operational correctness separately account for warm-up and
+unknown outcomes. Reset totals, reasons, discarded steps, recovery latency,
+confidence/latency distributions, class durations, transitions, and session
+majority are also recorded. Aggregate input is limited to completed labeled
+logs with the same format, artifact hashes, profile hash, threshold, backend,
+and precision. AUROC and PR-AUC are emitted only after both truth classes are
+available. Missing-support metrics are `null` with an explanation. Because
+each line is flushed, an interrupted file retains its complete observations,
+but without a run summary it is excluded from later aggregation.
+
 ## Processed and Raw Recording
 
 `--processed-output` streams version-5 newline-delimited JSON. Its first record
@@ -708,7 +752,7 @@ space externally.
 
 ## Automated Test Case Reference
 
-The test suite contains 221 cases in `testcodes/`. Run all of them from the
+The test suite contains 233 cases in `testcodes/`. Run all of them from the
 repository root with `QT_QPA_PLATFORM=offscreen python -m pytest -q`. The
 following inventory documents every collected case by file and test class.
 
@@ -853,7 +897,19 @@ following inventory documents every collected case by file and test class.
 - `test_rejects_incompatible_profile_fingerprint` — rejects artifacts trained for a different normalized profile.
 - `test_rejects_old_two_bin_target_gate_contract` — rejects obsolete artifacts using the former two-bin target gate.
 
-### `test_livedatacapture.py` (90 cases)
+### `test_classification_evaluation.py` (4 cases)
+
+`MetricTests`:
+
+- `test_binary_metrics_and_durations_are_calculated` — verifies confusion-matrix, per-class accuracy, and nominal class-duration calculations.
+- `test_unknown_attempt_affects_coverage_not_ready_accuracy` — keeps ready-decision accuracy separate from unknown-outcome coverage and operational correctness.
+
+`EvaluationLoggerTests`:
+
+- `test_stream_contains_history_reset_metadata_and_summaries` — writes reset sequencing, history generations, confidence, latency, and both shutdown summary records.
+- `test_second_compatible_run_aggregates_both_truth_classes` — combines compatible labeled runs and produces both class accuracies and AUROC.
+
+### `test_livedatacapture.py` (91 cases)
 
 `FrameBufferTests`:
 
@@ -883,7 +939,7 @@ following inventory documents every collected case by file and test class.
 
 `RotorPostprocessorTests`:
 
-- `test_postprocessor_preserves_frame_order_and_classification_alignment` — keeps asynchronous classification and serialization aligned with frame order.
+- `test_postprocessor_preserves_frame_order_and_classification_alignment` — keeps asynchronous classification, evaluation logging, and serialization aligned with frame order.
 
 `ProcessedOutputWriterTests`:
 
@@ -949,6 +1005,7 @@ following inventory documents every collected case by file and test class.
 - `test_combined_mode_overlaps_classification_with_micro_doppler` — overlaps classification work with the next combined-mode DSP update.
 - `test_predicted_track_continues_classification_history` — keeps classifier history during association-preserving prediction.
 - `test_confirmed_owner_change_resets_classification_history` — clears history when a genuinely different target takes ownership.
+- `test_history_reset_is_forwarded_to_evaluation_logger` — forwards explicit target changes and engine-originated failures with frame, target context, prior history length, discarded-step count, and reset reason.
 
 `RangeDisplayBoundsTests`:
 
@@ -984,7 +1041,7 @@ following inventory documents every collected case by file and test class.
 - `test_rotor_display_fills_time_gaps_from_nearest_spectrum` — fills display raster gaps using the nearest measured spectrum.
 - `test_gap_aware_series_inserts_nan_at_frame_gap` — inserts NaN separators into analysis series across capture gaps.
 
-### `test_run.py` (34 cases)
+### `test_run.py` (41 cases)
 
 `ChooseDurationMinutesTests`:
 
@@ -1016,6 +1073,16 @@ following inventory documents every collected case by file and test class.
 - `test_yes_enables_classification` — recognizes affirmative interactive input.
 - `test_explicit_cli_value_skips_prompt` — honors an explicit classification flag without prompting.
 
+`ChooseInferenceLoggingTests`:
+
+- `test_blank_input_disables_logging_by_default` — keeps optional inference evaluation off when the prompt is left blank.
+- `test_yes_enables_logging` — enables evaluation logging after an affirmative response.
+- `test_cli_values_skip_prompt` — honors explicit enable/disable flags without prompting.
+- `test_custom_path_enables_logging` — treats an explicit evaluation path as opt-in.
+- `test_custom_path_conflicts_with_explicit_disable` — rejects a path combined with explicit logging disablement.
+- `test_evaluation_label_prompt_normalizes_non_drone` — maps the interactive non-drone spelling to the stored `not_drone` label.
+- `test_explicit_evaluation_label_skips_prompt` — honors a supplied ground-truth label without prompting.
+
 `ChooseDatasetOutputDirectoryTests`:
 
 - `test_blank_input_uses_dataset_root` — stores captures under the dataset root by default.
@@ -1025,7 +1092,7 @@ following inventory documents every collected case by file and test class.
 `CaptureCommandTests`:
 
 - `test_calibration_command_disables_normal_processing` — constructs calibration capture without ordinary detection/classification work.
-- `test_processed_output_is_default_and_raw_output_is_opt_in` — enables processed JSONL by default and raw ADC only when requested.
+- `test_processed_output_is_default_and_raw_output_is_opt_in` — enables processed JSONL by default, keeps inference logging off by default, and forwards explicit evaluation options while raw ADC remains opt-in.
 - `test_rotor_command_forwards_gate_and_estimator_settings` — forwards dedicated rotor range, geometry, and RPM options.
 
 `SubprocessEnvironmentTests`:

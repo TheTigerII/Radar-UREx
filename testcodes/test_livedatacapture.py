@@ -542,6 +542,7 @@ class RotorPostprocessorTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary_directory:
             output_path = Path(temporary_directory) / "processed.jsonl"
+            inference_log = Path(temporary_directory) / "inference.jsonl"
             with (
                 patch(
                     "main.livedatacapture.create_inference_engine",
@@ -568,10 +569,16 @@ class RotorPostprocessorTests(unittest.TestCase):
                     None,
                     500.0,
                     10_700.0,
+                    inference_log,
+                    "not_drone",
                 )
             records = [
                 json.loads(line)
                 for line in output_path.read_text(encoding="utf-8").splitlines()
+            ]
+            inference_records = [
+                json.loads(line)
+                for line in inference_log.read_text(encoding="utf-8").splitlines()
             ]
 
         updates = records[1:]
@@ -586,6 +593,16 @@ class RotorPostprocessorTests(unittest.TestCase):
         self.assertEqual(counter.value, 2)
         self.assertFalse(failure_event.is_set())
         self.assertEqual(status_queue.get_nowait()["state"], "ready")
+        attempts = [
+            record
+            for record in inference_records
+            if record["record_type"] == "inference"
+        ]
+        self.assertEqual([record["frame_index"] for record in attempts], [4, 5])
+        self.assertEqual(
+            [record["target_source"] for record in attempts],
+            ["fixed_range_gate", "fixed_range_gate"],
+        )
 
 
 class ProcessedOutputWriterTests(unittest.TestCase):
@@ -2435,6 +2452,92 @@ class ClassificationIntegrationTests(unittest.TestCase):
 
         engine.reset.assert_called_once_with("target_changed")
         engine.update_feature_step.assert_not_called()
+
+    def test_history_reset_is_forwarded_to_evaluation_logger(self) -> None:
+        engine = Mock()
+        engine.unknown.return_value = self._result()
+        engine.reset.return_value = InferenceResult(
+            label="unknown",
+            p_drone=None,
+            threshold=0.98,
+            status="waiting",
+            reason="target_changed",
+            valid_steps=0,
+        )
+        evaluation_logger = Mock()
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            inference_engine=engine,
+            evaluation_logger=evaluation_logger,
+        )
+        sink.frame_count = 20
+        sink.current_captured_at_s = 10.5
+        sink.latest_classification = InferenceResult(
+            label="unknown",
+            p_drone=None,
+            threshold=0.98,
+            status="waiting",
+            reason="insufficient_history",
+            valid_steps=17,
+        )
+        track = TargetTrack(
+            position_m=(0.0, 2.0, 0.0),
+            velocity_m_per_update=(0.0, 0.0, 0.0),
+            age_updates=10,
+            hits=10,
+            missed_updates=0,
+            confirmed=True,
+        )
+
+        sink._classify_tracked_target(
+            np.zeros((128, 3, 4, 64), dtype=np.complex64),
+            np.arange(64, dtype=np.float32),
+            track,
+            target_changed=True,
+            target_source="dynamic",
+        )
+
+        evaluation_logger.record.assert_called_once()
+        call = evaluation_logger.record.call_args
+        self.assertTrue(call.kwargs["reset_requested"])
+        self.assertEqual(call.kwargs["reset_reason"], "target_changed")
+        self.assertEqual(call.kwargs["steps_cleared"], 17)
+        self.assertEqual(call.kwargs["frame_index"], 20)
+        self.assertEqual(call.kwargs["target_source"], "dynamic")
+
+        engine.update_feature_step.return_value = InferenceResult(
+            label="unknown",
+            p_drone=None,
+            threshold=0.98,
+            status="waiting",
+            reason="invalid_calibrated_probability",
+            valid_steps=0,
+        )
+        sink.latest_classification = InferenceResult(
+            label="unknown",
+            p_drone=None,
+            threshold=0.98,
+            status="waiting",
+            reason="insufficient_history",
+            valid_steps=17,
+        )
+        sink._classify_fixed_range(
+            np.ones((128, 3, 4, 64), dtype=np.complex64),
+            np.arange(64, dtype=np.float32) * 0.2,
+            2.0,
+            target_source="dynamic",
+        )
+
+        internal_reset = evaluation_logger.record.call_args_list[1]
+        self.assertTrue(internal_reset.kwargs["reset_requested"])
+        self.assertEqual(
+            internal_reset.kwargs["reset_reason"],
+            "invalid_calibrated_probability",
+        )
+        self.assertEqual(internal_reset.kwargs["steps_cleared"], 18)
 
 
 class RangeDisplayBoundsTests(unittest.TestCase):

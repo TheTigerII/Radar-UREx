@@ -120,6 +120,45 @@ class ChooseLiveClassificationTests(unittest.TestCase):
             prompt.assert_not_called()
 
 
+class ChooseInferenceLoggingTests(unittest.TestCase):
+    def test_blank_input_disables_logging_by_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_inference_logging(None))
+
+    def test_yes_enables_logging(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_inference_logging(None))
+
+    def test_cli_values_skip_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(run.choose_inference_logging(True))
+            self.assertFalse(run.choose_inference_logging(False))
+            prompt.assert_not_called()
+
+    def test_custom_path_enables_logging(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(
+                run.choose_inference_logging(None, Path("log/custom.jsonl"))
+            )
+            prompt.assert_not_called()
+
+    def test_custom_path_conflicts_with_explicit_disable(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            run.choose_inference_logging(False, Path("log/custom.jsonl"))
+
+    def test_evaluation_label_prompt_normalizes_non_drone(self) -> None:
+        with patch("builtins.input", return_value="non-drone"):
+            self.assertEqual(run.choose_evaluation_label(None), "not_drone")
+
+    def test_explicit_evaluation_label_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertEqual(
+                run.choose_evaluation_label("drone"),
+                "drone",
+            )
+            prompt.assert_not_called()
+
+
 class ChooseDatasetOutputDirectoryTests(unittest.TestCase):
     def test_blank_input_uses_dataset_root(self) -> None:
         with patch("builtins.input", return_value=""):
@@ -251,12 +290,27 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--classification", command)
         self.assertIn("--classification-artifacts", command)
         self.assertIn("--classification-device", command)
+        self.assertIn("--no-inference-logging", command)
         self.assertEqual(
             command[command.index("--classification-device") + 1],
             "auto",
         )
         self.assertNotIn("--raw-output", command)
         self.assertEqual(command[1], "-u")
+
+        args.inference_logging = True
+        args.inference_log = Path("log/evaluation.jsonl")
+        args.evaluation_label = "drone"
+        logging_command = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--inference-logging", logging_command)
+        self.assertIn("--inference-log", logging_command)
+        self.assertIn("log/evaluation.jsonl", logging_command)
+        self.assertIn("--evaluation-label", logging_command)
+        self.assertIn("drone", logging_command)
 
         args.static_detection = False
         disabled_command = run.build_capture_command(
