@@ -12,7 +12,7 @@ from scipy import fft as scipy_fft
 
 OPENRADAR_INSTALL_HINT = (
     "OpenRadar DSP is required. Create the project virtual environment as "
-    "described in 'rawdatacapture/User guide.md', install the capture "
+    "described in 'User guide.md', install the capture "
     "dependencies listed there, and run the application with that "
     "environment's Python."
 )

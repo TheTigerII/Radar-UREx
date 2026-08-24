@@ -20,21 +20,21 @@ PyQtGraph's OpenGL view.
 
 ## Runtime Components
 
-The integrated entry point is `run.py`. It launches two independent programs:
+The integrated entry point is `main/run.py`. It launches two independent programs:
 
 ```text
-run.py
+main/run.py
   +-- livedatacapture.py   UDP receive, frame assembly, DSP, display, raw saving
   +-- startup.py           radar serial control and DCA1000 UDP control
 ```
 
-`run.py` prompts for a duration before initialization (5 minutes by default;
+`main/run.py` prompts for a duration before initialization (5 minutes by default;
 zero means unlimited), starts the capture pipeline first, and waits until it
 reports that the UDP receiver is listening before starting the hardware
 controller. The readiness wait also covers initialization of the selected
 display, frame processor, and optional rotor post-processor; its timeout is
 extended for CUDA/TensorRT startup. When the deadline expires or Ctrl+C is
-pressed, `run.py` stops `startup.py` first so `sensorStop` and DCA1000
+pressed, `main/run.py` stops `startup.py` first so `sensorStop` and DCA1000
 `RECORD_STOP` are attempted before capture is closed.
 
 The programs can also be run manually in two terminals. `startup.py` does not
@@ -181,12 +181,12 @@ two-lane IQ conversion. Configuring any LVDS lane count other than two raises
 
 ## Calibration Workflow
 
-`run.py` implements three calibration modes: `calibration` for range bias and
+`main/run.py` implements three calibration modes: `calibration` for range bias and
 12 physical TX/RX channel coefficients, plus `azimuth-calibration` and
 `elevation-calibration` for host-side angular offsets. All require four RX
 channels and one chirp for each physical TX1, TX2, and TX3. The default source
 is `profiles/profile_calibration.cfg`; the operational profile to update is
-the normal `--config`, which defaults to `rawdatacapture/profile.cfg`.
+the normal `--config`, which defaults to `profiles/profile.cfg`.
 
 The launcher never programs the source calibration file directly. It creates a
 temporary runtime profile that disables UART GUI output and firmware-side range
@@ -486,7 +486,7 @@ samples, while avoiding that duplicate batched FFT.
 `--raw-output` writes only complete valid frames, consecutively and without
 DCA1000 headers. At normal shutdown a JSON sidecar records dimensions, sample
 format, processing parameters, counts, and paths. An explicit `--raw-metadata`
-overrides the sidecar name. Integrated `run.py` enables processed output by
+overrides the sidecar name. Integrated `main/run.py` enables processed output by
 default and leaves raw recording disabled unless `--raw-output` is supplied.
 
 Terminal messages are appended to `livedatacapture.log` by default. Raw files
@@ -506,7 +506,7 @@ space externally.
 - Range FFT includes the full complex FFT rather than selecting only a
   physically useful half-spectrum.
 - The point cloud is a diagnostic visualization, not precision metrology.
-- `startup.py` cannot itself run `livedatacapture.py`; use `run.py` or two
+- `startup.py` cannot itself run `livedatacapture.py`; use `main/run.py` or two
   terminals.
 - Logs and raw captures grow until stopped or the filesystem fills.
 

@@ -1,6 +1,6 @@
 # Live Raw ADC Capture User Guide
 
-This guide explains `livedatacapture.py` and the integrated `run.py` launcher
+This guide explains `livedatacapture.py` and the integrated `main/run.py` launcher
 for an IWR6843ISK-ODS connected to a DCA1000EVM.
 
 ## Prerequisites
@@ -64,7 +64,7 @@ Off-Jetson CPU drone/not-drone classification requires PyTorch 2.6 or newer and
 below version 3. Jetson CUDA classification uses TensorRT and does not require
 PyTorch. Combined point-cloud + micro-Doppler mode asks whether to enable
 classification, with **no** as the default. Install Jupyter as well when using
-`classification.ipynb`:
+`machinelearning/classification.ipynb`:
 
 ```bash
 .venv/bin/python -m pip install jupyter matplotlib "torch>=2.6,<3"
@@ -81,7 +81,7 @@ use its platform-specific command when it differs from the generic command
 above. The notebook stores outputs from its last Colab training run, but opening
 it does not execute any cell. Its first code cell mounts Google Drive and should
 be skipped outside Colab. Training starts only when the data and training cells
-are run manually. Off Jetson, use `run.py --no-classification` when capture is
+are run manually. Off Jetson, use `main/run.py --no-classification` when capture is
 needed without PyTorch.
 
 The notebook uses only native IWR6843 feature captures. Place UAV capture
@@ -131,10 +131,10 @@ micro-Doppler image in one window.
 ## Recommended: Integrated Run
 
 ```powershell
-.venv\Scripts\python run.py
+.venv\Scripts\python main/run.py
 ```
 
-`run.py`:
+`main/run.py`:
 
 1. Prompts for a display mode unless `--display` is supplied.
 2. Prompts for a run duration in minutes. Press Enter for the 5-minute default,
@@ -145,7 +145,7 @@ micro-Doppler image in one window.
    classification (default: no), then asks whether to save the timestamped
    JSONL under `dataset/uav`, `dataset/others`, or `dataset` (default: dataset).
    Other display modes enable classification by default and retain the
-   timestamped `rawdatacapture\captures` output default; pass
+   timestamped `calibrationoutput` output default; pass
    `--no-classification` when that is not wanted. Raw ADC recording is disabled
    unless `--raw-output` is explicitly given.
 6. When enabled, runs the trained CNN after 48 consecutive valid tracked
@@ -159,24 +159,24 @@ micro-Doppler image in one window.
 Choose a display without prompting:
 
 ```powershell
-python run.py --display none
-python run.py --display range
-python run.py --display range-doppler
-python run.py --display point-cloud
-python run.py --display point-cloud-micro-doppler
+python main/run.py --display none
+python main/run.py --display range
+python main/run.py --display range-doppler
+python main/run.py --display point-cloud
+python main/run.py --display point-cloud-micro-doppler
 ```
 
 Temporarily zoom a live display to the first 0.5 m with:
 
 ```powershell
-python run.py --display range --max-range-m 0.5
+python main/run.py --display range --max-range-m 0.5
 ```
 
 Skip the duration prompt with an explicit value:
 
 ```powershell
-python run.py --duration-minutes 5
-python run.py --duration-minutes 0
+python main/run.py --duration-minutes 5
+python main/run.py --duration-minutes 0
 ```
 
 The second command runs without a time limit.
@@ -184,11 +184,11 @@ The second command runs without a time limit.
 Specify the radar UART if automatic detection is wrong:
 
 ```powershell
-python run.py --radar-port COM4
+python main/run.py --radar-port COM4
 ```
 
 ```bash
-python3 run.py --radar-port /dev/ttyUSB0
+python3 main/run.py --radar-port /dev/ttyUSB0
 ```
 
 All display modes default to processing every valid frame. Override this with
@@ -204,10 +204,10 @@ angular calibration so the latter can import the operational profile's channel
 corrections.
 
 ```powershell
-python run.py --display calibration --calibration-distance-m 1.0
-python run.py --display azimuth-calibration `
+python main/run.py --display calibration --calibration-distance-m 1.0
+python main/run.py --display azimuth-calibration `
   --calibration-distance-m 1.0 --calibration-angle-deg 0
-python run.py --display elevation-calibration `
+python main/run.py --display elevation-calibration `
   --calibration-distance-m 1.0 --calibration-angle-deg 0
 ```
 
@@ -240,7 +240,7 @@ This starts UDP capture without model loading, but does not configure or start
 the hardware:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --no-classification
+python main\livedatacapture.py --no-classification
 ```
 
 Its defaults are `mmwave.json`, `setup.json`, host `192.168.33.30`, UDP port
@@ -248,16 +248,16 @@ Its defaults are `mmwave.json`, `setup.json`, host `192.168.33.30`, UDP port
 queue, and a requested 4 MiB socket receive buffer. The operating system may
 grant a different receive-buffer size; the actual value is printed.
 
-Unlike combined mode in `run.py`, standalone `livedatacapture.py` enables
+Unlike combined mode in `main/run.py`, standalone `livedatacapture.py` enables
 classification by default. Omitting `--no-classification` therefore requires a
 complete compatible model bundle and a `--config` whose normalized fingerprint
-matches it. The repository artifacts match `rawdatacapture/profile.cfg`, not
+matches it. The repository artifacts match `profiles/profile.cfg`, not
 the standalone receiver's default `mmwave.json`.
 
 The integrated launcher exposes all three buffering controls:
 
 ```powershell
-python run.py `
+python main/run.py `
   --socket-recv-buffer 4194304 `
   --packet-queue-size 8192 `
   --processing-queue-size 32
@@ -266,9 +266,9 @@ python run.py `
 Use the same config that programmed the radar:
 
 ```powershell
-python rawdatacapture\livedatacapture.py `
-  --config .\rawdatacapture\profile.cfg `
-  --setup .\rawdatacapture\setup.json `
+python main\livedatacapture.py `
+  --config .\profiles\profile.cfg `
+  --setup .\profiles\setup.json `
   --no-classification
 ```
 
@@ -280,7 +280,7 @@ is not supported.
 ### Range profile
 
 ```powershell
-python rawdatacapture\livedatacapture.py --display range
+python main\livedatacapture.py --display range
 ```
 
 The plot is average range-FFT magnitude over chirps and receivers. Its X-axis
@@ -288,8 +288,8 @@ uses meters when sample rate and frequency slope are available; otherwise it
 falls back to bin numbers. The displayed X limit defaults to 10 m:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --display range --max-range-m 10
-python rawdatacapture\livedatacapture.py --display range --max-range-m 0
+python main\livedatacapture.py --display range --max-range-m 10
+python main\livedatacapture.py --display range --max-range-m 0
 ```
 
 Zero selects the full computed axis.
@@ -297,7 +297,7 @@ Zero selects the full computed axis.
 ### Range-Doppler heatmap
 
 ```powershell
-python rawdatacapture\livedatacapture.py --display range-doppler
+python main\livedatacapture.py --display range-doppler
 ```
 
 The Y-axis is centered Doppler-bin index, not calibrated velocity. Processing
@@ -307,7 +307,7 @@ and receivers.
 ### Point cloud
 
 ```powershell
-python rawdatacapture\livedatacapture.py --display point-cloud
+python main\livedatacapture.py --display point-cloud
 ```
 
 The diagnostic point cloud has parallel moving-target and static-change paths.
@@ -371,14 +371,14 @@ The software OS-CFAR requested probability of false alarm defaults to
 
 Use `--max-range-m` to change the shared range limit for any display.
 `--point-cloud-fov-deg` changes the point-cloud half-FOV when invoking
-`livedatacapture.py` directly; the integrated `run.py` launcher currently uses
+`livedatacapture.py` directly; the integrated `main/run.py` launcher currently uses
 the receiver's ±60-degree default.
 
 Use `--cluster-eps-m` and `--cluster-min-samples` to tune DBSCAN. Set
 `--cluster-eps-m 0` to disable cluster-center generation:
 
 ```powershell
-python run.py --display point-cloud --cluster-eps-m 0.4 --cluster-min-samples 3
+python main/run.py --display point-cloud --cluster-eps-m 0.4 --cluster-min-samples 3
 ```
 
 The clutter-map warm-up update rate defaults to `0.02`, and its minimum
@@ -403,13 +403,13 @@ cells.
 Disable the static branch without changing the moving-target path with:
 
 ```powershell
-python run.py --display point-cloud --no-static-detection
+python main/run.py --display point-cloud --no-static-detection
 ```
 
 ### Point cloud with micro-Doppler
 
 ```powershell
-python run.py --display point-cloud-micro-doppler
+python main/run.py --display point-cloud-micro-doppler
 ```
 
 This mode places the 3D point cloud and a rolling 150-window micro-Doppler
@@ -452,10 +452,10 @@ important than simultaneous 3D tracking. It skips angle processing but retains
 the active profile's three-TX TDM schedule and processes each TX independently:
 
 ```powershell
-python run.py --display micro-doppler --micro-doppler-range-m 2.15 `
+python main/run.py --display micro-doppler --micro-doppler-range-m 2.15 `
   --rotor-blades 2 --rotor-count 1 --rotor-radius-m 0.05 `
   --rotor-rpm-min 1000 --rotor-rpm-max 10700 `
-  --raw-output .\rawdatacapture\captures\rotor.bin
+  --raw-output .\calibrationoutput\rotor.bin
 ```
 
 The default rotor model is two blades with a maximum search speed of
@@ -472,7 +472,7 @@ estimator.
 
 The fixed range gate is required because this mode intentionally skips point
 cloud detection and tracking. When option 6 is selected interactively,
-`run.py` prompts for the gate and defaults to 2.15 m. Its default half width is
+`main/run.py` prompts for the gate and defaults to 2.15 m. Its default half width is
 one bin, giving a three-bin gate. Each 16-loop Hann window has its weighted
 complex mean removed before the FFT, suppressing the stationary body return.
 The live plot displays power relative to a robust per-window floor over 0 to
@@ -540,7 +540,7 @@ modes; calibration modes write their separate JSON report instead. Override a
 normal capture path with:
 
 ```powershell
-python run.py --processed-output .\rawdatacapture\captures\processed.jsonl
+python main/run.py --processed-output .\calibrationoutput\processed.jsonl
 ```
 
 The first JSONL record declares format version 5 and contains the radar
@@ -600,8 +600,8 @@ is used.
 ## Optional Raw Frames
 
 ```powershell
-python rawdatacapture\livedatacapture.py `
-  --raw-output .\rawdatacapture\captures\test_capture.bin
+python main\livedatacapture.py `
+  --raw-output .\calibrationoutput\test_capture.bin
 ```
 
 Only valid complete frames are written, without DCA1000 headers. The default
@@ -609,17 +609,17 @@ metadata path is `test_capture.bin.json`; override it with `--raw-metadata`.
 The sidecar is written during clean shutdown.
 
 Raw recording is opt-in because its files are much larger than processed JSONL
-output. Files have no size limit. A `run.py` session is limited to 5 minutes by
-default, but `livedatacapture.py` alone and `run.py --duration-minutes 0` run
+output. Files have no size limit. A `main/run.py` session is limited to 5 minutes by
+default, but `livedatacapture.py` alone and `main/run.py --duration-minutes 0` run
 until stopped.
 
 ## Logging and Statistics
 
-Terminal output is appended to `rawdatacapture\livedatacapture.log` by default:
+Terminal output is appended to `log\livedatacapture.log` by default:
 
 ```powershell
-python rawdatacapture\livedatacapture.py `
-  --log-file .\rawdatacapture\capture_run.log
+python main\livedatacapture.py `
+  --log-file .\log\capture_run.log
 ```
 
 Important counters are:
@@ -696,7 +696,7 @@ cannot reliably report network packet loss.
 
 ## Shutdown
 
-Press Ctrl+C. With `run.py`, the startup process is stopped first, followed by
+Press Ctrl+C. With `main/run.py`, the startup process is stopped first, followed by
 the capture process. The frame processor ignores the parent SIGINT and stops
 only after the queue sentinel, so every frame queued before shutdown is
 drained. Clean capture shutdown closes the socket, child processes, queues,
@@ -705,5 +705,5 @@ raw file, metadata sidecar, and log file.
 Show all receiver options with:
 
 ```powershell
-python rawdatacapture\livedatacapture.py --help
+python main\livedatacapture.py --help
 ```

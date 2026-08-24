@@ -12,14 +12,14 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from inference import InferenceResult
-from rawdatacapture.dsp import (
+from main.inference import InferenceResult
+from main.dsp import (
     MicroDopplerResult,
     RotorEstimate,
     _points_are_within_fov,
 )
 
-from rawdatacapture.livedatacapture import (
+from main.livedatacapture import (
     CaptureStats,
     CapturedFrame,
     CombinedDisplayPayload,
@@ -194,15 +194,15 @@ class FrameDiagnosticsTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.frame_bytes_to_radar_cube",
+                "main.livedatacapture.frame_bytes_to_radar_cube",
                 return_value=radar_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_range_fft",
+                "main.livedatacapture.compute_range_fft",
                 return_value=range_fft,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_range_profile"
+                "main.livedatacapture.compute_range_profile"
             ) as range_profile,
         ):
             process_complete_frame(
@@ -298,7 +298,7 @@ class RotorDisplayPayloadSinkTests(unittest.TestCase):
         self,
     ) -> None:
         config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile.cfg")
+            Path(__file__).resolve().parent.parent / "profiles" / "profile.cfg"
         )
         payload_queue = queue.Queue(maxsize=1)
         sink = DisplayPayloadSink(
@@ -324,7 +324,7 @@ class RotorDisplayPayloadSinkTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "compute_rotor_micro_doppler_frame",
                 return_value=frame_result,
             ) as rotor_dsp,
@@ -342,13 +342,13 @@ class RotorDisplayPayloadSinkTests(unittest.TestCase):
 
     def test_rotor_frame_worker_initializes_with_three_tx_profile(self) -> None:
         config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile.cfg")
+            Path(__file__).resolve().parent.parent / "profiles" / "profile.cfg"
         )
         frame_queue = queue.Queue()
         frame_queue.put(None)
         log_queue = queue.Queue()
 
-        with patch("rawdatacapture.livedatacapture.signal.signal"):
+        with patch("main.livedatacapture.signal.signal"):
             _run_frame_processor(
                 config=config,
                 frame_queue=frame_queue,
@@ -402,7 +402,7 @@ class RotorDisplayPayloadSinkTests(unittest.TestCase):
 
     def test_rotor_frame_worker_processes_three_tx_frame(self) -> None:
         config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile.cfg")
+            Path(__file__).resolve().parent.parent / "profiles" / "profile.cfg"
         )
         frame_queue = queue.Queue()
         frame_queue.put(
@@ -420,7 +420,7 @@ class RotorDisplayPayloadSinkTests(unittest.TestCase):
             get_lock=lambda: threading.Lock(),
         )
 
-        with patch("rawdatacapture.livedatacapture.signal.signal"):
+        with patch("main.livedatacapture.signal.signal"):
             _run_frame_processor(
                 config=config,
                 frame_queue=frame_queue,
@@ -511,7 +511,7 @@ class RotorPostprocessorTests(unittest.TestCase):
                 pass
 
         config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile.cfg")
+            Path(__file__).resolve().parent.parent / "profiles" / "profile.cfg"
         )
         result = MicroDopplerResult(
             raw_spectrogram_db=np.ones((128, 1), dtype=np.float32),
@@ -544,10 +544,10 @@ class RotorPostprocessorTests(unittest.TestCase):
             output_path = Path(temporary_directory) / "processed.jsonl"
             with (
                 patch(
-                    "rawdatacapture.livedatacapture.create_inference_engine",
+                    "main.livedatacapture.create_inference_engine",
                     return_value=FakeInference(),
                 ),
-                patch("rawdatacapture.livedatacapture.signal.signal"),
+                patch("main.livedatacapture.signal.signal"),
             ):
                 _run_rotor_postprocessor(
                     config,
@@ -702,7 +702,7 @@ class ProcessedOutputWriterTests(unittest.TestCase):
 
     def test_writes_structured_rotor_micro_doppler_result(self) -> None:
         config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile.cfg")
+            Path(__file__).resolve().parent.parent / "profiles" / "profile.cfg"
         )
         result = MicroDopplerResult(
             raw_spectrogram_db=np.ones((4, 2), dtype=np.float32) * 1.2345,
@@ -1272,19 +1272,19 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=clusters,
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "compute_per_tx_micro_doppler_spectrogram",
                 return_value=np.arange(12, dtype=np.float32).reshape(4, 3),
             ) as short_time_micro_doppler,
@@ -1392,23 +1392,23 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=dynamic_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=static_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=dynamic_clusters,
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "cluster_point_cloud_with_labels",
                 return_value=(
                     static_clusters,
@@ -1459,23 +1459,23 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=dynamic_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=static_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=dynamic_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "cluster_point_cloud_with_labels",
                 return_value=(static_clusters, static_labels),
             ),
@@ -1513,19 +1513,19 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=static_point,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=empty_points,
             ),
         ):
@@ -1564,11 +1564,11 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 side_effect=[
                     dynamic_points,
                     dynamic_points,
@@ -1578,7 +1578,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 ],
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 side_effect=[
                     dynamic_clusters,
                     dynamic_clusters,
@@ -1588,7 +1588,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 ],
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 side_effect=[
                     empty_static,
                     empty_static,
@@ -1641,19 +1641,19 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=static_point,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=empty_points,
             ),
         ):
@@ -1689,19 +1689,19 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=static_point,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=empty_points,
             ),
         ):
@@ -1749,23 +1749,23 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=static_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "cluster_point_cloud_with_labels",
                 return_value=(
                     static_clusters,
@@ -1801,19 +1801,19 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=clusters,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
             ) as static_point_cloud,
         ):
             payload, _cube = sink._compute_point_cloud_payload(
@@ -1839,19 +1839,19 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=empty_static_points,
             ) as static_point_cloud,
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=empty_points,
             ),
         ):
@@ -1885,22 +1885,22 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
             ) as static_point_cloud,
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "cluster_point_cloud_with_labels",
             ) as static_clustering,
         ):
@@ -1943,23 +1943,23 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.livedatacapture.compute_range_doppler_fft",
+                "main.livedatacapture.compute_range_doppler_fft",
                 return_value=doppler_cube,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_point_cloud",
+                "main.livedatacapture.compute_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.cluster_point_cloud",
+                "main.livedatacapture.cluster_point_cloud",
                 return_value=empty_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture.compute_static_point_cloud",
+                "main.livedatacapture.compute_static_point_cloud",
                 return_value=static_points,
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "cluster_point_cloud_with_labels",
                 return_value=(
                     local_cluster,
@@ -2030,7 +2030,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 ),
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "compute_per_tx_micro_doppler_spectrogram",
                 return_value=spectra,
             ),
@@ -2105,7 +2105,7 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
                 ),
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "compute_per_tx_micro_doppler_spectrogram",
                 return_value=spectra,
             ),
@@ -2354,7 +2354,7 @@ class ClassificationIntegrationTests(unittest.TestCase):
                     return_value=(point_cloud, doppler_cube),
                 ),
                 patch(
-                    "rawdatacapture.livedatacapture."
+                    "main.livedatacapture."
                     "compute_per_tx_micro_doppler_spectrogram",
                     side_effect=micro_doppler,
                 ),
@@ -2587,7 +2587,7 @@ class MicroDopplerDisplayTests(unittest.TestCase):
         self,
     ) -> None:
         config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile.cfg")
+            Path(__file__).resolve().parent.parent / "profiles" / "profile.cfg"
         )
         slow_time_interval_s = float(config.slow_time_interval_s)
         window_span_s = (
@@ -2652,7 +2652,7 @@ class MicroDopplerDisplayTests(unittest.TestCase):
         np.testing.assert_array_equal(colored[0, 4, :3], lookup_table[-1])
         np.testing.assert_array_equal(colored[:, :, 3], 255)
 
-    @patch("rawdatacapture.livedatacapture._run_rotor_pyqtgraph_display")
+    @patch("main.livedatacapture._run_rotor_pyqtgraph_display")
     def test_rotor_display_process_dispatches_to_pyqtgraph(
         self,
         rotor_renderer: Mock,
@@ -2685,7 +2685,7 @@ class MicroDopplerDisplayTests(unittest.TestCase):
             startup_status_queue,
         )
 
-    @patch("rawdatacapture.livedatacapture._run_pyqtgraph_display")
+    @patch("main.livedatacapture._run_pyqtgraph_display")
     def test_range_display_process_dispatches_to_pyqtgraph(
         self,
         renderer: Mock,
@@ -2758,7 +2758,7 @@ class MicroDopplerDisplayTests(unittest.TestCase):
 
     def test_rotor_dependency_error_explains_missing_pyqtgraph(self) -> None:
         with patch(
-            "rawdatacapture.livedatacapture.importlib.util.find_spec",
+            "main.livedatacapture.importlib.util.find_spec",
             return_value=None,
         ):
             message = _display_dependency_error(ROTOR_DISPLAY_MODE)
@@ -2769,16 +2769,16 @@ class MicroDopplerDisplayTests(unittest.TestCase):
     def test_rotor_dependency_error_explains_missing_xcb_cursor(self) -> None:
         with (
             patch(
-                "rawdatacapture.livedatacapture.importlib.util.find_spec",
+                "main.livedatacapture.importlib.util.find_spec",
                 return_value=object(),
             ),
             patch(
-                "rawdatacapture.livedatacapture."
+                "main.livedatacapture."
                 "_bundled_xcb_cursor_library",
                 return_value=None,
             ),
             patch(
-                "rawdatacapture.livedatacapture.sys.platform",
+                "main.livedatacapture.sys.platform",
                 "linux",
             ),
             patch("ctypes.util.find_library", return_value=None),

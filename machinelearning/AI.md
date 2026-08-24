@@ -2,15 +2,15 @@
 
 ## Purpose and source of truth
 
-`classification.ipynb` trains the binary micro-Doppler classifier used by
-`inference.py`. The classifier answers one question for a consistently selected
+`machinelearning/classification.ipynb` trains the binary micro-Doppler classifier used by
+`main/inference.py`. The classifier answers one question for a consistently selected
 radar target: is the current 48-frame feature window a UAV (`1`) or something
 else (`0`)? Live inference exposes those classes as `drone` and `not_drone`,
 with `unknown` used while history is incomplete or an input is invalid.
 
 The notebook owns dataset ingestion, splitting, normalization, training,
 calibration, evaluation, and artifact export. It deliberately imports the
-feature constants and model builder from `inference.py`; this keeps training and
+feature constants and model builder from `main/inference.py`; this keeps training and
 deployment on the same tensor contract and CNN implementation.
 
 ## End-to-end architecture
@@ -69,7 +69,7 @@ shapes are rejected.
 
 When provided, the loader validates `feature_version`,
 `target_gate_range_bins`, and `compatible_profile_sha256` against the deployed
-feature contract and `rawdatacapture/profile.cfg`. Each source file is hashed
+feature contract and `profiles/profile.cfg`. Each source file is hashed
 and recorded in a dataset manifest.
 
 ## Split and preprocessing
@@ -174,7 +174,7 @@ Copy all five files into `model_weights/` before live classification. The
 launcher uses `model_weights/` by default; `--classification-artifacts` can
 override it.
 
-On Jetson Orin Nano, `tensorrt_inference.py` validates the deployment artifacts
+On Jetson Orin Nano, `main/tensorrt_inference.py` validates the deployment artifacts
 and live radar profile, builds a device-specific fixed-shape TensorRT FP16
 engine from ONNX once, verifies its probabilities and decisions against the
 parity artifact, then caches the engine. Live inference uses persistent pinned
@@ -183,7 +183,7 @@ scikit-learn calibrator and threshold after the GPU logit. Training, PyTorch,
 and ONNX export do not run on the Jetson.
 
 Off Jetson, or when `--classification-device cpu` is explicitly selected,
-`inference.py` reconstructs the PyTorch CNN from the state file and applies the
+`main/inference.py` reconstructs the PyTorch CNN from the state file and applies the
 same normalization, calibration, and threshold on CPU.
 
 ## Dataset requirements and evaluation warning

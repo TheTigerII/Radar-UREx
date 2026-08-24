@@ -4,12 +4,12 @@ from pathlib import Path
 
 import numpy as np
 
-from rawdatacapture import calibrate
-from rawdatacapture.dsp import (
+from main import calibrate
+from main.dsp import (
     _apply_host_angle_calibration,
     build_virtual_antenna_grids,
 )
-from rawdatacapture.livedatacapture import (
+from main.livedatacapture import (
     RadarCaptureConfig,
     _with_host_compensation,
 )
@@ -71,7 +71,7 @@ class CalibrationProfileTests(unittest.TestCase):
             )
 
     def test_angular_runtime_keeps_firmware_neutral_and_imports_host_compensation(self) -> None:
-        operational = ROOT / "rawdatacapture" / "profile.cfg"
+        operational = ROOT / "profiles" / "profile.cfg"
         source_command = next(
             line.strip()
             for line in CALIBRATION_PROFILE.read_text(encoding="utf-8").splitlines()
@@ -393,7 +393,7 @@ class CalibrationApplyTests(unittest.TestCase):
             max_magnitude_cv=0.01,
             tx_order=(1, 4, 2),
         )
-        operational = ROOT / "rawdatacapture" / "profile.cfg"
+        operational = ROOT / "profiles" / "profile.cfg"
         with tempfile.TemporaryDirectory() as directory:
             profile = Path(directory) / "profile.cfg"
             profile.write_bytes(operational.read_bytes())
@@ -405,7 +405,7 @@ class CalibrationApplyTests(unittest.TestCase):
             )
 
     def test_angular_apply_preserves_other_axis_and_is_parsed_by_normal_dsp(self) -> None:
-        operational = ROOT / "rawdatacapture" / "profile.cfg"
+        operational = ROOT / "profiles" / "profile.cfg"
         with tempfile.TemporaryDirectory() as directory:
             profile = Path(directory) / "profile.cfg"
             profile.write_bytes(operational.read_bytes())

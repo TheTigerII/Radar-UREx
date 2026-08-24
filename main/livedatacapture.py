@@ -22,7 +22,7 @@ if __package__ in {None, ""}:
     repository_root = str(Path(__file__).resolve().parent.parent)
     if repository_root not in sys.path:
         sys.path.insert(0, repository_root)
-    from rawdatacapture.dsp import (
+    from main.dsp import (
         AdaptiveClutterMap,
         DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
         DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
@@ -49,8 +49,21 @@ if __package__ in {None, ""}:
         range_resolution_m,
         static_target_protection_mask,
     )
-    from rawdatacapture import calibrate as radar_calibration
-    from rawdatacapture.openradar_backend import validate_openradar_backend
+    from main import calibrate as radar_calibration
+    from main.openradar_backend import validate_openradar_backend
+    from main.inference import (
+        DOPPLER_BINS,
+        FEATURE_VERSION,
+        TARGET_GATE_BINS,
+        WINDOW_STEPS,
+        DroneBirdInference,
+        InferenceResult,
+        doppler_cube_to_feature_step,
+    )
+    from main.tensorrt_inference import (
+        create_inference_engine,
+        resolve_classification_device,
+    )
 else:
     from .dsp import (
         AdaptiveClutterMap,
@@ -81,20 +94,19 @@ else:
     )
     from . import calibrate as radar_calibration
     from .openradar_backend import validate_openradar_backend
-
-from inference import (
-    DOPPLER_BINS,
-    FEATURE_VERSION,
-    TARGET_GATE_BINS,
-    WINDOW_STEPS,
-    DroneBirdInference,
-    InferenceResult,
-    doppler_cube_to_feature_step,
-)
-from tensorrt_inference import (
-    create_inference_engine,
-    resolve_classification_device,
-)
+    from .inference import (
+        DOPPLER_BINS,
+        FEATURE_VERSION,
+        TARGET_GATE_BINS,
+        WINDOW_STEPS,
+        DroneBirdInference,
+        InferenceResult,
+        doppler_cube_to_feature_step,
+    )
+    from .tensorrt_inference import (
+        create_inference_engine,
+        resolve_classification_device,
+    )
 
 
 # Default DCA1000 network parameters.
@@ -107,12 +119,13 @@ UINT32_MODULO = 2**32
 SOCKET_TIMEOUT_SECONDS = 0.5
 DEFAULT_PACKET_QUEUE_SIZE = 8192
 DEFAULT_PROCESSING_QUEUE_SIZE = 32
-DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
-DEFAULT_CONFIG_PATH = Path(__file__).with_name("mmwave.json")
-DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+PROFILES_DIR = REPOSITORY_ROOT / "profiles"
+DEFAULT_LOG_PATH = REPOSITORY_ROOT / "log" / "livedatacapture.log"
+DEFAULT_CONFIG_PATH = PROFILES_DIR / "mmwave.json"
+DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
 DEFAULT_CLASSIFICATION_ARTIFACT_DIR = (
-    Path(__file__).resolve().parent.parent
-    / "model_weights"
+    REPOSITORY_ROOT / "model_weights"
 )
 DEFAULT_MAX_RANGE_M = 10.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
@@ -5466,14 +5479,14 @@ def _resolve_config_path(config_path: Path) -> Path:
         return config_path
 
     if not config_path.is_absolute():
-        script_relative_path = Path(__file__).resolve().parent / config_path.name
-        if script_relative_path.exists():
-            return script_relative_path
+        profile_path = PROFILES_DIR / config_path.name
+        if profile_path.exists():
+            return profile_path
 
     raise FileNotFoundError(
         "Config file not found: "
         f"{config_path}. Current directory is {Path.cwd()}. "
-        "Pass the full path, or place the file beside livedatacapture.py."
+        f"Pass the full path, or place the file in {PROFILES_DIR}."
     )
 
 

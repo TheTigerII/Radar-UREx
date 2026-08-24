@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from rawdatacapture.startup import (
+from main.startup import (
     DCA1000Setup,
     PreflightValidator,
     RuntimeOptions,
@@ -59,7 +59,9 @@ class DCA1000PacketDelayTests(unittest.TestCase):
         self.assertEqual(int.from_bytes(payload[2:4], "little"), 6250)
 
     def test_repository_setup_uses_fifty_microseconds(self) -> None:
-        setup_path = Path(__file__).with_name("setup.json")
+        setup_path = (
+            Path(__file__).resolve().parent.parent / "profiles" / "setup.json"
+        )
         setup = json.loads(setup_path.read_text(encoding="utf-8"))
 
         self.assertEqual(setup["DCA1000Config"]["packetDelay_us"], 50)

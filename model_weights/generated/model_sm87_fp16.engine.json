@@ -22,11 +22,11 @@
       8,
       7
     ],
-    "total_memory_bytes": 7849050112,
+    "total_memory_bytes": 7849046016,
     "cuda_runtime_version": 13030,
     "cuda_driver_version": 13020
   },
-  "engine_sha256": "bf533d56e5ea21b72f7d237fa72bb212c3ceb5991cbee297d6f2dc73bcca0276",
+  "engine_sha256": "6f7690dc3bbf6c4f7f7a87ccee797dc1313b22b215e8c444f7deedc3cc86cd5c",
   "parity": {
     "windows": 128,
     "label_mismatches": 0,

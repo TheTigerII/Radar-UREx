@@ -2,7 +2,7 @@
 
 This document describes the implemented `startup.py` control plane. It
 configures radar and DCA1000 hardware but does not receive raw ADC packets.
-Use `run.py` for the integrated control-and-capture workflow.
+Use `main/run.py` for the integrated control-and-capture workflow.
 
 ## Responsibilities
 
@@ -132,9 +132,9 @@ dry-run capture close
 Cleanup continues if one step fails and reports accumulated errors afterward.
 The final state is `STOPPED`.
 
-## Relationship to `run.py`
+## Relationship to `main/run.py`
 
-`run.py` supplies the missing integration externally:
+`main/run.py` supplies the missing integration externally:
 
 ```text
 prompt for duration (default 5 minutes; 0 is unlimited)

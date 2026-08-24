@@ -8,8 +8,8 @@ from unittest.mock import ANY, patch
 
 import numpy as np
 
-from inference import INPUT_SHAPE_CHW, WINDOW_STEPS
-from tensorrt_inference import (
+from main.inference import INPUT_SHAPE_CHW, WINDOW_STEPS
+from main.tensorrt_inference import (
     PARITY_PROBABILITY_TOLERANCE,
     TensorRTDroneBirdInference,
     TensorRTInferenceError,
@@ -41,16 +41,16 @@ class _Runtime:
 
 class DeviceResolutionTests(unittest.TestCase):
     def test_auto_requires_cuda_on_jetson(self):
-        with patch("tensorrt_inference.is_jetson", return_value=True):
+        with patch("main.tensorrt_inference.is_jetson", return_value=True):
             self.assertEqual(resolve_classification_device("auto"), "cuda")
 
     def test_auto_uses_cpu_off_jetson(self):
-        with patch("tensorrt_inference.is_jetson", return_value=False):
+        with patch("main.tensorrt_inference.is_jetson", return_value=False):
             self.assertEqual(resolve_classification_device("auto"), "cpu")
 
     def test_cuda_creation_does_not_fall_back(self):
         with patch(
-            "tensorrt_inference.TensorRTDroneBirdInference",
+            "main.tensorrt_inference.TensorRTDroneBirdInference",
             side_effect=TensorRTInferenceError("unavailable"),
         ):
             with self.assertRaisesRegex(TensorRTInferenceError, "unavailable"):
@@ -64,7 +64,7 @@ class DeviceResolutionTests(unittest.TestCase):
     def test_cuda_creation_forwards_progress_callback(self):
         progress_messages = []
         with patch(
-            "tensorrt_inference.TensorRTDroneBirdInference"
+            "main.tensorrt_inference.TensorRTDroneBirdInference"
         ) as inference_class:
             create_inference_engine(
                 Path("model_weights"),

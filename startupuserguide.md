@@ -2,7 +2,7 @@
 
 This guide covers `startup.py`, which controls an SDK CLI radar and optionally
 the DCA1000. It does not receive or save ADC data. For normal operation, use
-`python run.py`; use `startup.py` directly for preflight, control testing, or a
+`python main/run.py`; use `startup.py` directly for preflight, control testing, or a
 manual two-terminal workflow.
 
 ## Prerequisites
@@ -28,7 +28,7 @@ lvdsStreamCfg -1 0 1 0
 From the repository root:
 
 ```powershell
-python run.py --display range
+python main/run.py --display range
 ```
 
 This starts capture before hardware control and saves raw data. See
@@ -41,7 +41,7 @@ press Enter for 5 minutes or enter `0` for unlimited. Use
 Check direct-serial inputs without sending commands:
 
 ```powershell
-python rawdatacapture\startup.py `
+python main\startup.py `
   --radar-backend direct-serial `
   --dca-backend dry-run `
   --preflight-only `
@@ -66,7 +66,7 @@ are read from `profile.cfg` automatically.
 ## Radar Control Without DCA1000 Control
 
 ```powershell
-python rawdatacapture\startup.py `
+python main\startup.py `
   --radar-backend direct-serial `
   --dca-backend dry-run `
   --radar-port COM4 `
@@ -80,7 +80,7 @@ Ctrl+C to send `sensorStop` and close the UART.
 ## Radar and DCA1000 Control
 
 ```powershell
-python rawdatacapture\startup.py `
+python main\startup.py `
   --radar-backend direct-serial `
   --dca-backend direct-udp `
   --radar-port COM4 `
@@ -96,23 +96,23 @@ receiver is ready or when testing the control plane.
 Terminal 1 must start first:
 
 ```powershell
-python rawdatacapture\livedatacapture.py `
-  --config .\rawdatacapture\profile.cfg `
-  --setup .\rawdatacapture\setup.json `
+python main\livedatacapture.py `
+  --config .\profiles\profile.cfg `
+  --setup .\profiles\setup.json `
   --host-ip 192.168.33.30 `
   --data-port 4098 `
   --display range `
-  --raw-output .\rawdatacapture\captures\manual.bin
+  --raw-output .\calibrationoutput\manual.bin
 ```
 
 Terminal 2 configures hardware. The skip flag is required because Terminal 1
 already owns UDP port 4098:
 
 ```powershell
-python rawdatacapture\startup.py `
-  --config .\rawdatacapture\profile.cfg `
-  --sdk-profile .\rawdatacapture\profile.cfg `
-  --setup .\rawdatacapture\setup.json `
+python main\startup.py `
+  --config .\profiles\profile.cfg `
+  --sdk-profile .\profiles\profile.cfg `
+  --setup .\profiles\setup.json `
   --radar-backend direct-serial `
   --dca-backend direct-udp `
   --skip-socket-preflight `
@@ -159,7 +159,7 @@ miniterm before running Python so it releases the port.
 Integrated Linux example:
 
 ```bash
-python3 run.py --radar-port /dev/ttyUSB0 --display none
+python3 main/run.py --radar-port /dev/ttyUSB0 --display none
 ```
 
 Use `none` for headless sessions without a graphical display.
@@ -190,7 +190,7 @@ radar_streaming
 ```
 
 `receiver_ready` refers only to `startup.py`'s dry-run capture backend. It does
-not prove that `livedatacapture.py` is running; `run.py` verifies that process
+not prove that `livedatacapture.py` is running; `main/run.py` verifies that process
 separately before starting hardware.
 
 ## Troubleshooting
@@ -226,5 +226,5 @@ another receiver already using the port.
 Show every option with:
 
 ```powershell
-python rawdatacapture\startup.py --help
+python main\startup.py --help
 ```

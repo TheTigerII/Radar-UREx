@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
-from inference import (
+from .inference import (
     DOPPLER_BINS,
     FEATURE_VERSION,
     INPUT_SHAPE_CHW,

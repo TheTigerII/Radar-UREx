@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from rawdatacapture.dsp import (
+from main.dsp import (
     AdaptiveClutterMap,
     DEFAULT_ROTOR_NOISE_GATE_MAX_DB,
     DEFAULT_ROTOR_NOISE_GATE_MIN_DB,
@@ -32,7 +32,7 @@ from rawdatacapture.dsp import (
     rotor_velocity_alias_diagnostic,
     static_target_protection_mask,
 )
-from rawdatacapture.openradar_backend import (
+from main.openradar_backend import (
     _os_scale,
     _os_thresholds_along_axis,
     doppler_fft,
@@ -465,7 +465,7 @@ class StaticSceneMapTests(unittest.TestCase):
         changed[2, 4, 6] = 20.0
 
         with patch(
-            "rawdatacapture.dsp.compute_static_angle_power",
+            "main.dsp.compute_static_angle_power",
             side_effect=(background, changed),
         ):
             calibration_points = compute_static_point_cloud(
@@ -502,7 +502,7 @@ class StaticSceneMapTests(unittest.TestCase):
         clutter.minimum_snr_linear = 4.0
 
         with patch(
-            "rawdatacapture.dsp.os_cfar_2d",
+            "main.dsp.os_cfar_2d",
             return_value=detections,
         ) as cfar:
             points = compute_point_cloud(
@@ -531,11 +531,11 @@ class StaticSceneMapTests(unittest.TestCase):
 
         with (
             patch(
-                "rawdatacapture.dsp.os_cfar_2d",
+                "main.dsp.os_cfar_2d",
                 return_value=np.ones((5, 8), dtype=bool),
             ),
             patch(
-                "rawdatacapture.dsp.estimate_xyz_from_virtual_arrays",
+                "main.dsp.estimate_xyz_from_virtual_arrays",
                 return_value=(
                     np.asarray(((0.0, 4.0, 0.0),)),
                     np.asarray((True,)),
@@ -618,22 +618,22 @@ class PointCloudCandidateOrderingTests(unittest.TestCase):
     def test_unlimited_points_bypass_power_sorting(self) -> None:
         with (
             patch(
-                "rawdatacapture.dsp.compute_range_doppler_fft",
+                "main.dsp.compute_range_doppler_fft",
                 return_value=self.doppler_cube,
             ),
             patch(
-                "rawdatacapture.dsp.os_cfar_2d",
+                "main.dsp.os_cfar_2d",
                 return_value=self.detections.copy(),
             ),
             patch(
-                "rawdatacapture.dsp.doppler_peak_mask",
+                "main.dsp.doppler_peak_mask",
                 return_value=np.ones_like(self.detections),
             ),
             patch(
-                "rawdatacapture.dsp.estimate_xyz_from_virtual_arrays",
+                "main.dsp.estimate_xyz_from_virtual_arrays",
                 side_effect=self._forward_xyz,
             ),
-            patch("rawdatacapture.dsp.np.argsort") as argsort,
+            patch("main.dsp.np.argsort") as argsort,
         ):
             points = compute_point_cloud(
                 np.empty((0,)),
@@ -648,19 +648,19 @@ class PointCloudCandidateOrderingTests(unittest.TestCase):
     def test_finite_point_cap_keeps_strongest_first(self) -> None:
         with (
             patch(
-                "rawdatacapture.dsp.compute_range_doppler_fft",
+                "main.dsp.compute_range_doppler_fft",
                 return_value=self.doppler_cube,
             ),
             patch(
-                "rawdatacapture.dsp.os_cfar_2d",
+                "main.dsp.os_cfar_2d",
                 return_value=self.detections.copy(),
             ),
             patch(
-                "rawdatacapture.dsp.doppler_peak_mask",
+                "main.dsp.doppler_peak_mask",
                 return_value=np.ones_like(self.detections),
             ),
             patch(
-                "rawdatacapture.dsp.estimate_xyz_from_virtual_arrays",
+                "main.dsp.estimate_xyz_from_virtual_arrays",
                 side_effect=self._forward_xyz,
             ),
         ):
@@ -1103,7 +1103,7 @@ class PointCloudClusteringTests(unittest.TestCase):
         labels = np.zeros(256, dtype=np.intp)
 
         with patch(
-            "rawdatacapture.dsp._dbscan_labels_small_cloud",
+            "main.dsp._dbscan_labels_small_cloud",
             return_value=labels,
         ) as vectorized_dbscan:
             centers, actual_labels = cluster_point_cloud_with_labels(

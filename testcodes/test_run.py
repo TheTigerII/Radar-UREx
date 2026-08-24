@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import run
+import main.run as run
 
 
 class ChooseDurationMinutesTests(unittest.TestCase):
@@ -326,10 +326,10 @@ class SubprocessEnvironmentTests(unittest.TestCase):
                 {"PATH": "/usr/bin"},
                 clear=True,
             ),
-            patch("run.os.name", "posix"),
-            patch("run.os.getuid", return_value=1000, create=True),
-            patch("run.Path.exists", return_value=True),
-            patch("run.Path.is_file", return_value=True),
+            patch("main.run.os.name", "posix"),
+            patch("main.run.os.getuid", return_value=1000, create=True),
+            patch("main.run.Path.exists", return_value=True),
+            patch("main.run.Path.is_file", return_value=True),
         ):
             environment = run.subprocess_environment()
 
@@ -349,7 +349,7 @@ class SubprocessEnvironmentTests(unittest.TestCase):
                 },
                 clear=True,
             ),
-            patch("run.os.name", "posix"),
+            patch("main.run.os.name", "posix"),
         ):
             environment = run.subprocess_environment()
 

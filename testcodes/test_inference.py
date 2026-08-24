@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from inference import (
+from main.inference import (
     CNN_CONFIG,
     DOPPLER_BINS,
     DroneBirdInference,
@@ -189,7 +189,7 @@ class StatefulInferenceTests(unittest.TestCase):
 class ArtifactContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.engine = DroneBirdInference.__new__(DroneBirdInference)
-        self.engine.profile_path = Path("rawdatacapture/profile.cfg")
+        self.engine.profile_path = Path("profiles/profile.cfg")
         self.engine.config = SimpleNamespace(
             num_adc_samples=64,
             num_rx_channels=4,

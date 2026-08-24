@@ -14,15 +14,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from rawdatacapture import calibrate as radar_calibration
+if __package__ in {None, ""}:
+    repository_root = str(Path(__file__).resolve().parent.parent)
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
+    from main import calibrate as radar_calibration
+else:
+    from . import calibrate as radar_calibration
 
 
-ROOT = Path(__file__).resolve().parent
-RAW_DATA_DIR = ROOT / "rawdatacapture"
-DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile.cfg"
+ROOT = Path(__file__).resolve().parent.parent
+MAIN_DIR = ROOT / "main"
+PROFILES_DIR = ROOT / "profiles"
+DEFAULT_CONFIG_PATH = PROFILES_DIR / "profile.cfg"
 DEFAULT_CALIBRATION_PROFILE_PATH = ROOT / "profiles" / "profile_calibration.cfg"
-DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
-DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
+DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
+DEFAULT_CALIBRATION_OUTPUT_DIR = ROOT / "calibrationoutput"
 DEFAULT_DATASET_DIR = ROOT / "dataset"
 UAV_DATASET_DIR = DEFAULT_DATASET_DIR / "uav"
 OTHERS_DATASET_DIR = DEFAULT_DATASET_DIR / "others"
@@ -293,7 +300,11 @@ def parse_args() -> argparse.Namespace:
             "Defaults to 1 for all display modes."
         ),
     )
-    parser.add_argument("--capture-dir", type=Path, default=DEFAULT_CAPTURE_DIR)
+    parser.add_argument(
+        "--capture-dir",
+        type=Path,
+        default=DEFAULT_CALIBRATION_OUTPUT_DIR,
+    )
     parser.add_argument(
         "--processed-output",
         type=Path,
@@ -809,7 +820,7 @@ def build_capture_command(
     command = [
         sys.executable,
         "-u",
-        str(RAW_DATA_DIR / "livedatacapture.py"),
+        str(MAIN_DIR / "livedatacapture.py"),
         "--config",
         str(config_path or args.config),
         "--setup",
@@ -983,7 +994,7 @@ def build_startup_command(
     effective_config = config_path or args.config
     return [
         sys.executable,
-        str(RAW_DATA_DIR / "startup.py"),
+        str(MAIN_DIR / "startup.py"),
         "--config",
         str(effective_config),
         "--sdk-profile",
@@ -1076,7 +1087,7 @@ def run_calibration_mode(
         report_path = ROOT / report_path
 
     try:
-        from rawdatacapture.livedatacapture import RadarCaptureConfig
+        from main.livedatacapture import RadarCaptureConfig
 
         source_config = RadarCaptureConfig.from_file(source_profile)
     except (OSError, ValueError) as exc:
