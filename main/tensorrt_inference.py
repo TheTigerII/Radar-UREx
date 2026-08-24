@@ -40,6 +40,13 @@ DEFAULT_WARMUP_RUNS = 20
 DEFAULT_BENCHMARK_RUNS = 200
 ONNX_MODEL_NAME = "model.onnx"
 PARITY_DATA_NAME = "parity.npz"
+GPU_ENGINE_COMPATIBILITY_KEYS = (
+    "device_index",
+    "name",
+    "compute_capability",
+    "cuda_runtime_version",
+    "cuda_driver_version",
+)
 JETSON_MODEL_PATH = Path("/proc/device-tree/model")
 SYSTEM_DIST_PACKAGES = (
     Path("/usr/lib/python3/dist-packages"),
@@ -425,21 +432,7 @@ class TensorRTDroneBirdInference:
         self.metadata_path = self.engine_path.with_suffix(".engine.json")
         self._load_deployment_artifacts()
         expected = self._expected_metadata()
-        if not self._cache_is_valid(expected):
-            self._report_progress(
-                "TensorRT engine cache is missing or stale; compiling FP16 "
-                f"engine from {self.onnx_path}. This can take several minutes."
-            )
-            self._build_engine(expected)
-        else:
-            self._report_progress(
-                f"Using cached TensorRT FP16 engine: {self.engine_path}"
-            )
-        self.runtime = _TensorRTRuntime(
-            self.engine_path,
-            self._trt,
-            self._cudart,
-        )
+        self.runtime = self._load_or_build_runtime(expected)
         if not self._cache_is_valid(expected):
             self.close()
             raise TensorRTInferenceError("TensorRT engine cache validation failed")
@@ -687,17 +680,89 @@ class TensorRTDroneBirdInference:
         except (OSError, ValueError):
             return False
         for key, value in expected.items():
-            if observed.get(key) != value:
+            if key == "gpu":
+                observed_gpu = observed.get("gpu")
+                if not isinstance(value, dict) or not isinstance(observed_gpu, dict):
+                    return False
+                if any(
+                    observed_gpu.get(gpu_key) != value.get(gpu_key)
+                    for gpu_key in GPU_ENGINE_COMPATIBILITY_KEYS
+                ):
+                    return False
+            elif observed.get(key) != value:
                 return False
         if observed.get("engine_sha256") != _sha256(self.engine_path):
             return False
-        parity = observed.get("parity")
+        return self._parity_is_acceptable(observed.get("parity"))
+
+    @staticmethod
+    def _parity_is_acceptable(parity: Any) -> bool:
         return bool(
             isinstance(parity, dict)
             and parity.get("label_mismatches") == 0
             and float(parity.get("max_probability_error", float("inf")))
             <= PARITY_PROBABILITY_TOLERANCE
         )
+
+    def _load_or_build_runtime(
+        self,
+        expected: dict[str, Any],
+    ) -> _TensorRTRuntime:
+        if not self.engine_path.is_file():
+            self._report_progress(
+                "No cached TensorRT engine found; compiling FP16 engine from "
+                f"{self.onnx_path}. This can take several minutes."
+            )
+            self._build_engine(expected)
+            return _TensorRTRuntime(
+                self.engine_path,
+                self._trt,
+                self._cudart,
+            )
+
+        self._report_progress(
+            f"Found cached TensorRT FP16 engine: {self.engine_path}"
+        )
+        try:
+            runtime = _TensorRTRuntime(
+                self.engine_path,
+                self._trt,
+                self._cudart,
+            )
+        except Exception as exc:
+            raise TensorRTInferenceError(
+                "The cached TensorRT engine could not be loaded. Remove "
+                f"{self.engine_path} to allow it to be rebuilt."
+            ) from exc
+
+        if self._cache_is_valid(expected):
+            self._report_progress(
+                f"Using cached TensorRT FP16 engine: {self.engine_path}"
+            )
+            return runtime
+
+        self._report_progress(
+            "Cached TensorRT engine metadata is missing or stale; validating "
+            "the existing engine without recompiling."
+        )
+        try:
+            parity = self._validate_parity(runtime)
+        except Exception:
+            runtime.close()
+            raise
+        if not self._parity_is_acceptable(parity):
+            runtime.close()
+            raise TensorRTInferenceError(
+                "The cached TensorRT engine is incompatible with the current "
+                "model artifacts. Remove the engine file to allow a rebuild: "
+                f"{self.engine_path}"
+            )
+        self._write_cache_metadata(expected, parity)
+        self._report_progress(
+            "Existing TensorRT engine passed parity validation; cache metadata "
+            "was refreshed without recompiling."
+        )
+        return runtime
 
     def _build_engine(
         self,
@@ -753,16 +818,26 @@ class TensorRTDroneBirdInference:
             parity = self._validate_parity(runtime)
         finally:
             runtime.close()
-        if (
-            parity["label_mismatches"] != 0
-            or parity["max_probability_error"] > PARITY_PROBABILITY_TOLERANCE
-        ):
+        if not self._parity_is_acceptable(parity):
             self.engine_path.unlink(missing_ok=True)
             raise TensorRTInferenceError(
                 "TensorRT FP16 parity validation failed: "
                 f"label_mismatches={parity['label_mismatches']}, "
                 f"max_probability_error={parity['max_probability_error']:.6g}"
             )
+        self._write_cache_metadata(expected, parity)
+        self._report_progress(
+            "TensorRT parity validation passed: "
+            f"windows={parity['windows']}, "
+            f"max_probability_error={parity['max_probability_error']:.6g}. "
+            f"Engine cache ready: {self.engine_path}"
+        )
+
+    def _write_cache_metadata(
+        self,
+        expected: dict[str, Any],
+        parity: dict[str, Any],
+    ) -> None:
         metadata = {
             **expected,
             "engine_sha256": _sha256(self.engine_path),
@@ -774,12 +849,6 @@ class TensorRTDroneBirdInference:
             encoding="utf-8",
         )
         os.replace(temporary_metadata, self.metadata_path)
-        self._report_progress(
-            "TensorRT parity validation passed: "
-            f"windows={parity['windows']}, "
-            f"max_probability_error={parity['max_probability_error']:.6g}. "
-            f"Engine cache ready: {self.engine_path}"
-        )
 
     def _validate_parity(
         self,

@@ -122,6 +122,122 @@ class EngineCacheTests(unittest.TestCase):
             engine.write_bytes(b"changed")
             self.assertFalse(instance._cache_is_valid(expected))
 
+    def test_cache_ignores_volatile_reported_total_gpu_memory(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            engine = root / "model.engine"
+            metadata = root / "model.engine.json"
+            engine.write_bytes(b"engine")
+            instance = TensorRTDroneBirdInference.__new__(
+                TensorRTDroneBirdInference
+            )
+            instance.engine_path = engine
+            instance.metadata_path = metadata
+            expected_gpu = {
+                "device_index": 0,
+                "name": "Orin",
+                "compute_capability": [8, 7],
+                "total_memory_bytes": 7_849_046_016,
+                "cuda_runtime_version": 13030,
+                "cuda_driver_version": 13020,
+            }
+
+            import hashlib
+
+            metadata.write_text(
+                json.dumps(
+                    {
+                        "format_version": 2,
+                        "gpu": {
+                            **expected_gpu,
+                            "total_memory_bytes": 7_849_054_208,
+                        },
+                        "engine_sha256": hashlib.sha256(b"engine").hexdigest(),
+                        "parity": {
+                            "label_mismatches": 0,
+                            "max_probability_error": 0.0,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(
+                instance._cache_is_valid(
+                    {"format_version": 2, "gpu": expected_gpu}
+                )
+            )
+
+    def test_existing_engine_is_validated_without_recompiling(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            instance = TensorRTDroneBirdInference.__new__(
+                TensorRTDroneBirdInference
+            )
+            instance.engine_path = Path(temporary_directory) / "model.engine"
+            instance.engine_path.write_bytes(b"engine")
+            instance._trt = object()
+            instance._cudart = object()
+            messages = []
+            instance._report_progress = messages.append
+            runtime = _Runtime()
+            parity = {
+                "windows": 1,
+                "label_mismatches": 0,
+                "max_probability_error": 0.0,
+            }
+
+            with (
+                patch(
+                    "main.tensorrt_inference._TensorRTRuntime",
+                    return_value=runtime,
+                ),
+                patch.object(instance, "_cache_is_valid", return_value=False),
+                patch.object(instance, "_validate_parity", return_value=parity),
+                patch.object(instance, "_write_cache_metadata") as write_metadata,
+                patch.object(instance, "_build_engine") as build_engine,
+            ):
+                loaded = instance._load_or_build_runtime({"format_version": 2})
+
+            self.assertIs(loaded, runtime)
+            build_engine.assert_not_called()
+            write_metadata.assert_called_once_with(
+                {"format_version": 2}, parity
+            )
+            self.assertTrue(
+                any("without recompiling" in message for message in messages)
+            )
+
+    def test_engine_is_compiled_only_when_cache_file_is_absent(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            instance = TensorRTDroneBirdInference.__new__(
+                TensorRTDroneBirdInference
+            )
+            instance.engine_path = Path(temporary_directory) / "model.engine"
+            instance.onnx_path = Path(temporary_directory) / "model.onnx"
+            instance._trt = object()
+            instance._cudart = object()
+            instance._report_progress = lambda _message: None
+            runtime = _Runtime()
+
+            def create_engine(_expected):
+                instance.engine_path.write_bytes(b"engine")
+
+            with (
+                patch(
+                    "main.tensorrt_inference._TensorRTRuntime",
+                    return_value=runtime,
+                ),
+                patch.object(
+                    instance,
+                    "_build_engine",
+                    side_effect=create_engine,
+                ) as build_engine,
+            ):
+                loaded = instance._load_or_build_runtime({"format_version": 2})
+
+            self.assertIs(loaded, runtime)
+            build_engine.assert_called_once_with({"format_version": 2})
+
     def test_parity_uses_training_export_without_pytorch(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             instance = TensorRTDroneBirdInference.__new__(
