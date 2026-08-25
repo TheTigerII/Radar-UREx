@@ -84,6 +84,14 @@ class CalibrationSettings:
             raise ValueError("Reference angle must be within -60 to +60 degrees")
         if not math.isfinite(self.max_angle_std_deg) or self.max_angle_std_deg <= 0:
             raise ValueError("Maximum angle standard deviation must be positive")
+        for value, label in (
+            (self.min_peak_prominence_db, "Minimum peak prominence"),
+            (self.max_range_std_m, "Maximum range standard deviation"),
+            (self.max_phase_std_deg, "Maximum phase standard deviation"),
+            (self.max_magnitude_cv, "Maximum magnitude variation"),
+        ):
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{label} must be finite and non-negative")
 
 
 @dataclass(frozen=True)

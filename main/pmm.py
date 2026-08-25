@@ -81,10 +81,18 @@ class PmmConfig:
     random_seed: int = 6843
 
     def __post_init__(self) -> None:
-        if self.background_calibration_seconds <= 0.0:
-            raise ValueError("PMM background calibration duration must be positive")
-        if self.maximum_target_speed_m_s <= 0.0:
-            raise ValueError("PMM maximum target speed must be positive")
+        if (
+            not np.isfinite(self.background_calibration_seconds)
+            or self.background_calibration_seconds <= 0.0
+        ):
+            raise ValueError(
+                "PMM background calibration duration must be finite and positive"
+            )
+        if (
+            not np.isfinite(self.maximum_target_speed_m_s)
+            or self.maximum_target_speed_m_s <= 0.0
+        ):
+            raise ValueError("PMM maximum target speed must be finite and positive")
         if not (
             2
             <= self.folding_size_min
@@ -115,8 +123,8 @@ class PmmConfig:
             raise ValueError(
                 "PMM adaptive threshold minimum must be finite and non-negative"
             )
-        if self.history_seconds <= 0.0:
-            raise ValueError("PMM history duration must be positive")
+        if not np.isfinite(self.history_seconds) or self.history_seconds <= 0.0:
+            raise ValueError("PMM history duration must be finite and positive")
         if self.provisional_frames < 1:
             raise ValueError("PMM provisional frame count must be positive")
         if self.confirmation_window_frames < self.provisional_frames:
@@ -127,12 +135,19 @@ class PmmConfig:
             raise ValueError("PMM coast frame count cannot be negative")
         if self.particle_count < 1:
             raise ValueError("PMM particle count must be positive")
-        if not 0.0 <= self.min_range_m < self.max_range_m:
+        if (
+            not np.isfinite(self.min_range_m)
+            or not np.isfinite(self.max_range_m)
+            or not 0.0 <= self.min_range_m < self.max_range_m
+        ):
             raise ValueError("PMM range bounds are invalid")
-        if not 0.0 < self.angle_limit_deg <= 90.0:
+        if (
+            not np.isfinite(self.angle_limit_deg)
+            or not 0.0 < self.angle_limit_deg <= 90.0
+        ):
             raise ValueError("PMM angle limit must be in (0, 90]")
-        if self.angle_step_deg <= 0.0:
-            raise ValueError("PMM angle step must be positive")
+        if not np.isfinite(self.angle_step_deg) or self.angle_step_deg <= 0.0:
+            raise ValueError("PMM angle step must be finite and positive")
 
 
 @dataclass(frozen=True)
@@ -222,6 +237,26 @@ def validate_mini4_profile(config: PmmRadarConfig) -> None:
         raise ValueError(
             "Mini4-20m profile requires the ODS TX schedule (1, 4, 2)"
         )
+    if int(getattr(config, "lvds_lanes", 2)) != 2:
+        raise ValueError("Mini4-20m profile requires two LVDS lanes")
+    if not bool(getattr(config, "iq_swap", True)):
+        raise ValueError("Mini4-20m profile requires IQ swap enabled")
+    if bool(getattr(config, "channel_interleave", False)):
+        raise ValueError("Mini4-20m profile requires non-interleaved RX channels")
+    range_bias_m = float(getattr(config, "range_bias_m", 0.0))
+    if not np.isfinite(range_bias_m):
+        raise ValueError("Mini4-20m profile range bias must be finite")
+    for field in ("azimuth_bias_deg", "elevation_bias_deg"):
+        value = float(getattr(config, field, 0.0))
+        if not np.isfinite(value):
+            raise ValueError(f"Mini4-20m profile {field} must be finite")
+    compensation = getattr(config, "rx_channel_compensation", None)
+    if compensation is not None:
+        coefficients = np.asarray(compensation, dtype=np.complex64)
+        if coefficients.shape != (12,) or not np.isfinite(coefficients).all():
+            raise ValueError(
+                "Mini4-20m profile RX compensation must contain 12 finite values"
+            )
     expected_scalars = {
         "sample_rate_ksps": MINI4_SAMPLE_RATE_KSPS,
         "frequency_slope_mhz_per_us": MINI4_SLOPE_MHZ_PER_US,

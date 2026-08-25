@@ -237,6 +237,8 @@ class PreflightValidator:
     def _validate_radar_control_settings(
         self, config: StartupConfig, errors: list[str]
     ) -> None:
+        if self.options.radar_backend != "direct-serial":
+            return
         radar_device = config.radar_device
         control_port = self.options.radar_port or radar_device.control_port
         baud_rate = self.options.radar_baud or radar_device.baud_rate
@@ -941,7 +943,12 @@ def _dca1000_payload_override(
         raise StartupError(
             f"directUdpDCA1000 payload override for {command.name} must be hex text"
         )
-    return bytes.fromhex(value.replace(" ", "").replace("_", ""))
+    try:
+        return bytes.fromhex(value.replace(" ", "").replace("_", ""))
+    except ValueError as exc:
+        raise StartupError(
+            f"directUdpDCA1000 payload override for {command.name} is not valid hex"
+        ) from exc
 
 
 def _adc_data_format_mode(config: StartupConfig) -> int:
@@ -1139,29 +1146,29 @@ def options_from_args(args: argparse.Namespace) -> RuntimeOptions:
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     orchestrator = StartupOrchestrator(options_from_args(args))
+    exit_code = 0
 
     try:
         if args.preflight_only:
             orchestrator.run_preflight()
             print("Startup preflight passed.")
-            return 0
-
-        orchestrator.startup()
-        print("Startup sequence reached radar_streaming.")
-        print("Radar is running. Press Ctrl+C to stop.")
-        _wait_until_interrupted()
-        return 0
+        else:
+            orchestrator.startup()
+            print("Startup sequence reached radar_streaming.")
+            print("Radar is running. Press Ctrl+C to stop.")
+            _wait_until_interrupted()
     except KeyboardInterrupt:
         print("\nCtrl+C received. Stopping radar startup session.")
-        return 0
-    except StartupError as exc:
+    except (OSError, UnicodeError, ValueError, StartupError) as exc:
         print(f"Startup failed: {exc}", file=sys.stderr)
-        return 2
+        exit_code = 2
     finally:
         try:
             orchestrator.stop()
         except StartupError as exc:
             print(f"Startup cleanup failed: {exc}", file=sys.stderr)
+            exit_code = 2
+    return exit_code
 
 
 def _wait_until_interrupted() -> None:

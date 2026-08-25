@@ -87,6 +87,20 @@ class SpectrumFoldingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "two folding rows"):
             PmmConfig(folding_size_max=33)
 
+    def test_non_finite_runtime_settings_are_rejected(self) -> None:
+        for field in (
+            "background_calibration_seconds",
+            "maximum_target_speed_m_s",
+            "history_seconds",
+            "min_range_m",
+            "max_range_m",
+            "angle_limit_deg",
+            "angle_step_deg",
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    PmmConfig(**{field: float("nan")})
+
 
 class BackgroundSubtractionTests(unittest.TestCase):
     def test_removes_scaled_static_background_and_keeps_target(self) -> None:
@@ -174,6 +188,18 @@ class Mini4ProfileTests(unittest.TestCase):
             float(range_axis[-1]) + config.range_bias_m,
             19.8,
         )
+
+    def test_rejects_wrong_adc_layout_and_non_finite_calibration(self) -> None:
+        for field, value in (
+            ("iq_swap", False),
+            ("channel_interleave", True),
+            ("lvds_lanes", 4),
+            ("range_bias_m", float("nan")),
+        ):
+            config = _mini4_config()
+            setattr(config, field, value)
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_mini4_profile(config)
 
 
 class CaponAngleTests(unittest.TestCase):
@@ -699,6 +725,29 @@ class RawReplayTests(unittest.TestCase):
                         PmmConfig(background_calibration_seconds=0.1),
                     )
                 )
+
+    def test_replay_creates_output_parent_directory(self) -> None:
+        from main import replay_pmm
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw_path = root / "empty.bin"
+            raw_path.write_bytes(b"")
+            output_path = root / "nested" / "replay.jsonl"
+            args = SimpleNamespace(
+                raw_path=raw_path,
+                config=PROFILE_PATH,
+                output=output_path,
+                calibration_seconds=0.1,
+                threshold=None,
+                adaptive_threshold_sigma=6.0,
+                adaptive_threshold_minimum=700.0,
+            )
+
+            with patch("main.replay_pmm.parse_args", return_value=args):
+                replay_pmm.main()
+
+            self.assertTrue(output_path.is_file())
 
 
 class PmmWorkerIntegrationTests(unittest.TestCase):

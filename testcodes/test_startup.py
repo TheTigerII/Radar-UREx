@@ -7,7 +7,10 @@ from main.startup import (
     DCA1000Setup,
     PreflightValidator,
     RuntimeOptions,
+    StartupError,
+    DCA1000Command,
     _build_dca1000_packet_payload,
+    _dca1000_payload_override,
 )
 
 
@@ -63,6 +66,54 @@ class DCA1000PacketDelayTests(unittest.TestCase):
         setup = json.loads(setup_path.read_text(encoding="utf-8"))
 
         self.assertEqual(setup["DCA1000Config"]["packetDelay_us"], 50)
+
+
+class StartupValidationTests(unittest.TestCase):
+    def test_dry_run_does_not_require_serial_settings(self) -> None:
+        validator = PreflightValidator(
+            RuntimeOptions(Path("profile.cfg"), Path("setup.json"))
+        )
+        errors = []
+
+        validator._validate_radar_control_settings(
+            SimpleNamespace(
+                radar_device=SimpleNamespace(control_port=None, baud_rate=None)
+            ),
+            errors,
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_direct_serial_requires_port_and_baud(self) -> None:
+        validator = PreflightValidator(
+            RuntimeOptions(
+                Path("profile.cfg"),
+                Path("setup.json"),
+                radar_backend="direct-serial",
+            )
+        )
+        errors = []
+
+        validator._validate_radar_control_settings(
+            SimpleNamespace(
+                radar_device=SimpleNamespace(control_port=None, baud_rate=None)
+            ),
+            errors,
+        )
+
+        self.assertEqual(len(errors), 2)
+
+    def test_invalid_hex_payload_override_has_startup_error(self) -> None:
+        config = SimpleNamespace(
+            setup_json={
+                "directUdpDCA1000": {
+                    "payloads": {"CONFIG_RECORD": "not-hex"}
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(StartupError, "not valid hex"):
+            _dca1000_payload_override(config, DCA1000Command.CONFIG_RECORD)
 
 
 if __name__ == "__main__":

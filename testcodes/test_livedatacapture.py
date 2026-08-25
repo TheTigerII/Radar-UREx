@@ -1,7 +1,9 @@
 import queue
 import socket
+import threading
 import unittest
 from itertools import chain, repeat
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -19,11 +21,13 @@ from main.livedatacapture import (
     UdpPacketReceiver,
     _format_capture_summary,
     _put_latest_queue_payload,
+    _run_frame_processor,
 )
 from main.dsp import (
     compute_range_doppler_fft,
     frame_bytes_to_radar_cube,
 )
+from main.pmm import PmmConfig
 
 
 class DcaHeaderTests(unittest.TestCase):
@@ -229,6 +233,59 @@ class AdcLayoutTests(unittest.TestCase):
                 (((1 + 10j, 3 + 30j), (2 + 20j, 4 + 40j)),),
                 dtype=np.complex64,
             ),
+        )
+
+    def test_frame_with_extra_bytes_is_rejected(self) -> None:
+        config = RadarCaptureConfig.from_dimensions(
+            num_adc_samples=2,
+            num_rx_channels=2,
+            num_chirps_per_frame=1,
+        )
+
+        with self.assertRaisesRegex(ValueError, "bytes; expected"):
+            frame_bytes_to_radar_cube(self._frame_bytes() + b"extra", config)
+
+
+class FrameProcessorFailureTests(unittest.TestCase):
+    def test_processing_failure_is_raised_after_ready_status(self) -> None:
+        config = RadarCaptureConfig.from_file(
+            Path(__file__).resolve().parent.parent
+            / "profiles"
+            / "profile-mini4-20m.cfg"
+        )
+        frame_queue = queue.Queue()
+        frame_queue.put(CapturedFrame(b"", 0, 1.0))
+        log_queue = queue.Queue()
+        status_queue = queue.Queue(maxsize=1)
+        counter = SimpleNamespace(value=0, get_lock=lambda: threading.Lock())
+
+        with (
+            patch("main.livedatacapture.signal.signal"),
+            self.assertRaisesRegex(ValueError, "bytes; expected"),
+        ):
+            _run_frame_processor(
+                config=config,
+                pmm_config=PmmConfig(background_calibration_seconds=0.1),
+                frame_queue=frame_queue,
+                log_queue=log_queue,
+                processed_frames_counter=counter,
+                display_payload_queue=None,
+                display_skipped_counter=None,
+                raw_output=None,
+                raw_metadata=None,
+                processed_output=None,
+                display_mode="none",
+                display_update_every=1,
+                startup_status_queue=status_queue,
+            )
+
+        self.assertEqual(status_queue.get_nowait()["state"], "ready")
+        messages = []
+        while not log_queue.empty():
+            messages.append(log_queue.get_nowait())
+        self.assertTrue(
+            any("Frame processor failed" in message for message in messages),
+            messages,
         )
 
 

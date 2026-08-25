@@ -41,6 +41,12 @@ def frame_bytes_to_radar_cube(
     The non-interleaved layout follows section 24.8 of TI's mmWave Studio
     guide: all samples for one receiver are contiguous within each chirp.
     """
+    if len(frame_bytes) != config.bytes_per_frame:
+        raise ValueError(
+            f"Frame has {len(frame_bytes)} bytes; expected {config.bytes_per_frame}"
+        )
+    if config.bytes_per_frame % np.dtype("<i2").itemsize:
+        raise ValueError("Frame byte count must be divisible by the int16 sample size")
     expected_int16_count = config.bytes_per_frame // np.dtype("<i2").itemsize
     adc_samples = np.frombuffer(
         frame_bytes,
@@ -113,8 +119,15 @@ def compute_range_doppler_fft(
     tx_count = int(config.num_chirps_per_loop or 0)
     if loops <= 0 or tx_count <= 0:
         raise ValueError("Doppler FFT requires loop and TDM transmitter counts")
-    if range_fft.shape[0] != loops * tx_count:
-        raise ValueError("Range FFT chirp count does not match the TDM profile")
+    expected_shape = (
+        loops * tx_count,
+        config.num_rx_channels,
+        config.num_adc_samples,
+    )
+    if tuple(range_fft.shape) != expected_shape:
+        raise ValueError(
+            f"Range FFT must have shape {expected_shape}, got {range_fft.shape}"
+        )
     if fft_size < loops:
         raise ValueError("Doppler FFT size cannot be smaller than loop count")
     explicit = np.asarray(range_fft, dtype=np.complex64).reshape(
@@ -149,19 +162,25 @@ def compute_range_doppler_heatmap(
 
 
 def range_resolution_m(config: RadarDspConfig) -> Optional[float]:
+    sample_rate_ksps = config.sample_rate_ksps
+    slope_mhz_per_us = config.frequency_slope_mhz_per_us
     if (
-        config.sample_rate_ksps is None
-        or config.frequency_slope_mhz_per_us is None
-        or config.frequency_slope_mhz_per_us <= 0.0
+        sample_rate_ksps is None
+        or not np.isfinite(sample_rate_ksps)
+        or sample_rate_ksps <= 0.0
+        or slope_mhz_per_us is None
+        or not np.isfinite(slope_mhz_per_us)
+        or slope_mhz_per_us <= 0.0
+        or config.num_adc_samples <= 0
     ):
         return None
     return (
         SPEED_OF_LIGHT_M_PER_S
-        * config.sample_rate_ksps
+        * sample_rate_ksps
         * 1e3
         / (
             2.0
-            * config.frequency_slope_mhz_per_us
+            * slope_mhz_per_us
             * 1e12
             * config.num_adc_samples
         )

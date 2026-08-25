@@ -560,19 +560,25 @@ def wait_for_capture_ready(
 def terminate_process(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
-    if os.name == "nt":
-        process.terminate()
-    else:
-        os.killpg(process.pid, signal.SIGINT)
+    try:
+        if os.name == "nt":
+            process.terminate()
+        else:
+            os.killpg(process.pid, signal.SIGINT)
+    except ProcessLookupError:
+        return
 
 
 def kill_process(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
-    if os.name == "nt":
-        process.kill()
-    else:
-        os.killpg(process.pid, signal.SIGKILL)
+    try:
+        if os.name == "nt":
+            process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
 
 
 def stop_process(process: Optional[subprocess.Popen], timeout: float = 10.0) -> None:
@@ -990,6 +996,9 @@ def main() -> int:
             time.sleep(0.2)
     except KeyboardInterrupt:
         print("Stopping...")
+    except OSError as exc:
+        print(f"Could not start or manage the radar processes: {exc}", file=sys.stderr)
+        return 1
     finally:
         stop_process(startup)
         stop_process(capture)

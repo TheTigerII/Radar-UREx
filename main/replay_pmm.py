@@ -132,6 +132,8 @@ def main() -> None:
         adaptive_threshold_sigma=args.adaptive_threshold_sigma,
         adaptive_threshold_minimum=args.adaptive_threshold_minimum,
     )
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
     output = args.output.open("w", encoding="utf-8") if args.output else None
     try:
         for record in replay_raw_frames(args.raw_path, radar_config, pmm_config):

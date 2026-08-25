@@ -108,6 +108,10 @@ class CaptureStartupError(RuntimeError):
     pass
 
 
+class CaptureProcessingError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class DCA1000PacketHeader:
     sequence_number: int
@@ -1076,6 +1080,7 @@ def _run_frame_processor(
                 )
             except queue.Full:
                 pass
+        raise
     finally:
         if raw_writer is not None:
             raw_writer.close()
@@ -1508,6 +1513,7 @@ def listen_for_frames(
     frame_queue: mp.Queue,
     log_queue: mp.Queue,
     pipeline_complete_event: Optional[Any] = None,
+    processor_process: Optional[Any] = None,
 ) -> CaptureStats:
     stats = CaptureStats()
     sequence_tracker = SequenceTracker(stats)
@@ -1543,6 +1549,15 @@ def listen_for_frames(
                 _drain_log_queue(log_queue)
                 emit("Calibration completed; stopping capture.")
                 break
+            if (
+                processor_process is not None
+                and not processor_process.is_alive()
+            ):
+                processor_process.join(timeout=0.0)
+                raise CaptureProcessingError(
+                    "Frame processor stopped unexpectedly with exit code "
+                    f"{processor_process.exitcode}"
+                )
             try:
                 packet, received_at = packet_queue.get(
                     timeout=socket_timeout_seconds
@@ -1709,7 +1724,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> int:
     args = parse_args()
     setup_terminal_log(args.log_file)
     context = mp.get_context("spawn")
@@ -1719,6 +1734,7 @@ def main() -> None:
     display: Optional[LiveDisplay] = None
     calibration_settings: Optional[radar_calibration.CalibrationSettings] = None
     calibration_complete_event: Optional[Any] = None
+    exit_code = 0
     try:
         if args.display in radar_calibration.CALIBRATION_DISPLAY_MODES:
             calibration_type = {
@@ -1837,11 +1853,20 @@ def main() -> None:
             frame_queue=frame_queue,
             log_queue=log_queue,
             pipeline_complete_event=calibration_complete_event,
+            processor_process=processor,
         )
     except CaptureStartupError as exc:
         emit(f"Capture startup failed: {exc}")
-    except ValueError as exc:
+        exit_code = 2
+    except CaptureProcessingError as exc:
+        emit(f"Capture processing failed: {exc}")
+        exit_code = 1
+    except (FileNotFoundError, ValueError) as exc:
         emit(f"Capture configuration failed: {exc}")
+        exit_code = 2
+    except OSError as exc:
+        emit(f"Capture runtime failed: {exc}")
+        exit_code = 1
     finally:
         if frame_queue is not None:
             try:
@@ -1853,11 +1878,18 @@ def main() -> None:
             if processor.is_alive():
                 processor.terminate()
                 processor.join(timeout=1.0)
+            if processor.exitcode not in {None, 0} and exit_code == 0:
+                emit(
+                    "Frame processor exited unsuccessfully with code "
+                    f"{processor.exitcode}."
+                )
+                exit_code = 1
         if log_queue is not None:
             _drain_log_queue(log_queue)
         if display is not None:
             display.close()
         close_terminal_log()
+    return exit_code
 
 
 def _config_from_cfg_lines(lines: Iterable[str]) -> RadarCaptureConfig:
@@ -2070,4 +2102,4 @@ def _timestamp() -> str:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
