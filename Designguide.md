@@ -96,6 +96,102 @@ are included in diagnostics. A large discontinuity resynchronizes frame
 ownership. Raw capture remains optional and stores complete frames with sidecar
 metadata.
 
+## Radar and DCA1000 startup control plane
+
+`main/startup.py` configures the radar and DCA1000 hardware but does not
+receive raw ADC packets. `main/run.py` is the recommended integrated launcher:
+it starts `main/livedatacapture.py`, waits for the receiver and frame processor
+to report readiness, and only then starts the hardware control process.
+
+### Responsibilities and backends
+
+The startup control plane:
+
+- parses radar dimensions and commands from the SDK CLI `.cfg` profile;
+- parses board and DCA1000 settings from `profiles/setup.json`;
+- validates dimensions, two-lane LVDS support, ports, hardware settings, the
+  direct-serial command profile, and the capture UDP bind address;
+- configures DCA1000 over UDP or simulates it with the dry-run backend;
+- configures SDK CLI firmware over the radar command UART or uses dry-run;
+- defers `sensorStart` until DCA1000 recording is armed; and
+- sends `sensorStop` and DCA1000 `RECORD_STOP` during shutdown.
+
+It does not flash firmware. The radar backends are `dry-run` (the default) and
+`direct-serial`. Direct serial uses pyserial, sends commands from
+`--sdk-profile`, and defers the profile's `sensorStart`. Blank lines and `%` or
+`#` comments are ignored. Command responses complete on `Done`, `Error`, the
+`mmwDemo:/>` prompt, `Ignored`, or `Skipped`; an error response fails startup
+unless cleanup is already in progress.
+
+The DCA1000 backends are `dry-run` and `direct-udp`. Direct UDP binds local
+port 4096 by default and sends commands to `192.168.33.180:4096` in this order:
+
+```text
+SYSTEM_CONNECT
+RESET_FPGA
+CONFIG_FPGA_GEN
+CONFIG_RECORD
+RECORD_START
+```
+
+Shutdown sends `RECORD_STOP` if recording was armed. Each command validates
+its acknowledgement and honors `--dca-timeout` and `--dca-retries`. FPGA and
+packet payloads are derived from the setup and radar configuration, with
+optional hexadecimal overrides under `directUdpDCA1000.payloads` in
+`profiles/setup.json`.
+
+The only in-process `--capture-backend` is `dry-run`. It advances orchestration
+state and reports the expected address and frame size but does not bind or read
+the data stream. Live reception belongs to `main/livedatacapture.py`.
+
+### Configuration and preflight
+
+The radar configuration and SDK command-profile defaults both resolve to
+`profiles/profile-mini4-20m.cfg`; capture-board settings resolve to
+`profiles/setup.json`. With direct serial, if `--config` remains at its default,
+the selected `--sdk-profile` also supplies the capture dimensions. Normally
+the same `.cfg` should be used for both so hardware programming and frame
+interpretation cannot diverge.
+
+Preflight checks positive ADC, RX, chirp, and frame-byte dimensions; exactly
+two LVDS lanes; supported DCA1000 settings; valid UDP ports; direct-serial port
+and baud settings; an existing SDK profile containing `sensorStart`; and the
+ability to bind `host_ip:data_port`. The socket probe closes immediately.
+Because the integrated launcher already has the real receiver bound, it starts
+the control process with `--skip-socket-preflight`.
+
+`--preflight-only` stops after validation and never configures hardware.
+
+### Orchestration and shutdown
+
+```text
+load configs
+  -> CONFIGS_LOADED
+preflight validation
+  -> PREFLIGHT_PASSED
+configure DCA1000
+  -> DCA1000_READY
+configure radar, excluding sensorStart
+  -> RADAR_READY
+start the capture backend
+  -> RECEIVER_READY
+arm DCA1000 and wait --readiness-delay (default 0.25 s)
+  -> DCA1000_ARMED
+send deferred sensorStart
+  -> RADAR_STREAMING
+```
+
+On shutdown, cleanup attempts radar sensor stop, DCA1000 record stop and
+control-socket close, then capture-backend close. Cleanup continues if one
+step fails, reports all failures, and ends in `STOPPED`.
+
+Current limitations are that firmware flashing is not implemented, the
+startup module has no real capture backend, direct serial assumes compatible
+SDK CLI firmware is already running, and DCA1000 direct-UDP compatibility
+depends on its firmware accepting the generated or overridden payloads. Packet
+and frame health are reported by `main/livedatacapture.py`, not by the startup
+state monitor.
+
 ## Hardware calibration path
 
 The `calibration`, `azimuth-calibration`, and `elevation-calibration` modes are
@@ -289,9 +385,9 @@ strongest-bin alignment, `log1p`, and stored normalization operations before
 computing the two probabilities. Inference runs in the DSP worker rather than
 the UDP receiver, and its latency is included in processing diagnostics.
 
-All notebook cells are committed without execution counts or outputs. Training,
-evaluation, and permanent artifact creation occur only when an operator runs
-the notebook.
+Training, evaluation, and permanent artifact creation occur only when an
+operator runs the notebook. Any committed notebook output is a record of a
+prior interactive run and is not consumed by the live application.
 
 ## Process model
 
@@ -310,7 +406,6 @@ superseded drawings without affecting processing.
 Run:
 
 ```bash
-python -m unittest discover -s . -p "test_*.py" -v
 python -m unittest discover -s testcodes -p "test_*.py" -v
 python main/startup.py \
   --config profiles/profile-mini4-20m.cfg \
