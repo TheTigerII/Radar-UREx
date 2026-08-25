@@ -49,8 +49,8 @@ sudo ip link set eth0 up
 Replace `eth0` with the DCA1000-facing interface. The default board address is
 `192.168.33.180`; UDP data is received on `192.168.33.30:4098`.
 
-To use `machinelearning/training.ipynb`, install a PyTorch build appropriate for the training
-machine, then install the remaining notebook dependencies:
+To use `machinelearning/training.ipynb`, install a PyTorch build appropriate
+for the training machine, then install the remaining notebook dependencies:
 
 ```bash
 python -m pip install scikit-learn matplotlib onnx onnxscript jupyter
@@ -161,6 +161,7 @@ Show all options with:
 ```bash
 python main/run.py --help
 python main/livedatacapture.py --help
+python main/startup.py --help
 ```
 
 ## Hardware calibration
@@ -274,9 +275,10 @@ For local Jupyter, skip the first code cell: it is a Google Colab bootstrap
 that imports `google.colab`, mounts Drive, changes to a Colab-specific path,
 and installs export packages. Start with the imports cell after installing the
 dependencies above. In Colab, adjust the Drive path in the bootstrap cell and
-then run all cells in order. The committed notebook is unexecuted and does not
-contain weights or metrics. It validates that all input files share the same
-Mini4 profile, feature pipeline, and threshold configuration;
+then run all cells in order. Saved notebook outputs are informational and may
+come from a different machine or dataset; rerun the applicable cells to produce
+results for the current data. The notebook validates that all input files share
+the same Mini4 profile, feature pipeline, and threshold configuration;
 extracts non-overlapping 36-by-64 Doppler-Time segments; applies the recorded
 PMM threshold; estimates the center-bin DC baseline only from frames whose body
 peak is away from DC; aligns the pre-removal body peak; balances the classes;
@@ -288,10 +290,10 @@ Feature version `mini4-pmm-tracking-v8` uses the paper's tracking clutter
 suppression for both range and angle: non-demeaned Doppler spectra are folded
 first, followed by projection subtraction of the calibrated Range-Time-PMM and
 Angle-Time-PMM backgrounds. It learns frozen per-range adaptive thresholds from
-the initial calibration and searches folding sizes 2 through 32. Earlier
-captures and the committed v4 model weights cannot reproduce this input and
-must not be relabelled as v8. Record a new v8 dataset and retrain before
-enabling classification.
+the initial calibration and searches folding sizes 2 through 32. Captures and
+model weights from earlier feature versions cannot reproduce this input and
+must not be relabelled as v8. The installed manifest declares v8; retrain the
+model whenever the capture or feature contract changes.
 
 Training uses a two-layer, 128-hidden-unit LSTM for 100 epochs with Adam at
 `5e-5` and batch size 10. Validation loss chooses the retained state. The final
@@ -352,7 +354,15 @@ incomplete trailing frame. Use `python main/replay_pmm.py --help` for
 the available output path, background-calibration duration, and threshold
 options. The replay CLI does not provide a frame-limit option.
 
-## Hardware preflight
+## Hardware startup and preflight
+
+Normal operation should use `main/run.py`. It starts the live ADC receiver and
+waits for both its processing worker and UDP listener before it invokes the
+hardware control plane in `main/startup.py`. The launcher then configures the
+DCA1000, sends the SDK CLI profile, arms recording, and starts the radar in the
+required order.
+
+### Configuration preflight
 
 Run the startup configuration preflight without sending hardware commands:
 
@@ -364,13 +374,79 @@ python main/startup.py \
   --preflight-only --skip-socket-preflight
 ```
 
-This checks the parsed dimensions, two-lane LVDS support, DCA1000 and serial
-settings, and the SDK command file. Because `--skip-socket-preflight` is shown,
-it does not test the UDP bind; omit that flag when the host interface is
-configured and the port should be checked. The normal capture worker performs
-the stricter Mini4 acquisition-contract validation before live reception.
+With the default dry-run backends, this checks the parsed radar dimensions,
+two-lane LVDS support, DCA1000 setup values, and UDP port numbers without
+opening the serial port or contacting either board. Because
+`--skip-socket-preflight` is shown, it also skips the UDP bind check. Omit that
+flag when the DCA1000-facing interface is configured and no receiver already
+owns `192.168.33.30:4098`.
+
+Serial settings and SDK profile commands are additionally validated when
+`--radar-backend direct-serial` is selected. The live capture worker performs
+the stricter Mini4 acquisition-contract validation before accepting frames.
+
+### Manual two-terminal startup
+
+Use this only when the integrated launcher is unsuitable. Start capture first:
+
+```bash
+python main/livedatacapture.py \
+  --config profiles/profile-mini4-20m.cfg \
+  --setup profiles/setup.json \
+  --host-ip 192.168.33.30 --data-port 4098 \
+  --display combined \
+  --raw-output dataset/manual.bin
+```
+
+Wait for `Listening for live radar stream`, then configure and start the
+hardware in a second terminal:
+
+```bash
+python main/startup.py \
+  --config profiles/profile-mini4-20m.cfg \
+  --sdk-profile profiles/profile-mini4-20m.cfg \
+  --setup profiles/setup.json \
+  --radar-backend direct-serial \
+  --dca-backend direct-udp \
+  --skip-socket-preflight \
+  --radar-port /dev/ttyUSB0 \
+  --radar-baud 115200
+```
+
+Replace `/dev/ttyUSB0` if the command UART uses another port. The standalone
+startup process keeps running after reaching `radar_streaming`. Stop that
+terminal first with Ctrl+C so it sends `sensorStop` and `RECORD_STOP`, then
+stop the capture terminal.
+
+During a complete startup, the control plane reports these states in order:
+
+```text
+configs_loaded
+preflight_passed
+dca1000_ready
+radar_ready
+receiver_ready
+dca1000_armed
+radar_streaming
+```
+
+`main/startup.py` has a dry-run capture backend; in manual operation,
+`receiver_ready` is a control-plane handoff rather than a check of the separate
+capture process. This is why the first terminal must visibly be listening
+before the hardware startup command is run.
 
 ## Troubleshooting
+
+For a DCA1000 command timeout, confirm the direct Ethernet link, host address,
+board power, and that no TI tool owns UDP configuration port 4096.
+
+For a radar serial timeout, select the command UART rather than the data UART,
+close other terminal programs, confirm 115200 baud and SDK CLI-compatible
+firmware, and increase `--radar-command-timeout` if necessary.
+
+For an ADC bind failure, use `--skip-socket-preflight` only when the live
+receiver already owns port 4098. Otherwise, correct the host interface address
+or stop the conflicting process.
 
 If normal capture rejects a profile, compare its acquisition dimensions,
 timing, slope, sample rate, and `(1, 4, 2)` TX order with the repository
