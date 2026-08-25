@@ -15,12 +15,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from rawdatacapture.dsp import (  # noqa: E402
+from main.dsp import (  # noqa: E402
     compute_range_doppler_fft,
     compute_range_fft,
 )
-from rawdatacapture.livedatacapture import RadarCaptureConfig  # noqa: E402
-from rawdatacapture.pmm import PmmConfig, PmmTracker  # noqa: E402
+from main.livedatacapture import RadarCaptureConfig  # noqa: E402
+from main.pmm import PmmConfig, PmmTracker  # noqa: E402
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
         "--config",
         type=Path,
         default=REPOSITORY_ROOT
-        / "rawdatacapture"
+        / "profiles"
         / "profile-mini4-20m.cfg",
     )
     args = parser.parse_args()

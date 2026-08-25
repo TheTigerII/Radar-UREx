@@ -18,20 +18,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from rawdatacapture.pmm import (
-    MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
-    MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
-)
-from rawdatacapture import calibrate as radar_calibration
+if __package__ in {None, ""}:
+    repository_root = str(Path(__file__).resolve().parent.parent)
+    if repository_root not in sys.path:
+        sys.path.insert(0, repository_root)
+    from main.pmm import (
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
+    )
+    from main import calibrate as radar_calibration
+else:
+    from .pmm import (
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
+    )
+    from . import calibrate as radar_calibration
 
 
-ROOT = Path(__file__).resolve().parent
-RAW_DATA_DIR = ROOT / "rawdatacapture"
-DEFAULT_CONFIG_PATH = RAW_DATA_DIR / "profile-mini4-20m.cfg"
+ROOT = Path(__file__).resolve().parent.parent
+MAIN_DIR = ROOT / "main"
+PROFILES_DIR = ROOT / "profiles"
+DEFAULT_CONFIG_PATH = PROFILES_DIR / "profile-mini4-20m.cfg"
 DEFAULT_CALIBRATION_PROFILE_PATH = ROOT / "profiles" / "profile_calibration.cfg"
-DEFAULT_SETUP_PATH = RAW_DATA_DIR / "setup.json"
-DEFAULT_CAPTURE_DIR = RAW_DATA_DIR / "captures"
+DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
 DEFAULT_DATASET_DIR = ROOT / "dataset"
+DEFAULT_CAPTURE_DIR = DEFAULT_DATASET_DIR
 DEFAULT_MODEL_WEIGHTS_DIR = ROOT / "model_weights"
 DEFAULT_HOST_IP = "192.168.33.30"
 DEFAULT_DATA_PORT = 4098
@@ -349,7 +360,7 @@ def build_capture_command(
     command = [
         sys.executable,
         "-u",
-        str(RAW_DATA_DIR / "livedatacapture.py"),
+        str(MAIN_DIR / "livedatacapture.py"),
         "--config",
         str(config_path or args.config),
         "--setup",
@@ -450,7 +461,7 @@ def build_startup_command(
     effective_config = config_path or args.config
     return [
         sys.executable,
-        str(RAW_DATA_DIR / "startup.py"),
+        str(MAIN_DIR / "startup.py"),
         "--config",
         str(effective_config),
         "--sdk-profile",
@@ -668,7 +679,7 @@ def run_calibration_mode(
         report_path = ROOT / report_path
 
     try:
-        from rawdatacapture.livedatacapture import RadarCaptureConfig
+        from main.livedatacapture import RadarCaptureConfig
 
         source_config = RadarCaptureConfig.from_file(source_profile)
     except (OSError, ValueError) as exc:

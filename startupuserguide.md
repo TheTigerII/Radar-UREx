@@ -7,7 +7,7 @@ the radar.
 ## Prerequisites
 
 - IWR6843ISK-ODS running SDK CLI-compatible firmware.
-- `rawdatacapture/profile-mini4-20m.cfg` available unchanged.
+- `profiles/profile-mini4-20m.cfg` available unchanged.
 - DCA1000 connected directly to a host interface configured as
   `192.168.33.30/24`.
 - Radar command UART available, commonly `/dev/ttyUSB0`.
@@ -16,7 +16,7 @@ the radar.
 ## Integrated operation
 
 ```bash
-python run.py --display combined
+python main/run.py --display combined
 ```
 
 The launcher uses the same profile for hardware commands and frame dimensions,
@@ -26,10 +26,10 @@ CP2105 `Enhanced COM Port`; an explicit `--radar-port` overrides this default.
 ## Preflight
 
 ```bash
-python rawdatacapture/startup.py \
-  --config rawdatacapture/profile-mini4-20m.cfg \
-  --sdk-profile rawdatacapture/profile-mini4-20m.cfg \
-  --setup rawdatacapture/setup.json \
+python main/startup.py \
+  --config profiles/profile-mini4-20m.cfg \
+  --sdk-profile profiles/profile-mini4-20m.cfg \
+  --setup profiles/setup.json \
   --preflight-only --skip-socket-preflight
 ```
 
@@ -41,21 +41,21 @@ Omit `--skip-socket-preflight` when no ADC receiver owns
 Start capture first:
 
 ```bash
-python rawdatacapture/livedatacapture.py \
-  --config rawdatacapture/profile-mini4-20m.cfg \
-  --setup rawdatacapture/setup.json \
+python main/livedatacapture.py \
+  --config profiles/profile-mini4-20m.cfg \
+  --setup profiles/setup.json \
   --host-ip 192.168.33.30 --data-port 4098 \
   --display combined \
-  --raw-output rawdatacapture/captures/manual.bin
+  --raw-output dataset/manual.bin
 ```
 
 Then configure and start the hardware:
 
 ```bash
-python rawdatacapture/startup.py \
-  --config rawdatacapture/profile-mini4-20m.cfg \
-  --sdk-profile rawdatacapture/profile-mini4-20m.cfg \
-  --setup rawdatacapture/setup.json \
+python main/startup.py \
+  --config profiles/profile-mini4-20m.cfg \
+  --sdk-profile profiles/profile-mini4-20m.cfg \
+  --setup profiles/setup.json \
   --radar-backend direct-serial \
   --dca-backend direct-udp \
   --skip-socket-preflight \

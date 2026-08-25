@@ -12,7 +12,7 @@ if __package__ in {None, ""}:
     repository_root = str(Path(__file__).resolve().parent.parent)
     if repository_root not in sys.path:
         sys.path.insert(0, repository_root)
-    from rawdatacapture.livedatacapture import (
+    from main.livedatacapture import (
         DEFAULT_CONFIG_PATH,
         DEFAULT_SETUP_PATH,
         UDP_IP,
@@ -42,7 +42,9 @@ DCA1000_FPGA_CLK_CONVERSION_FACTOR = 1000
 DCA1000_FPGA_CLK_PERIOD_NS = 8
 DCA1000_MIN_PACKET_DELAY_US = 5
 DCA1000_MAX_PACKET_DELAY_US = 500
-DEFAULT_SDK_PROFILE_PATH = Path(__file__).with_name("profile-mini4-20m.cfg")
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+PROFILES_DIR = REPOSITORY_ROOT / "profiles"
+DEFAULT_SDK_PROFILE_PATH = PROFILES_DIR / "profile-mini4-20m.cfg"
 EmitFunc = Callable[[str], None]
 
 
@@ -953,9 +955,9 @@ def _resolve_existing_path(path: Path) -> Path:
         return path
 
     if not path.is_absolute():
-        script_relative_path = Path(__file__).resolve().parent / path.name
-        if script_relative_path.exists():
-            return script_relative_path
+        profile_path = PROFILES_DIR / path.name
+        if profile_path.exists():
+            return profile_path
 
     raise StartupError(f"required startup file not found: {path}")
 

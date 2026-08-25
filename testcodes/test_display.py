@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from rawdatacapture.livedatacapture import (
+from main.livedatacapture import (
     CombinedDisplayPayload,
     PointCloudDisplayPayload,
     TargetTrack,
@@ -51,7 +51,7 @@ class ImageLevelTests(unittest.TestCase):
 @unittest.skipUnless(GUI_AVAILABLE, "PyQtGraph/PySide6 is not installed")
 class PyQtGraphDisplayTests(unittest.TestCase):
     def _display(self, mode: str):
-        from rawdatacapture.livedatacapture import _PyQtGraphDisplay
+        from main.livedatacapture import _PyQtGraphDisplay
 
         return _PyQtGraphDisplay(
             mode=mode,

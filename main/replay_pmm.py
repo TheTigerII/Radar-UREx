@@ -13,19 +13,38 @@ if __package__ in {None, ""}:
     if repository_root not in sys.path:
         sys.path.insert(0, repository_root)
 
-from rawdatacapture.dsp import (
-    compute_range_doppler_fft,
-    compute_range_fft,
-    frame_bytes_to_radar_cube,
-)
-from rawdatacapture.livedatacapture import RadarCaptureConfig
-from rawdatacapture.pmm import (
-    MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
-    MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
-    PmmConfig,
-    PmmTracker,
-    validate_mini4_profile,
-)
+if __package__ in {None, ""}:
+    from main.dsp import (
+        compute_range_doppler_fft,
+        compute_range_fft,
+        frame_bytes_to_radar_cube,
+    )
+    from main.livedatacapture import RadarCaptureConfig
+    from main.pmm import (
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
+        PmmConfig,
+        PmmTracker,
+        validate_mini4_profile,
+    )
+else:
+    from .dsp import (
+        compute_range_doppler_fft,
+        compute_range_fft,
+        frame_bytes_to_radar_cube,
+    )
+    from .livedatacapture import RadarCaptureConfig
+    from .pmm import (
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
+        MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
+        PmmConfig,
+        PmmTracker,
+        validate_mini4_profile,
+    )
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_PATH = REPOSITORY_ROOT / "profiles" / "profile-mini4-20m.cfg"
 
 
 def replay_raw_frames(
@@ -82,7 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path(__file__).with_name("profile-mini4-20m.cfg"),
+        default=DEFAULT_CONFIG_PATH,
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--calibration-seconds", type=float, default=30.0)

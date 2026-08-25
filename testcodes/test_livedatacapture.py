@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from rawdatacapture.livedatacapture import (
+from main.livedatacapture import (
     CapturedFrame,
     CaptureStartupError,
     CaptureStats,
@@ -20,7 +20,7 @@ from rawdatacapture.livedatacapture import (
     _format_capture_summary,
     _put_latest_queue_payload,
 )
-from rawdatacapture.dsp import (
+from main.dsp import (
     compute_range_doppler_fft,
     frame_bytes_to_radar_cube,
 )

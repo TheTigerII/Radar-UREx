@@ -225,7 +225,7 @@ windows remain `unknown` rather than forcing an object label.
 
 ## Offline LSTM training
 
-`training.ipynb` implements a repository-native adaptation of mmHawkeye's UAV
+`machinelearning/training.ipynb` implements a repository-native adaptation of mmHawkeye's UAV
 identification network. The paper does not disclose its exact tensor shape, so
 the notebook uses the Mini4 contract: 36 frames at 10 Hz, with 64 centered
 Doppler bins per frame. Input captures are discovered recursively under
@@ -311,11 +311,11 @@ Run:
 
 ```bash
 python -m unittest discover -s . -p "test_*.py" -v
-python -m unittest discover -s rawdatacapture -p "test_*.py" -v
-python rawdatacapture/startup.py \
-  --config rawdatacapture/profile-mini4-20m.cfg \
-  --sdk-profile rawdatacapture/profile-mini4-20m.cfg \
-  --setup rawdatacapture/setup.json \
+python -m unittest discover -s testcodes -p "test_*.py" -v
+python main/startup.py \
+  --config profiles/profile-mini4-20m.cfg \
+  --sdk-profile profiles/profile-mini4-20m.cfg \
+  --setup profiles/setup.json \
   --preflight-only --skip-socket-preflight
 python scripts/benchmark_pmm.py
 ```

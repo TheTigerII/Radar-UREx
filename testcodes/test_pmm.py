@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from rawdatacapture.pmm import (
+from main.pmm import (
     MINI4_DOPPLER_FFT_SIZE,
     MINI4_ADC_START_TIME_US,
     MINI4_FRAME_PERIODICITY_MS,
@@ -33,6 +33,9 @@ from rawdatacapture.pmm import (
     spectrum_folding,
     validate_mini4_profile,
 )
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+PROFILE_PATH = REPOSITORY_ROOT / "profiles" / "profile-mini4-20m.cfg"
 
 
 def _mini4_config() -> SimpleNamespace:
@@ -155,11 +158,9 @@ class Mini4ProfileTests(unittest.TestCase):
     def test_repository_profile_has_required_frame_size_and_range_spacing(
         self,
     ) -> None:
-        from rawdatacapture.livedatacapture import RadarCaptureConfig
+        from main.livedatacapture import RadarCaptureConfig
 
-        config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile-mini4-20m.cfg")
-        )
+        config = RadarCaptureConfig.from_file(PROFILE_PATH)
         validate_mini4_profile(config)
         range_axis = config.range_axis_m()
         assert range_axis is not None
@@ -271,7 +272,7 @@ class CaponAngleTests(unittest.TestCase):
 
 class PmmTrackerStateTests(unittest.TestCase):
     def test_3d_display_suppresses_tentative_tracks(self) -> None:
-        from rawdatacapture.livedatacapture import _target_track
+        from main.livedatacapture import _target_track
 
         tracker = PmmTracker(
             _mini4_config(),
@@ -325,10 +326,10 @@ class PmmTrackerStateTests(unittest.TestCase):
         angles = np.arange(-60.0, 62.0, 2.0, dtype=np.float32)
         angle_scores = np.ones((61, 61), dtype=np.float32)
         with patch(
-            "rawdatacapture.pmm.spectrum_folding",
+            "main.pmm.spectrum_folding",
             side_effect=score_frames,
         ), patch(
-            "rawdatacapture.pmm.capon_pmm_angle_scores",
+            "main.pmm.capon_pmm_angle_scores",
             return_value=(angles, angle_scores),
         ):
             for _ in range(3):
@@ -372,7 +373,7 @@ class PmmTrackerStateTests(unittest.TestCase):
         measured_angles[40, 20] += 20.0
 
         with patch(
-            "rawdatacapture.pmm.capon_pmm_angle_scores",
+            "main.pmm.capon_pmm_angle_scores",
             side_effect=(
                 (angles, background_angles),
                 (angles, measured_angles),
@@ -474,7 +475,7 @@ class PmmTrackerStateTests(unittest.TestCase):
         angle_scores = np.zeros((angles.size, angles.size), dtype=np.float32)
         angle_scores[30, 30] = 100.0
         with patch(
-            "rawdatacapture.pmm.capon_pmm_angle_scores",
+            "main.pmm.capon_pmm_angle_scores",
             return_value=(angles, angle_scores),
         ):
             first = tracker.update(target, range_fft, range_axis)
@@ -489,7 +490,7 @@ class PmmTrackerStateTests(unittest.TestCase):
 
         miss = background.copy()
         with patch(
-            "rawdatacapture.pmm.capon_pmm_angle_scores",
+            "main.pmm.capon_pmm_angle_scores",
             return_value=(angles, angle_scores),
         ):
             coast_one = tracker.update(miss, range_fft, range_axis)
@@ -536,7 +537,7 @@ class PmmTrackerStateTests(unittest.TestCase):
         angles = np.arange(-60.0, 62.0, 2.0, dtype=np.float32)
         angle_scores = np.zeros((61, 61), dtype=np.float32)
         with patch(
-            "rawdatacapture.pmm.capon_pmm_angle_scores",
+            "main.pmm.capon_pmm_angle_scores",
             return_value=(angles, angle_scores),
         ):
             tracker.update(target, range_fft, range_axis, timestamp_s=1.1)
@@ -577,14 +578,12 @@ class PmmTrackerStateTests(unittest.TestCase):
 
 class PmmJsonlTests(unittest.TestCase):
     def test_schema_contains_only_pmm_tracking_fields(self) -> None:
-        from rawdatacapture.livedatacapture import (
+        from main.livedatacapture import (
             ProcessedOutputWriter,
             RadarCaptureConfig,
         )
 
-        config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile-mini4-20m.cfg")
-        )
+        config = RadarCaptureConfig.from_file(PROFILE_PATH)
         tracker = PmmTracker(
             config,
             PmmConfig(background_calibration_seconds=0.1),
@@ -615,14 +614,12 @@ class PmmJsonlTests(unittest.TestCase):
         self.assertEqual(update["pmm_tracking"]["label"], "PMM target")
 
     def test_schema_includes_optional_classification_metadata_and_result(self) -> None:
-        from rawdatacapture.livedatacapture import (
+        from main.livedatacapture import (
             ProcessedOutputWriter,
             RadarCaptureConfig,
         )
 
-        config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile-mini4-20m.cfg")
-        )
+        config = RadarCaptureConfig.from_file(PROFILE_PATH)
         tracker = PmmTracker(
             config,
             PmmConfig(background_calibration_seconds=0.1),
@@ -657,12 +654,10 @@ class PmmJsonlTests(unittest.TestCase):
 
 class RawReplayTests(unittest.TestCase):
     def test_complete_raw_frames_replay_in_order(self) -> None:
-        from rawdatacapture.livedatacapture import RadarCaptureConfig
-        from rawdatacapture.replay_pmm import replay_raw_frames
+        from main.livedatacapture import RadarCaptureConfig
+        from main.replay_pmm import replay_raw_frames
 
-        config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile-mini4-20m.cfg")
-        )
+        config = RadarCaptureConfig.from_file(PROFILE_PATH)
         with tempfile.TemporaryDirectory() as directory:
             raw_path = Path(directory) / "clutter-only.bin"
             raw_path.write_bytes(bytes(config.bytes_per_frame * 2))
@@ -689,12 +684,10 @@ class RawReplayTests(unittest.TestCase):
         )
 
     def test_incomplete_raw_frame_is_rejected(self) -> None:
-        from rawdatacapture.livedatacapture import RadarCaptureConfig
-        from rawdatacapture.replay_pmm import replay_raw_frames
+        from main.livedatacapture import RadarCaptureConfig
+        from main.replay_pmm import replay_raw_frames
 
-        config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile-mini4-20m.cfg")
-        )
+        config = RadarCaptureConfig.from_file(PROFILE_PATH)
         with tempfile.TemporaryDirectory() as directory:
             raw_path = Path(directory) / "packet-gap.bin"
             raw_path.write_bytes(bytes(config.bytes_per_frame - 1))
@@ -710,16 +703,14 @@ class RawReplayTests(unittest.TestCase):
 
 class PmmWorkerIntegrationTests(unittest.TestCase):
     def test_worker_processes_mini4_frame(self) -> None:
-        from rawdatacapture.livedatacapture import (
+        from main.livedatacapture import (
             CapturedFrame,
             CombinedDisplayPayload,
             RadarCaptureConfig,
             _run_frame_processor,
         )
 
-        config = RadarCaptureConfig.from_file(
-            Path(__file__).with_name("profile-mini4-20m.cfg")
-        )
+        config = RadarCaptureConfig.from_file(PROFILE_PATH)
         frame_queue = queue.Queue()
         frame_queue.put(
             CapturedFrame(
@@ -738,7 +729,7 @@ class PmmWorkerIntegrationTests(unittest.TestCase):
             {"value": 0, "get_lock": lambda self: threading.Lock()},
         )()
 
-        with patch("rawdatacapture.livedatacapture.signal.signal"):
+        with patch("main.livedatacapture.signal.signal"):
             _run_frame_processor(
                 config=config,
                 pmm_config=PmmConfig(

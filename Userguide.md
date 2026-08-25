@@ -49,7 +49,7 @@ sudo ip link set eth0 up
 Replace `eth0` with the DCA1000-facing interface. The default board address is
 `192.168.33.180`; UDP data is received on `192.168.33.30:4098`.
 
-To use `training.ipynb`, install a PyTorch build appropriate for the training
+To use `machinelearning/training.ipynb`, install a PyTorch build appropriate for the training
 machine, then install the remaining notebook dependencies:
 
 ```bash
@@ -66,13 +66,13 @@ From the repository root:
 
 ```bash
 source .venv/bin/activate
-python run.py --display combined
+python main/run.py --display combined
 ```
 
 The launcher starts capture first, waits for its worker and UDP listener to be
 ready, configures the DCA1000, sends the selected SDK CLI profile to the radar,
 arms DCA1000 recording, and then sends `sensorStart`. The default profile is
-`rawdatacapture/profile-mini4-20m.cfg`; normal PMM capture accepts another
+`profiles/profile-mini4-20m.cfg`; normal PMM capture accepts another
 `.cfg` path only when its acquisition values match the Mini4 contract. The
 launcher prompts for a duration; Enter selects five minutes and `0` runs until
 Ctrl+C.
@@ -101,17 +101,17 @@ used only for controlled, independently labelled data collection.
 Useful examples:
 
 ```bash
-python run.py --radar-port /dev/ttyUSB0 --display none \
+python main/run.py --radar-port /dev/ttyUSB0 --display none \
   --duration-minutes 60
 
-python run.py --radar-port /dev/ttyUSB0 --display range-doppler \
-  --raw-output rawdatacapture/captures/session.bin
+python main/run.py --radar-port /dev/ttyUSB0 --display range-doppler \
+  --raw-output dataset/session.bin
 
-python run.py --radar-port /dev/ttyUSB0 \
+python main/run.py --radar-port /dev/ttyUSB0 \
   --pmm-adaptive-threshold-sigma 6 \
   --pmm-background-calibration-seconds 30
 
-python run.py --display combined --classification \
+python main/run.py --display combined --classification \
   --model-weights-dir model_weights \
   --dataset-destination dataset
 ```
@@ -159,8 +159,8 @@ backgrounds used by the paper's projection subtraction.
 Show all options with:
 
 ```bash
-python run.py --help
-python rawdatacapture/livedatacapture.py --help
+python main/run.py --help
+python main/livedatacapture.py --help
 ```
 
 ## Hardware calibration
@@ -173,12 +173,12 @@ rest of the calibration region clear, and run range/RX-channel calibration
 first:
 
 ```bash
-python run.py --display calibration --calibration-distance-m 1.0
+python main/run.py --display calibration --calibration-distance-m 1.0
 ```
 
 The defaults are a 1 m target distance, a ±0.20 m search window, 16 warm-up
 frames, 64 accepted frames, and a 90-second timeout. A stable result produces a
-JSON report under `rawdatacapture/captures/` unless
+JSON report under `dataset/` unless
 `--calibration-output` supplies another path. The launcher then asks before
 updating `compRangeBiasAndRxChanPhase` in the operational profile. Applying a
 result creates a timestamped `.bak` copy first.
@@ -187,10 +187,10 @@ After range/RX calibration has been applied, measure azimuth and elevation at
 a known tripod angle:
 
 ```bash
-python run.py --display azimuth-calibration \
+python main/run.py --display azimuth-calibration \
   --calibration-distance-m 1.0 --calibration-angle-deg 0
 
-python run.py --display elevation-calibration \
+python main/run.py --display elevation-calibration \
   --calibration-distance-m 1.0 --calibration-angle-deg 0
 ```
 
@@ -207,7 +207,7 @@ output. Use the `--calibration-search-window-m`,
 ## Output
 
 The generated processed filename is `pmm_capture_<timestamp>.jsonl`. Its
-default directory is `rawdatacapture/captures/` for normal modes other than
+default directory is `dataset/` for normal modes other than
 `combined`; combined mode prompts for `dataset/`, `dataset/uav/`, or
 `dataset/other/` and defaults to `dataset/`. Supplying
 `--dataset-destination` uses that dataset directory in any normal mode, while
@@ -245,10 +245,10 @@ directly under its known class:
 ```bash
 mkdir -p dataset/uav dataset/other
 
-python run.py --display none \
+python main/run.py --display none \
   --processed-output dataset/uav/uav_session_001.jsonl
 
-python run.py --display none \
+python main/run.py --display none \
   --processed-output dataset/other/bird_session_001.jsonl
 ```
 
@@ -263,11 +263,11 @@ segments in each class; this is only a technical minimum, not a sufficient
 operational dataset. Collect substantially more sessions across target types,
 ranges, motions, sites, and environmental conditions.
 
-Start Jupyter from the repository root and open `training.ipynb`:
+Start Jupyter from the repository root and open `machinelearning/training.ipynb`:
 
 ```bash
 source .venv/bin/activate
-jupyter lab training.ipynb
+jupyter lab machinelearning/training.ipynb
 ```
 
 For local Jupyter, skip the first code cell: it is a Google Colab bootstrap
@@ -341,14 +341,14 @@ prediction, not independent ground truth.
 Replay a recorded raw ADC file without hardware:
 
 ```bash
-python rawdatacapture/replay_pmm.py \
-  rawdatacapture/captures/session.bin \
-  --config rawdatacapture/profile-mini4-20m.cfg \
-  --output rawdatacapture/captures/session_replay.jsonl
+python main/replay_pmm.py \
+  dataset/session.bin \
+  --config profiles/profile-mini4-20m.cfg \
+  --output dataset/session_replay.jsonl
 ```
 
 Replay emits one `pmm_replay` JSON object per complete raw frame and rejects an
-incomplete trailing frame. Use `python rawdatacapture/replay_pmm.py --help` for
+incomplete trailing frame. Use `python main/replay_pmm.py --help` for
 the available output path, background-calibration duration, and threshold
 options. The replay CLI does not provide a frame-limit option.
 
@@ -357,10 +357,10 @@ options. The replay CLI does not provide a frame-limit option.
 Run the startup configuration preflight without sending hardware commands:
 
 ```bash
-python rawdatacapture/startup.py \
-  --config rawdatacapture/profile-mini4-20m.cfg \
-  --sdk-profile rawdatacapture/profile-mini4-20m.cfg \
-  --setup rawdatacapture/setup.json \
+python main/startup.py \
+  --config profiles/profile-mini4-20m.cfg \
+  --sdk-profile profiles/profile-mini4-20m.cfg \
+  --setup profiles/setup.json \
   --preflight-only --skip-socket-preflight
 ```
 

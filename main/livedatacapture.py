@@ -22,7 +22,7 @@ if __package__ in {None, ""}:
     repository_root = str(Path(__file__).resolve().parent.parent)
     if repository_root not in sys.path:
         sys.path.insert(0, repository_root)
-    from rawdatacapture.dsp import (
+    from main.dsp import (
         compute_range_doppler_fft,
         compute_range_doppler_heatmap,
         compute_range_fft,
@@ -31,7 +31,7 @@ if __package__ in {None, ""}:
         range_axis_m,
         range_resolution_m,
     )
-    from rawdatacapture.pmm import (
+    from main.pmm import (
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
         PmmConfig,
@@ -39,7 +39,7 @@ if __package__ in {None, ""}:
         PmmTracker,
         validate_mini4_profile,
     )
-    from rawdatacapture import calibrate as radar_calibration
+    from main import calibrate as radar_calibration
 else:
     from .dsp import (
         compute_range_doppler_fft,
@@ -70,9 +70,11 @@ SOCKET_TIMEOUT_SECONDS = 0.5
 DEFAULT_PACKET_QUEUE_SIZE = 8192
 DEFAULT_PROCESSING_QUEUE_SIZE = 32
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
-DEFAULT_LOG_PATH = Path(__file__).with_suffix(".log")
-DEFAULT_CONFIG_PATH = Path(__file__).with_name("profile-mini4-20m.cfg")
-DEFAULT_SETUP_PATH = Path(__file__).with_name("setup.json")
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+PROFILES_DIR = REPOSITORY_ROOT / "profiles"
+DEFAULT_LOG_PATH = REPOSITORY_ROOT / "log" / "livedatacapture.log"
+DEFAULT_CONFIG_PATH = PROFILES_DIR / "profile-mini4-20m.cfg"
+DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
 DEFAULT_MAX_RANGE_M = 20.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
 COMBINED_DISPLAY_MODE = "combined"
@@ -988,7 +990,10 @@ def _run_frame_processor(
         else:
             tracker = None
         if tracker is not None and model_weights_dir is not None:
-            from inference import RealtimeUavClassifier
+            if __package__ in {None, ""}:
+                from main.inference import RealtimeUavClassifier
+            else:
+                from .inference import RealtimeUavClassifier
 
             classifier = RealtimeUavClassifier(
                 model_weights_dir,
@@ -2027,9 +2032,9 @@ def _resolve_config_path(path: Path) -> Path:
     if path.exists():
         return path
     if not path.is_absolute():
-        beside_script = Path(__file__).resolve().parent / path.name
-        if beside_script.exists():
-            return beside_script
+        profile_path = PROFILES_DIR / path.name
+        if profile_path.exists():
+            return profile_path
     raise FileNotFoundError(f"Config file not found: {path}")
 
 

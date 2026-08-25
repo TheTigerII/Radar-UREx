@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import run
+from main import run
 
 
 def _args() -> argparse.Namespace:
@@ -131,7 +131,7 @@ class PromptTests(unittest.TestCase):
             ),
         ]
         with (
-            patch("run.list_serial_ports", return_value=ports),
+            patch("main.run.list_serial_ports", return_value=ports),
             patch("builtins.print"),
         ):
             selected = run.resolve_radar_port(None)
@@ -139,7 +139,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(selected, "/dev/ttyUSB1")
 
     def test_explicit_radar_port_overrides_cp2105_default(self) -> None:
-        with patch("run.list_serial_ports") as list_ports:
+        with patch("main.run.list_serial_ports") as list_ports:
             selected = run.resolve_radar_port("/dev/serial/radar")
 
         self.assertEqual(selected, "/dev/serial/radar")

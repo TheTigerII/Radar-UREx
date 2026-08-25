@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from inference import (
+from main.inference import (
     DOPPLER_BINS,
     LABEL_TO_INDEX,
     SEGMENT_FRAMES,
@@ -67,7 +67,7 @@ def _classifier(weights: Path) -> RealtimeUavClassifier:
     generated = weights / "generated"
     generated.mkdir()
     (generated / "model.fp16.engine").write_bytes(b"test TensorRT engine")
-    with patch("inference._TensorRtSession", return_value=_FakeTensorRtSession()):
+    with patch("main.inference._TensorRtSession", return_value=_FakeTensorRtSession()):
         return RealtimeUavClassifier(weights, _runtime_contract())
 
 
@@ -170,7 +170,7 @@ class RealtimeClassifierTests(unittest.TestCase):
             engine_path.write_bytes(b"test TensorRT engine")
             fake_session = object()
 
-            with patch("inference._TensorRtSession", return_value=fake_session):
+            with patch("main.inference._TensorRtSession", return_value=fake_session):
                 classifier = RealtimeUavClassifier(weights, _runtime_contract())
 
             self.assertIs(classifier.session, fake_session)
@@ -194,8 +194,8 @@ class RealtimeClassifierTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0)
 
             with (
-                patch("inference.shutil.which", return_value="/usr/bin/trtexec"),
-                patch("inference.subprocess.run", side_effect=fake_run),
+                patch("main.inference.shutil.which", return_value="/usr/bin/trtexec"),
+                patch("main.inference.subprocess.run", side_effect=fake_run),
                 patch("builtins.print") as output,
             ):
                 engine_path = ensure_tensorrt_engine(model_path)
@@ -218,7 +218,7 @@ class RealtimeClassifierTests(unittest.TestCase):
             engine_path = generated / "model_sm87_fp16.engine"
             engine_path.write_bytes(b"existing TensorRT engine")
 
-            with patch("inference.subprocess.run") as compiler:
+            with patch("main.inference.subprocess.run") as compiler:
                 resolved = ensure_tensorrt_engine(model_path)
 
             self.assertEqual(resolved, engine_path)

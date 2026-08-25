@@ -6,14 +6,14 @@ from unittest.mock import patch
 
 import numpy as np
 
-from rawdatacapture import calibrate
-from rawdatacapture.livedatacapture import RadarCaptureConfig, _with_host_compensation
-from rawdatacapture.pmm import PmmConfig
+from main import calibrate
+from main.livedatacapture import RadarCaptureConfig, _with_host_compensation
+from main.pmm import PmmConfig
 
 
 ROOT = Path(__file__).resolve().parent.parent
 CALIBRATION_PROFILE = ROOT / "profiles" / "profile_calibration.cfg"
-OPERATIONAL_PROFILE = ROOT / "rawdatacapture" / "profile-mini4-20m.cfg"
+OPERATIONAL_PROFILE = ROOT / "profiles" / "profile-mini4-20m.cfg"
 
 
 class CalibrationProfileTests(unittest.TestCase):
@@ -264,7 +264,7 @@ class CalibrationAlgorithmTests(unittest.TestCase):
         runtime_estimator = calibrate.capon_pmm_angle_scores
 
         with patch(
-            "rawdatacapture.calibrate.capon_pmm_angle_scores",
+            "main.calibrate.capon_pmm_angle_scores",
             wraps=runtime_estimator,
         ) as estimator:
             accumulator.update(cube)
