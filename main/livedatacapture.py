@@ -67,6 +67,11 @@ if __package__ in {None, ""}:
         ClassificationEvaluationLogger,
         default_inference_log_path,
     )
+    from main.performance_logging import (
+        DEFAULT_RESOURCE_SAMPLE_INTERVAL_S,
+        PerformanceMetricsLogger,
+        default_performance_log_path,
+    )
 else:
     from .dsp import (
         AdaptiveClutterMap,
@@ -112,6 +117,11 @@ else:
     from .classification_evaluation import (
         ClassificationEvaluationLogger,
         default_inference_log_path,
+    )
+    from .performance_logging import (
+        DEFAULT_RESOURCE_SAMPLE_INTERVAL_S,
+        PerformanceMetricsLogger,
+        default_performance_log_path,
     )
 
 
@@ -433,6 +443,22 @@ class ProcessingTimingStats:
     def add(self, stage: str, elapsed_seconds: float) -> None:
         if stage in self.samples_ms:
             self.samples_ms[stage].append(max(float(elapsed_seconds), 0.0) * 1000.0)
+
+    def snapshot_counts(self) -> dict[str, int]:
+        """Return cursors that can isolate timing samples for one frame."""
+        return {
+            stage: len(samples)
+            for stage, samples in self.samples_ms.items()
+        }
+
+    def samples_since(self, counts: dict[str, int]) -> dict[str, float]:
+        """Return total time per stage added since ``snapshot_counts``."""
+        result = {}
+        for stage, samples in self.samples_ms.items():
+            new_samples = samples[max(int(counts.get(stage, 0)), 0) :]
+            if new_samples:
+                result[stage] = float(sum(new_samples))
+        return result
 
     def format_summary(self) -> str:
         fields = []
@@ -1673,6 +1699,7 @@ class DisplayPayloadSink:
         self.micro_doppler_history_gap_updates = 0
         self.latest_micro_doppler_db = np.empty((0,), dtype=np.float32)
         self.latest_micro_doppler_windows_db = np.empty((0, 0), dtype=np.float32)
+        self.input_frame_count = 0
         self.frame_count = 0
         self.timings = ProcessingTimingStats()
         self.static_candidate_total = 0
@@ -1716,6 +1743,12 @@ class DisplayPayloadSink:
             else None
         )
         self.latest_classification_feature: Optional[np.ndarray] = None
+        self.latest_detection_metrics: dict[str, Any] = {
+            "available": False,
+        }
+        self.latest_tracking_metrics: dict[str, Any] = {
+            "state": "unavailable",
+        }
         self._last_classification_emit_s = 0.0
         self._last_classification_signature: Optional[
             tuple[str, Optional[str]]
@@ -1748,7 +1781,12 @@ class DisplayPayloadSink:
         *,
         captured_at_s: Optional[float] = None,
     ) -> None:
+        self.input_frame_count += 1
         self.current_captured_at_s = captured_at_s
+        # A skipped display/DSP update must not repeat the previous frame's
+        # detection and track state in performance telemetry.
+        self.latest_detection_metrics = {"available": False}
+        self.latest_tracking_metrics = {"state": "unavailable"}
         if self.calibration_accumulator is not None:
             payload = self.calibration_accumulator.update(range_fft)
             if self.payload_queue is not None:
@@ -2809,6 +2847,61 @@ class DisplayPayloadSink:
             target_source = "dynamic"
 
         static_reference = self._static_reference_status()
+        selected_track_state = "absent"
+        if target_track is not None:
+            selected_track_state = (
+                "predicted" if target_track.is_predicted else "measured"
+            )
+        elif (
+            self.dynamic_target_tracker.has_track
+            or self.static_target_tracker.has_track
+        ):
+            selected_track_state = "tentative"
+        self.latest_detection_metrics = {
+            "available": True,
+            "dynamic_point_count": int(points.shape[0]),
+            "dynamic_cluster_count": int(clusters.shape[0]),
+            "static_candidate_count": int(static_candidate_count),
+            "validated_static_point_count": int(static_points.shape[0]),
+            "validated_static_cluster_count": int(static_clusters.shape[0]),
+            "static_reference_ready": bool(static_reference.ready),
+            "static_validation": str(static_validation),
+        }
+        self.latest_tracking_metrics = {
+            "state": selected_track_state,
+            "source": target_source,
+            "range_m": (
+                float(target_track.range_m)
+                if target_track is not None
+                else None
+            ),
+            "position_m": (
+                list(target_track.position_m)
+                if target_track is not None
+                else None
+            ),
+            "speed_m_per_update": (
+                float(np.linalg.norm(target_track.velocity_m_per_update))
+                if target_track is not None
+                else None
+            ),
+            "age_updates": (
+                int(target_track.age_updates)
+                if target_track is not None
+                else None
+            ),
+            "hits": int(target_track.hits) if target_track is not None else None,
+            "missed_updates": (
+                int(target_track.missed_updates)
+                if target_track is not None
+                else None
+            ),
+            "confirmed": (
+                bool(target_track.confirmed)
+                if target_track is not None
+                else False
+            ),
+        }
         return (
             PointCloudDisplayPayload(
                 points=points,
@@ -4433,9 +4526,11 @@ def process_complete_frame(
     display: DisplayPayloadSink,
     raw_writer: RawFrameWriter,
     emit_func: Optional[EmitFunc] = None,
+    performance_logger: Optional[PerformanceMetricsLogger] = None,
 ) -> None:
     emit_func = emit_func or emit
     total_started = time.perf_counter()
+    timing_counts = display.timings.snapshot_counts()
     if not frame.is_valid:
         raw_writer.write_frame(frame)
         emit_func(
@@ -4464,6 +4559,20 @@ def process_complete_frame(
         captured_at_s=frame.first_byte_at_s,
     )
     display.timings.add("total", time.perf_counter() - total_started)
+    if performance_logger is not None:
+        classification = (
+            display.latest_classification.to_dict()
+            if display.latest_classification is not None
+            else None
+        )
+        performance_logger.record_frame(
+            frame_index=display.input_frame_count,
+            captured_at_s=frame.first_byte_at_s,
+            processing_timings_ms=display.timings.samples_since(timing_counts),
+            detection=display.latest_detection_metrics,
+            tracking=display.latest_tracking_metrics,
+            classification=classification,
+        )
 
 
 def _queue_emit(log_queue: mp.Queue, message: str) -> None:
@@ -4865,6 +4974,8 @@ def _run_frame_processor_impl(
     calibration_complete_event: Optional[Any] = None,
     inference_log: Optional[Path] = None,
     evaluation_label: str = "unlabeled",
+    performance_log: Optional[Path] = None,
+    performance_sample_interval_s: float = DEFAULT_RESOURCE_SAMPLE_INTERVAL_S,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -4990,6 +5101,28 @@ def _run_frame_processor_impl(
         calibration_complete_event=calibration_complete_event,
         calibration_emit_func=worker_emit,
     )
+    performance_logger = (
+        PerformanceMetricsLogger(
+            performance_log,
+            run_metadata={
+                "display_mode": display_mode,
+                "display_update_every": max(int(display_update_every), 1),
+                "frame_periodicity_ms": config.frame_periodicity_ms,
+                "classification_enabled": bool(classification_enabled),
+                "classification_device": (
+                    resolve_classification_device(classification_device)
+                    if classification_enabled
+                    else "disabled"
+                ),
+                "static_detection_enabled": bool(static_detection),
+                "process_role": "RadarFrameProcessor",
+            },
+            resource_sample_interval_s=performance_sample_interval_s,
+            emit_func=worker_emit,
+        )
+        if performance_log is not None
+        else None
+    )
     if display.clutter_map is not None and (
         display_mode in {"point-cloud", COMBINED_DISPLAY_MODE}
         or processed_writer.enabled
@@ -5062,7 +5195,14 @@ def _run_frame_processor_impl(
             if frame is None:
                 break
 
-            process_complete_frame(frame, config, display, raw_writer, worker_emit)
+            process_complete_frame(
+                frame,
+                config,
+                display,
+                raw_writer,
+                worker_emit,
+                performance_logger,
+            )
             _increment_shared_counter(processed_frames_counter)
     except KeyboardInterrupt:
         pass
@@ -5095,6 +5235,8 @@ def _run_frame_processor_impl(
                 run_summary,
                 aggregate_summary,
             )
+        if performance_logger is not None:
+            performance_logger.close(termination_status)
         worker_emit(display.format_static_summary())
         worker_emit(display.timings.format_summary())
 
@@ -5446,6 +5588,32 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Evaluation JSONL path. Supplying a path enables inference "
             "logging; otherwise an enabled log is created under log/."
+        ),
+    )
+    parser.add_argument(
+        "--performance-logging",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Write processing, resource, detection, and tracking telemetry "
+            "as JSONL. Disabled by default; --performance-log also enables it."
+        ),
+    )
+    parser.add_argument(
+        "--performance-log",
+        type=Path,
+        help=(
+            "Performance telemetry JSONL path. When omitted, enabled logging "
+            "uses a timestamped file under log/."
+        ),
+    )
+    parser.add_argument(
+        "--performance-sample-interval",
+        type=float,
+        default=DEFAULT_RESOURCE_SAMPLE_INTERVAL_S,
+        help=(
+            "Seconds between CPU, memory, and GPU resource samples. "
+            f"Defaults to {DEFAULT_RESOURCE_SAMPLE_INTERVAL_S:g}."
         ),
     )
     parser.add_argument(
@@ -6336,6 +6504,28 @@ def main() -> None:
                 "--inference-log cannot be combined with "
                 "--no-inference-logging"
             )
+        if args.performance_logging is False and args.performance_log is not None:
+            raise CaptureStartupError(
+                "--performance-log cannot be combined with "
+                "--no-performance-logging"
+            )
+        if (
+            not np.isfinite(args.performance_sample_interval)
+            or args.performance_sample_interval <= 0.0
+        ):
+            raise CaptureStartupError(
+                "--performance-sample-interval must be finite and positive"
+            )
+        performance_logging_enabled = bool(
+            args.performance_logging is True or args.performance_log is not None
+        )
+        resolved_performance_log = None
+        if performance_logging_enabled:
+            resolved_performance_log = (
+                _resolve_output_path(args.performance_log)
+                if args.performance_log is not None
+                else default_performance_log_path()
+            )
         inference_logging_enabled = bool(
             args.inference_logging is True or args.inference_log is not None
         )
@@ -6611,6 +6801,8 @@ def main() -> None:
                     else resolved_inference_log
                 ),
                 args.evaluation_label,
+                resolved_performance_log,
+                args.performance_sample_interval,
             ),
             name="RadarFrameProcessor",
         )

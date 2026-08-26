@@ -477,6 +477,8 @@ Less common direct-receiver controls include:
   explicitly and select a non-default artifact directory;
 - `--inference-logging --evaluation-label LABEL` to opt into a timestamped
   live-inference evaluation log, or `--inference-log PATH` to select its path;
+- `--performance-logging` to write a timestamped processing/resource/detection/
+  tracking telemetry log, or `--performance-log PATH` to select its path;
 - `--micro-doppler-range-half-width-bins N` to change the dedicated rotor
   range-gate width;
 - `--static-detection` to explicitly select the default-enabled static branch;
@@ -884,6 +886,51 @@ summaries, but all complete inference lines remain readable; incomplete logs
 are not included in later aggregate scores. The 48-frame windows overlap, so
 frame results are correlated. Use the session-majority result alongside
 frame-weighted metrics when comparing runs of different lengths.
+
+## Optional Performance Telemetry Log
+
+The integrated launcher asks on each capture run:
+
+```text
+Enable performance telemetry log? [y/N]:
+```
+
+Blank input keeps it disabled. Direct `livedatacapture.py` remains
+non-interactive for scripted capture.
+
+Enable machine-readable runtime telemetry with:
+
+```powershell
+python main/run.py `
+  --performance-logging `
+  --performance-sample-interval 1
+```
+
+The default path is `log/performance_<timestamp>.jsonl`. Supplying
+`--performance-log PATH` also enables logging. Direct `livedatacapture.py`
+accepts the same options. Do not combine a path with
+`--no-performance-logging`.
+
+The version-1 JSONL contains three record types:
+
+- `frame`: capture-to-completion latency, per-stage processing time, dynamic
+  point/cluster counts, static candidates and validation state, selected track
+  state/source/position/range/speed/age/hits/misses, and the latest classifier
+  result;
+- `resource_sample`: frame-processor CPU and resident memory, whole-system CPU
+  and memory, plus NVIDIA GPU utilization/memory/temperature/power when
+  `nvidia-smi` exposes them; Jetson sysfs supplies GPU utilization, frequency,
+  and temperature as a fallback; and
+- `run_summary`: p50/p95/max timing and resource distributions, candidate-frame
+  rate, measured/predicted/absent track coverage, acquisitions, losses, source
+  switches, and longest continuous track.
+
+Resource sampling defaults to once per second to keep overhead low. A `null`
+GPU field means that the platform did not expose that measurement; on Jetson,
+GPU memory is shared system RAM and may not have a separate value. Detection
+candidate rate and track coverage are operational metrics, not accuracy. To
+compute precision/recall, localization error, MOTA, or ID metrics, align the
+logged frame/timestamps with external ground-truth detections or trajectories.
 
 ## Optional Raw Frames
 

@@ -359,6 +359,26 @@ def parse_args() -> argparse.Namespace:
         help="Run-level ground truth; prompts when logging is enabled and omitted.",
     )
     parser.add_argument(
+        "--performance-logging",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Write processing, CPU/GPU/memory, detection, and tracking "
+            "telemetry JSONL. Disabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--performance-log",
+        type=Path,
+        help="Custom performance JSONL path; supplying it enables logging.",
+    )
+    parser.add_argument(
+        "--performance-sample-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between resource samples. Defaults to 1.",
+    )
+    parser.add_argument(
         "--raw-output",
         type=Path,
         help="Optional raw ADC output. Raw recording is disabled by default.",
@@ -441,6 +461,30 @@ def choose_inference_logging(
     while True:
         choice = input(
             "Enable live inference evaluation log? [y/N]: "
+        ).strip().lower()
+        if choice in {"", "n", "no"}:
+            return False
+        if choice in {"y", "yes"}:
+            return True
+        print("Enter y for yes or n for no.")
+
+
+def choose_performance_logging(
+    logging_arg: Optional[bool],
+    log_path: Optional[Path] = None,
+) -> bool:
+    if logging_arg is False and log_path is not None:
+        raise ValueError(
+            "--performance-log cannot be combined with "
+            "--no-performance-logging"
+        )
+    if log_path is not None:
+        return True
+    if logging_arg is not None:
+        return bool(logging_arg)
+    while True:
+        choice = input(
+            "Enable performance telemetry log? [y/N]: "
         ).strip().lower()
         if choice in {"", "n", "no"}:
             return False
@@ -965,6 +1009,20 @@ def build_capture_command(
             command.append("--no-inference-logging")
     else:
         command.append("--no-classification")
+    performance_logging = bool(getattr(args, "performance_logging", False))
+    performance_log = getattr(args, "performance_log", None)
+    if performance_logging or performance_log is not None:
+        command.append("--performance-logging")
+        if performance_log is not None:
+            command.extend(("--performance-log", str(performance_log)))
+    else:
+        command.append("--no-performance-logging")
+    command.extend(
+        (
+            "--performance-sample-interval",
+            str(getattr(args, "performance_sample_interval", 1.0)),
+        )
+    )
     if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
         calibration_distance_m = getattr(args, "calibration_distance_m", None)
         if calibration_distance_m is None:
@@ -1407,6 +1465,23 @@ def main() -> int:
             return 2
         args.inference_logging = False
         args.evaluation_label = "unlabeled"
+    try:
+        args.performance_logging = choose_performance_logging(
+            args.performance_logging,
+            args.performance_log,
+        )
+    except ValueError as exc:
+        print(f"Invalid performance logging options: {exc}", file=sys.stderr)
+        return 2
+    if (
+        not math.isfinite(args.performance_sample_interval)
+        or args.performance_sample_interval <= 0.0
+    ):
+        print(
+            "--performance-sample-interval must be finite and positive.",
+            file=sys.stderr,
+        )
+        return 2
     if display == "micro-doppler":
         try:
             args.micro_doppler_range_m = choose_micro_doppler_range_m(
@@ -1450,6 +1525,13 @@ def main() -> int:
             else ROOT / args.inference_log
         )
         args.inference_log.parent.mkdir(parents=True, exist_ok=True)
+    if args.performance_log is not None:
+        args.performance_log = (
+            args.performance_log
+            if args.performance_log.is_absolute()
+            else ROOT / args.performance_log
+        )
+        args.performance_log.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Display mode: {display}")
     duration_text = (
@@ -1473,6 +1555,14 @@ def main() -> int:
         + (
             str(args.inference_log or "enabled (timestamped under log/)")
             if args.inference_logging
+            else "disabled"
+        )
+    )
+    print(
+        "Performance telemetry log: "
+        + (
+            str(args.performance_log or "enabled (timestamped under log/)")
+            if args.performance_logging or args.performance_log is not None
             else "disabled"
         )
     )

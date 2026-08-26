@@ -55,6 +55,7 @@ boundaries are:
 | `main/inference.py` | Shared CNN feature contract and CPU/PyTorch backend. It creates one `[2, 64]` feature step from a selected three-bin range gate, retains 48 steps, validates the checkpoint/calibration/model-card/profile fingerprint, normalizes the `[2, 48, 64]` window, and returns calibrated `drone`, `not_drone`, or `unknown` results. It has no CLI. |
 | `main/tensorrt_inference.py` | CUDA/TensorRT FP16 backend and device selector. It owns pinned host/device buffers and one CUDA stream, builds or validates the cached engine against ONNX, artifact, profile, TensorRT, and GPU metadata, requires parity within 0.005 probability with no label changes, benchmarks the engine, and implements the same stateful inference interface as the CPU backend. `auto` selects CUDA on Jetson and CPU elsewhere; requested CUDA failures are fatal rather than silently falling back. |
 | `main/classification_evaluation.py` | Optional live-inference evaluation logger. It streams versioned per-attempt JSONL, records the 48-step history lifecycle and reset metadata, computes run-level classification, confidence, duration, latency, stability, and recovery metrics, fingerprints compatible deployments, and aggregates completed labeled logs. It has no CLI and is instantiated by `livedatacapture.py` only when explicitly enabled. |
+| `main/performance_logging.py` | Optional versioned performance telemetry writer. It records per-frame stage time, detection/track state, low-rate process/system CPU and memory, NVIDIA GPU metrics from `nvidia-smi` or Jetson sysfs, and an orderly operational summary. |
 
 The primary module dependencies are:
 
@@ -712,6 +713,31 @@ available. Missing-support metrics are `null` with an explanation. Because
 each line is flushed, an interrupted file retains its complete observations,
 but without a run summary it is excluded from later aggregation.
 
+## Optional Performance Telemetry
+
+Performance telemetry is independent of processed data and inference
+evaluation. The integrated launcher prompts
+`Enable performance telemetry log? [y/N]:`; blank input disables it. Direct
+capture stays non-interactive. `--performance-logging` selects a timestamped
+`log/performance_*.jsonl`; `--performance-log PATH` selects a path and enables
+the feature. `--performance-sample-interval` controls the resource cadence and
+defaults to one second.
+
+The frame processor owns the log. Each processed frame contains its stage
+timings, capture-to-completion latency, post-CFAR point and cluster counts,
+static candidates/validation, selected track state and kinematics, and current
+classification result. Resource records contain the frame processor's CPU/RSS,
+whole-system CPU/RAM, and GPU load/frequency/temperature data when NVIDIA
+tooling or Jetson sysfs provides it. On orderly shutdown, the run summary
+reports timing/resource distributions, candidate-frame rate, tracking
+measurement and continuity coverage, prediction fraction, acquisitions,
+losses, source handoffs, and the longest continuous track.
+
+These are operational observability measures. The application cannot infer
+false positives, false negatives, localization error, MOTA, or identity
+metrics without synchronized external ground truth; timestamps and frame
+indices are retained so an evaluator can join that truth later.
+
 ## Processed and Raw Recording
 
 `--processed-output` streams version-5 newline-delimited JSON. Its first record
@@ -752,7 +778,7 @@ space externally.
 
 ## Automated Test Case Reference
 
-The test suite contains 233 cases in `testcodes/`. Run all of them from the
+The test suite contains 244 cases in `testcodes/`. Run all of them from the
 repository root with `QT_QPA_PLATFORM=offscreen python -m pytest -q`. The
 following inventory documents every collected case by file and test class.
 
@@ -1041,7 +1067,7 @@ following inventory documents every collected case by file and test class.
 - `test_rotor_display_fills_time_gaps_from_nearest_spectrum` — fills display raster gaps using the nearest measured spectrum.
 - `test_gap_aware_series_inserts_nan_at_frame_gap` — inserts NaN separators into analysis series across capture gaps.
 
-### `test_run.py` (41 cases)
+### `test_run.py` (46 cases)
 
 `ChooseDurationMinutesTests`:
 
@@ -1083,6 +1109,14 @@ following inventory documents every collected case by file and test class.
 - `test_evaluation_label_prompt_normalizes_non_drone` — maps the interactive non-drone spelling to the stored `not_drone` label.
 - `test_explicit_evaluation_label_skips_prompt` — honors a supplied ground-truth label without prompting.
 
+`ChoosePerformanceLoggingTests`:
+
+- `test_blank_input_disables_logging_by_default` — keeps performance telemetry off when the prompt is left blank.
+- `test_yes_enables_logging` — enables performance telemetry after an affirmative response.
+- `test_cli_values_skip_prompt` — honors explicit enable/disable flags without prompting.
+- `test_custom_path_enables_logging` — treats an explicit performance-log path as opt-in.
+- `test_custom_path_conflicts_with_explicit_disable` — rejects a performance path combined with explicit logging disablement.
+
 `ChooseDatasetOutputDirectoryTests`:
 
 - `test_blank_input_uses_dataset_root` — stores captures under the dataset root by default.
@@ -1092,7 +1126,7 @@ following inventory documents every collected case by file and test class.
 `CaptureCommandTests`:
 
 - `test_calibration_command_disables_normal_processing` — constructs calibration capture without ordinary detection/classification work.
-- `test_processed_output_is_default_and_raw_output_is_opt_in` — enables processed JSONL by default, keeps inference logging off by default, and forwards explicit evaluation options while raw ADC remains opt-in.
+- `test_processed_output_is_default_and_raw_output_is_opt_in` — enables processed JSONL by default and forwards inference/performance logging options while raw ADC remains opt-in.
 - `test_rotor_command_forwards_gate_and_estimator_settings` — forwards dedicated rotor range, geometry, and RPM options.
 
 `SubprocessEnvironmentTests`:
@@ -1145,6 +1179,15 @@ following inventory documents every collected case by file and test class.
 `StatefulTensorRTTests`:
 
 - `test_feature_history_runs_tensor_rt_at_step_48` — invokes TensorRT when the 48th valid feature step completes the window.
+
+### `test_performance_logging.py` (6 cases)
+
+- `test_processing_timing_stats_isolates_one_frame_samples` — isolates per-frame stage timings from the existing run-level accumulator.
+- `test_performance_log_records_frames_resources_and_summary` — verifies metadata, frame/resource records, timing distributions, and track acquisition/loss/source-switch summaries.
+- `test_performance_log_rejects_non_positive_resource_interval` — rejects invalid resource sampling cadence.
+- `test_jetson_sysfs_gpu_sample_uses_orin_paths_and_thermal_zone` — reads Orin GPU load, frequency, and thermal-zone temperature with the correct units.
+- `test_nvidia_smi_all_na_result_triggers_fallback` — rejects successful but unusable all-N/A NVIDIA-SMI output.
+- `test_resource_sampler_prefers_jetson_sysfs_over_nvidia_smi` — avoids NVIDIA-SMI when working integrated-GPU sysfs counters are available.
 
 ## Current Limitations
 

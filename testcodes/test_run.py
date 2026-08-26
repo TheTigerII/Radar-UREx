@@ -159,6 +159,39 @@ class ChooseInferenceLoggingTests(unittest.TestCase):
             prompt.assert_not_called()
 
 
+class ChoosePerformanceLoggingTests(unittest.TestCase):
+    def test_blank_input_disables_logging_by_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_performance_logging(None))
+
+    def test_yes_enables_logging(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_performance_logging(None))
+
+    def test_cli_values_skip_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(run.choose_performance_logging(True))
+            self.assertFalse(run.choose_performance_logging(False))
+            prompt.assert_not_called()
+
+    def test_custom_path_enables_logging(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(
+                run.choose_performance_logging(
+                    None,
+                    Path("log/performance.jsonl"),
+                )
+            )
+            prompt.assert_not_called()
+
+    def test_custom_path_conflicts_with_explicit_disable(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            run.choose_performance_logging(
+                False,
+                Path("log/performance.jsonl"),
+            )
+
+
 class ChooseDatasetOutputDirectoryTests(unittest.TestCase):
     def test_blank_input_uses_dataset_root(self) -> None:
         with patch("builtins.input", return_value=""):
@@ -311,6 +344,24 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("log/evaluation.jsonl", logging_command)
         self.assertIn("--evaluation-label", logging_command)
         self.assertIn("drone", logging_command)
+
+        args.performance_logging = True
+        args.performance_log = Path("log/performance.jsonl")
+        args.performance_sample_interval = 2.5
+        performance_command = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--performance-logging", performance_command)
+        self.assertIn("--performance-log", performance_command)
+        self.assertIn("log/performance.jsonl", performance_command)
+        self.assertEqual(
+            performance_command[
+                performance_command.index("--performance-sample-interval") + 1
+            ],
+            "2.5",
+        )
 
         args.static_detection = False
         disabled_command = run.build_capture_command(
