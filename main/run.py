@@ -177,6 +177,26 @@ def parse_args() -> argparse.Namespace:
         help="run-level ground truth; prompts when logging is enabled",
     )
     parser.add_argument(
+        "--performance-logging",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "write a runtime JSONL with frame timing, CPU/GPU/memory load, "
+            "and PMM detection/tracking metrics (default: enabled)"
+        ),
+    )
+    parser.add_argument(
+        "--performance-log",
+        type=Path,
+        help="custom runtime performance JSONL path; supplying it enables logging",
+    )
+    parser.add_argument(
+        "--resource-sample-interval-seconds",
+        type=float,
+        default=1.0,
+        help="CPU/GPU/memory sampling interval (minimum 0.1 seconds)",
+    )
+    parser.add_argument(
         "--pmm-background-calibration-seconds",
         type=float,
         default=30.0,
@@ -475,6 +495,32 @@ def build_capture_command(
         )
     if processed_output is not None and display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
         command.extend(("--processed-output", str(processed_output)))
+    if display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        performance_logging = bool(getattr(args, "performance_logging", True))
+        performance_log = getattr(args, "performance_log", None)
+        if performance_logging or performance_log is not None:
+            command.append("--performance-logging")
+            if performance_log is not None:
+                command.extend(("--performance-log", str(performance_log)))
+        else:
+            command.append("--no-performance-logging")
+        command.extend(
+            (
+                "--resource-sample-interval-seconds",
+                str(
+                    max(
+                        float(
+                            getattr(
+                                args,
+                                "resource_sample_interval_seconds",
+                                1.0,
+                            )
+                        ),
+                        0.1,
+                    )
+                ),
+            )
+        )
     if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
         distance_m = getattr(args, "calibration_distance_m", None)
         angle_deg = getattr(args, "calibration_angle_deg", None)
@@ -964,6 +1010,25 @@ def run_calibration_mode(
 
 def main() -> int:
     args = parse_args()
+    args.performance_logging = bool(
+        getattr(args, "performance_logging", True)
+    )
+    args.performance_log = getattr(args, "performance_log", None)
+    args.resource_sample_interval_seconds = float(
+        getattr(args, "resource_sample_interval_seconds", 1.0)
+    )
+    if args.performance_logging is False and args.performance_log is not None:
+        print(
+            "--performance-log cannot be combined with --no-performance-logging.",
+            file=sys.stderr,
+        )
+        return 2
+    if not math.isfinite(args.resource_sample_interval_seconds):
+        print(
+            "--resource-sample-interval-seconds must be finite.",
+            file=sys.stderr,
+        )
+        return 2
     display = choose_display(args.display)
     duration_minutes = 0.0
     realtime_classification = False
@@ -1075,10 +1140,25 @@ def main() -> int:
             else ROOT / args.inference_log
         )
         args.inference_log.parent.mkdir(parents=True, exist_ok=True)
+    if args.performance_log is not None:
+        args.performance_logging = True
+        args.performance_log = (
+            args.performance_log
+            if args.performance_log.is_absolute()
+            else ROOT / args.performance_log
+        )
+    elif args.performance_logging:
+        args.performance_log = processed_output.with_suffix(".performance.jsonl")
+    if args.performance_log is not None:
+        args.performance_log.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Display mode: {display}")
     print(f"Processed output: {processed_output}")
     print(f"Raw output: {raw_output or 'disabled'}")
+    print(
+        "Runtime performance log: "
+        + (str(args.performance_log) if args.performance_logging else "disabled")
+    )
     print(
         "Real-time classification: "
         + (

@@ -43,6 +43,10 @@ if __package__ in {None, ""}:
         ClassificationEvaluationLogger,
         default_inference_log_path,
     )
+    from main.performance_evaluation import (
+        PerformanceEvaluationLogger,
+        default_performance_log_path,
+    )
     from main import calibrate as radar_calibration
 else:
     from .dsp import (
@@ -65,6 +69,10 @@ else:
     from .classification_evaluation import (
         ClassificationEvaluationLogger,
         default_inference_log_path,
+    )
+    from .performance_evaluation import (
+        PerformanceEvaluationLogger,
+        default_performance_log_path,
     )
     from . import calibrate as radar_calibration
 
@@ -163,6 +171,7 @@ class CapturedFrame:
     gap_bytes: int
     first_byte_at_s: float
     capture_diagnostics: Optional[dict[str, int]] = None
+    completed_at_s: Optional[float] = None
 
     @property
     def is_valid(self) -> bool:
@@ -436,11 +445,20 @@ class FrameBuffer:
                 ),
                 payload_received_at_s,
             )
+            completed_at = max(
+                (
+                    timestamp
+                    for start, end, timestamp in self.arrival_markers
+                    if end > 0 and start < self.bytes_per_frame
+                ),
+                default=payload_received_at_s,
+            )
             frames.append(
                 CapturedFrame(
                     data=bytes(self.buffer[: self.bytes_per_frame]),
                     gap_bytes=gap_bytes,
                     first_byte_at_s=received_at,
+                    completed_at_s=completed_at,
                 )
             )
             if gap_bytes:
@@ -759,6 +777,7 @@ class DisplayPayloadSink:
         calibration_complete_event: Optional[Any] = None,
         calibration_emit_func: Optional[EmitFunc] = None,
         evaluation_logger: Optional[ClassificationEvaluationLogger] = None,
+        performance_logger: Optional[PerformanceEvaluationLogger] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(int(update_every), 1)
@@ -768,6 +787,7 @@ class DisplayPayloadSink:
         self.processed_writer = processed_writer
         self.classifier = classifier
         self.evaluation_logger = evaluation_logger
+        self.performance_logger = performance_logger
         self._classification_history_frames = 0
         self.display_skipped_counter = display_skipped_counter
         self.frame_count = 0
@@ -791,6 +811,11 @@ class DisplayPayloadSink:
         range_axis: np.ndarray,
         *,
         captured_at_s: Optional[float] = None,
+        capture_completed_at_s: Optional[float] = None,
+        pipeline_started_s: Optional[float] = None,
+        raw_output_write_ms: float = 0.0,
+        frame_decode_ms: float = 0.0,
+        queue_wait_ms: Optional[float] = None,
     ) -> None:
         if self.calibration_accumulator is not None:
             payload = self.calibration_accumulator.update(range_fft)
@@ -811,7 +836,7 @@ class DisplayPayloadSink:
 
         if self.tracker is None or self.processed_writer is None:
             raise RuntimeError("Normal Mini4 processing requires tracker and writer")
-        total_started = time.perf_counter()
+        total_started = pipeline_started_s or time.perf_counter()
         self.frame_count += 1
         started = time.perf_counter()
         doppler_cube = compute_range_doppler_fft(
@@ -902,11 +927,10 @@ class DisplayPayloadSink:
             },
             classification=classification,
         )
-        self.timings.add_ms(
-            "serialization",
-            (time.perf_counter() - serialization_started) * 1_000.0,
-        )
+        serialization_ms = (time.perf_counter() - serialization_started) * 1_000.0
+        self.timings.add_ms("serialization", serialization_ms)
 
+        display_started = time.perf_counter()
         if (
             self.payload_queue is not None
             and self.mode != "none"
@@ -955,10 +979,40 @@ class DisplayPayloadSink:
                 )
             skipped = _put_latest_queue_payload(self.payload_queue, payload)
             _increment_shared_counter(self.display_skipped_counter, skipped)
+        display_handoff_ms = (time.perf_counter() - display_started) * 1_000.0
+        completed_at_s = time.perf_counter()
+        pipeline_total_ms = (completed_at_s - total_started) * 1_000.0
         self.timings.add_ms(
             "total",
-            (time.perf_counter() - total_started) * 1_000.0,
+            pipeline_total_ms,
         )
+        if self.performance_logger is not None:
+            frame_assembly_ms = (
+                max(capture_completed_at_s - captured_at_s, 0.0) * 1_000.0
+                if captured_at_s is not None and capture_completed_at_s is not None
+                else None
+            )
+            self.performance_logger.record_frame(
+                frame_index=self.frame_count,
+                captured_at_s=captured_at_s,
+                completed_at_s=completed_at_s,
+                latency_ms={
+                    "frame_assembly": frame_assembly_ms,
+                    "processing_queue_wait": queue_wait_ms,
+                    "raw_output_write": raw_output_write_ms,
+                    "frame_decode": frame_decode_ms,
+                    "range_fft": self.latest_range_fft_ms,
+                    "doppler_fft": doppler_ms,
+                    "pmm_tracking": tracking_ms,
+                    "classification": classification_ms,
+                    "processed_output_serialization": serialization_ms,
+                    "display_handoff": display_handoff_ms,
+                    "pipeline_total": pipeline_total_ms,
+                },
+                pmm_result=result,
+                capture_diagnostics=self.capture_diagnostics,
+                classification=classification,
+            )
 
 
 def process_complete_frame(
@@ -977,9 +1031,14 @@ def process_complete_frame(
             f"bytes_per_frame={config.bytes_per_frame}"
         )
         return
+    pipeline_started_s = time.perf_counter()
+    raw_write_started = time.perf_counter()
     raw_writer.write_frame(frame)
+    raw_output_write_ms = (time.perf_counter() - raw_write_started) * 1_000.0
     display.capture_diagnostics = dict(frame.capture_diagnostics or {})
+    decode_started = time.perf_counter()
     radar_cube = frame_bytes_to_radar_cube(frame.data, config)
+    frame_decode_ms = (time.perf_counter() - decode_started) * 1_000.0
     started = time.perf_counter()
     range_fft = compute_range_fft(radar_cube)
     range_fft_ms = (time.perf_counter() - started) * 1_000.0
@@ -992,6 +1051,15 @@ def process_complete_frame(
         range_fft,
         range_axis,
         captured_at_s=frame.first_byte_at_s,
+        capture_completed_at_s=frame.completed_at_s,
+        pipeline_started_s=pipeline_started_s,
+        raw_output_write_ms=raw_output_write_ms,
+        frame_decode_ms=frame_decode_ms,
+        queue_wait_ms=(
+            max(pipeline_started_s - frame.completed_at_s, 0.0) * 1_000.0
+            if frame.completed_at_s is not None
+            else None
+        ),
     )
 
 
@@ -1016,6 +1084,8 @@ def _run_frame_processor(
     inference_log: Optional[Path] = None,
     evaluation_label: str = "unlabeled",
     classification_profile_path: Optional[Path] = None,
+    performance_log: Optional[Path] = None,
+    resource_sample_interval_s: float = 1.0,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -1027,6 +1097,7 @@ def _run_frame_processor(
     display: Optional[DisplayPayloadSink] = None
     classifier: Optional[Any] = None
     evaluation_logger: Optional[ClassificationEvaluationLogger] = None
+    performance_logger: Optional[PerformanceEvaluationLogger] = None
     ready_reported = False
     termination_status = "completed"
     try:
@@ -1072,6 +1143,40 @@ def _run_frame_processor(
                     f"path={evaluation_logger.output_path}, "
                     f"ground_truth={evaluation_label}"
                 )
+        if tracker is not None and performance_log is not None:
+            cuda_memory_provider: Optional[Callable[[], dict[str, int]]] = None
+            if classifier is not None:
+                def read_cuda_memory() -> dict[str, int]:
+                    error, free_bytes, total_bytes = (
+                        classifier.session.cudart.cudaMemGetInfo()
+                    )
+                    if error != classifier.session.cudart.cudaError_t.cudaSuccess:
+                        raise RuntimeError(f"CUDA memory query failed: {error}")
+                    return {
+                        "free_bytes": int(free_bytes),
+                        "total_bytes": int(total_bytes),
+                        "used_bytes": int(total_bytes) - int(free_bytes),
+                    }
+
+                cuda_memory_provider = read_cuda_memory
+
+            performance_logger = PerformanceEvaluationLogger(
+                performance_log,
+                frame_period_s=(
+                    float(config.frame_periodicity_ms) * 1e-3
+                    if config.frame_periodicity_ms is not None
+                    else None
+                ),
+                radar_metadata=_radar_config_metadata(config),
+                pmm_metadata=tracker.metadata,
+                resource_sample_interval_s=resource_sample_interval_s,
+                cuda_memory_provider=cuda_memory_provider,
+            )
+            worker_emit(
+                "Runtime performance logging enabled: "
+                f"path={performance_logger.output_path}, "
+                f"resource_interval={resource_sample_interval_s:g}s"
+            )
         raw_writer = RawFrameWriter(
             raw_output,
             raw_metadata,
@@ -1101,6 +1206,7 @@ def _run_frame_processor(
             calibration_complete_event=calibration_complete_event,
             calibration_emit_func=worker_emit,
             evaluation_logger=evaluation_logger,
+            performance_logger=performance_logger,
         )
         if tracker is not None:
             threshold_description = (
@@ -1165,6 +1271,14 @@ def _run_frame_processor(
                 f"{metrics.get('attempts', 0)}, "
                 f"accuracy={metrics.get('overall_accuracy')}, "
                 f"aggregate_runs={aggregate_summary.get('included_runs', 0)}"
+            )
+        if performance_logger is not None:
+            summary = performance_logger.close(termination_status)
+            worker_emit(
+                "Runtime performance log saved: "
+                f"path={performance_logger.output_path}, "
+                f"frames={summary.get('frames', 0)}, "
+                f"deadline_miss_rate={summary.get('deadline', {}).get('miss_rate')}"
             )
         if display is not None:
             worker_emit(
@@ -1752,6 +1866,23 @@ def parse_args() -> argparse.Namespace:
         default="unlabeled",
         help="run-level ground truth used for evaluation metrics",
     )
+    parser.add_argument(
+        "--performance-logging",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="write frame timing, resource, detection, and tracking metrics",
+    )
+    parser.add_argument(
+        "--performance-log",
+        type=Path,
+        help="custom runtime performance JSONL path; supplying it enables logging",
+    )
+    parser.add_argument(
+        "--resource-sample-interval-seconds",
+        type=float,
+        default=1.0,
+        help="CPU/GPU/memory sampling interval (minimum 0.1 seconds)",
+    )
     parser.add_argument("--display", choices=DISPLAY_CHOICES, default="none")
     parser.add_argument(
         "--calibration-distance-m",
@@ -1832,6 +1963,7 @@ def main() -> int:
     calibration_settings: Optional[radar_calibration.CalibrationSettings] = None
     calibration_complete_event: Optional[Any] = None
     resolved_inference_log: Optional[Path] = None
+    resolved_performance_log: Optional[Path] = None
     exit_code = 0
     try:
         if args.inference_logging is False and args.inference_log is not None:
@@ -1864,6 +1996,31 @@ def main() -> int:
                 f"path={resolved_inference_log}, "
                 f"ground_truth={args.evaluation_label}"
             )
+        if args.performance_logging is False and args.performance_log is not None:
+            raise CaptureStartupError(
+                "--performance-log cannot be combined with "
+                "--no-performance-logging"
+            )
+        if not np.isfinite(float(args.resource_sample_interval_seconds)):
+            raise CaptureStartupError(
+                "--resource-sample-interval-seconds must be finite"
+            )
+        performance_logging_enabled = bool(
+            args.performance_logging is True or args.performance_log is not None
+        )
+        if (
+            performance_logging_enabled
+            and args.display in radar_calibration.CALIBRATION_DISPLAY_MODES
+        ):
+            performance_logging_enabled = False
+            emit("Runtime performance logging disabled during calibration.")
+        if performance_logging_enabled:
+            resolved_performance_log = (
+                _resolve_output_path(args.performance_log)
+                if args.performance_log is not None
+                else default_performance_log_path()
+            )
+            emit(f"Runtime performance log: {resolved_performance_log}")
         if args.display in radar_calibration.CALIBRATION_DISPLAY_MODES:
             calibration_type = {
                 radar_calibration.CALIBRATION_DISPLAY_MODE: "range",
@@ -1961,6 +2118,10 @@ def main() -> int:
                 "evaluation_label": args.evaluation_label,
                 "classification_profile_path": _resolve_config_path(
                     args.config
+                ),
+                "performance_log": resolved_performance_log,
+                "resource_sample_interval_s": max(
+                    float(args.resource_sample_interval_seconds), 0.1
                 ),
             },
             name="RadarFrameProcessor",

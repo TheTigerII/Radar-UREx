@@ -421,6 +421,19 @@ The processing queue is bounded and records drops rather than allowing
 unbounded memory growth. The display queue is also bounded and may discard
 superseded drawings without affecting processing.
 
+`main/performance_evaluation.py` owns the separate version 1 runtime
+performance sidecar. Frame records are emitted by the DSP worker after output
+serialization and display handoff, so timing covers the complete worker path
+without changing the training JSONL schema. Capture assembly completion is
+timestamped by the receiver, allowing assembly, bounded-queue wait, worker
+pipeline, and first-byte-to-completion latency to be evaluated independently.
+Resource sampling uses `/proc` for CPU and memory, Jetson sysfs for GPU load,
+and the active CUDA runtime for device memory. Sampling failures leave nullable
+fields and never stop radar processing. The final summary aggregates latency
+and load distributions plus PMM threshold crossings and track-state
+transitions; these operational rates deliberately do not claim accuracy in the
+absence of external scene truth.
+
 ## Verification
 
 Run:

@@ -158,6 +158,11 @@ backgrounds used by the paper's projection subtraction.
 - `--inference-log`: select an exact evaluation JSONL path and enable logging.
 - `--evaluation-label`: set the run truth to `drone`, `not_drone`, or
   `unlabeled` without an interactive prompt.
+- `--performance-logging` and `--no-performance-logging`: enable or disable
+  the runtime performance sidecar (enabled by default for normal capture).
+- `--performance-log`: select an exact runtime performance JSONL path.
+- `--resource-sample-interval-seconds`: set the CPU/GPU/memory sample period;
+  the minimum is 0.1 seconds and the default is 1 second.
 - `--dataset-destination`: select `dataset`, `uav`, or `other` without the
   combined-display save prompt.
 
@@ -237,6 +242,37 @@ States progress through `calibrating`, `searching`, `tentative`, `confirmed`,
 `coasting`, and `lost`. Only `confirmed` represents a confirmed PMM track; it
 is not a drone-identification result. The 3-D display suppresses tentative
 tracks and shows only confirmed tracks and their short coasting predictions.
+
+### Runtime performance log
+
+Normal captures also write a compact performance JSONL sidecar. When launched
+through `run.py`, its default name uses the processed output stem with
+`.performance.jsonl`; for example,
+`pmm_capture_2026_08_26T12_00_00.performance.jsonl`. Direct
+`livedatacapture.py` runs use `log/runtime_performance_<timestamp>.jsonl`.
+Use `--performance-log` for a specific path or `--no-performance-logging` to
+disable it.
+
+The file contains:
+
+- one `metadata` record describing the radar frame period and PMM settings;
+- one compact `frame` record per processed frame with frame assembly, queue
+  wait, raw output writing, decode, range/Doppler FFT, PMM tracking,
+  classification, processed output serialization, display handoff, total pipeline, and
+  capture-to-completion latency;
+- periodic `resource` records with system and worker-process CPU load, system
+  memory and worker RSS, Jetson GPU utilization when exposed by sysfs, and CUDA
+  free/used/total memory when classification has initialized CUDA;
+- one `summary` record with min/mean/p50/p95/max distributions, frame-period
+  deadline misses, PMM detection rate, state occupancy, confirmed/tracked
+  frame rates, predicted/coasting frames, acquisitions, and losses.
+
+Unsupported GPU counters are written as `null`, which makes missing telemetry
+distinguishable from genuine zero load. CPU process percentage is relative to
+one logical core, so `200` means the worker consumed about two full CPU cores.
+PMM `detected` means score at or above threshold; it is not a ground-truth
+accuracy label. Detection precision/recall and range/angle error require a
+separately recorded truth source for the test scene.
 
 When `--raw-output` is supplied, valid complete ADC frames are also saved to
 the given `.bin` file with a JSON metadata sidecar. This is the preferred input

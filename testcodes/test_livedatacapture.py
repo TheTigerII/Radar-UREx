@@ -78,8 +78,21 @@ class FrameBufferTests(unittest.TestCase):
             1.25,
         )
 
-        self.assertEqual(frames, [CapturedFrame(b"abcdefgh", 0, 1.25)])
+        self.assertEqual(
+            frames,
+            [CapturedFrame(b"abcdefgh", 0, 1.25, completed_at_s=1.25)],
+        )
         self.assertEqual(stats.frames_emitted, 1)
+
+    def test_frame_records_first_and_last_packet_arrival(self) -> None:
+        stats = CaptureStats()
+        buffer = FrameBuffer(8, stats)
+        buffer.add_payload(DCA1000PacketHeader(1, 0), b"abcd", 1.0)
+
+        frames = buffer.add_payload(DCA1000PacketHeader(2, 4), b"efgh", 1.25)
+
+        self.assertEqual(frames[0].first_byte_at_s, 1.0)
+        self.assertEqual(frames[0].completed_at_s, 1.25)
 
     def test_packet_gap_marks_affected_frame_invalid(self) -> None:
         stats = CaptureStats()
@@ -464,6 +477,44 @@ class ClassificationEvaluationWiringTests(unittest.TestCase):
 
         classifier.classify.assert_called_once()
         writer.write_update.assert_called_once()
+
+    def test_performance_logging_is_frame_aligned(self) -> None:
+        tracker = Mock()
+        tracker.update.return_value = self._track_result(1)
+        tracker.spectrogram_db = np.ones((64, 1), dtype=np.float32)
+        performance_logger = Mock()
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            tracker,
+            Mock(),
+            performance_logger=performance_logger,
+        )
+
+        with patch(
+            "main.livedatacapture.compute_range_doppler_fft",
+            return_value=np.empty((0,), dtype=np.float32),
+        ):
+            sink.update(
+                np.empty((0,), dtype=np.float32),
+                np.asarray([1.0], dtype=np.float32),
+                captured_at_s=10.0,
+                capture_completed_at_s=10.01,
+                pipeline_started_s=10.02,
+                raw_output_write_ms=0.25,
+                frame_decode_ms=0.5,
+                queue_wait_ms=10.0,
+            )
+
+        performance_logger.record_frame.assert_called_once()
+        metrics = performance_logger.record_frame.call_args.kwargs
+        self.assertEqual(metrics["frame_index"], 1)
+        self.assertAlmostEqual(metrics["latency_ms"]["frame_assembly"], 10.0)
+        self.assertEqual(metrics["latency_ms"]["processing_queue_wait"], 10.0)
+        self.assertEqual(metrics["latency_ms"]["raw_output_write"], 0.25)
+        self.assertEqual(metrics["latency_ms"]["frame_decode"], 0.5)
 
 
 class DopplerProcessingTests(unittest.TestCase):

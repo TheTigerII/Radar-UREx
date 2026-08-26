@@ -59,6 +59,28 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertIn("--pmm-adaptive-threshold-minimum", command)
         self.assertIn("--pmm-background-calibration-seconds", command)
         self.assertIn("--raw-output", command)
+        self.assertIn("--performance-logging", command)
+
+    def test_forwards_custom_performance_log_and_sample_interval(self) -> None:
+        args = _args()
+        args.performance_logging = True
+        args.performance_log = Path("/tmp/performance.jsonl")
+        args.resource_sample_interval_seconds = 2.5
+
+        command = run.build_capture_command(
+            args,
+            "none",
+            Path("/tmp/pmm.jsonl"),
+        )
+
+        self.assertEqual(
+            command[command.index("--performance-log") + 1],
+            "/tmp/performance.jsonl",
+        )
+        self.assertEqual(
+            command[command.index("--resource-sample-interval-seconds") + 1],
+            "2.5",
+        )
 
     def test_forwards_model_weights_only_when_classification_is_enabled(self) -> None:
         disabled = run.build_capture_command(
