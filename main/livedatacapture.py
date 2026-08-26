@@ -39,6 +39,10 @@ if __package__ in {None, ""}:
         PmmTracker,
         validate_mini4_profile,
     )
+    from main.classification_evaluation import (
+        ClassificationEvaluationLogger,
+        default_inference_log_path,
+    )
     from main import calibrate as radar_calibration
 else:
     from .dsp import (
@@ -57,6 +61,10 @@ else:
         PmmTrackResult,
         PmmTracker,
         validate_mini4_profile,
+    )
+    from .classification_evaluation import (
+        ClassificationEvaluationLogger,
+        default_inference_log_path,
     )
     from . import calibrate as radar_calibration
 
@@ -77,6 +85,7 @@ DEFAULT_CONFIG_PATH = PROFILES_DIR / "profile-mini4-20m.cfg"
 DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
 DEFAULT_MAX_RANGE_M = 20.0
 DEFAULT_POINT_CLOUD_FOV_DEG = 60.0
+PROCESSOR_STARTUP_TIMEOUT_SECONDS = 30.0
 COMBINED_DISPLAY_MODE = "combined"
 DISPLAY_CHOICES = (
     "none",
@@ -749,6 +758,7 @@ class DisplayPayloadSink:
         pmm_config: Optional[PmmConfig] = None,
         calibration_complete_event: Optional[Any] = None,
         calibration_emit_func: Optional[EmitFunc] = None,
+        evaluation_logger: Optional[ClassificationEvaluationLogger] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(int(update_every), 1)
@@ -757,6 +767,8 @@ class DisplayPayloadSink:
         self.tracker = tracker
         self.processed_writer = processed_writer
         self.classifier = classifier
+        self.evaluation_logger = evaluation_logger
+        self._classification_history_frames = 0
         self.display_skipped_counter = display_skipped_counter
         self.frame_count = 0
         self.capture_diagnostics: dict[str, int] = {}
@@ -832,6 +844,7 @@ class DisplayPayloadSink:
         classification: Optional[dict[str, Any]] = None
         classification_ms = 0.0
         if self.classifier is not None:
+            history_frames_before = self._classification_history_frames
             started = time.perf_counter()
             classification_result = self.classifier.classify(
                 self.tracker.spectrogram_db,
@@ -840,6 +853,30 @@ class DisplayPayloadSink:
             )
             classification_ms = (time.perf_counter() - started) * 1_000.0
             classification = classification_result.to_dict()
+            history_frames_after = max(
+                int(classification_result.history_frames), 0
+            )
+            reset_requested = history_frames_after < history_frames_before
+            if self.evaluation_logger is not None:
+                self.evaluation_logger.record(
+                    classification_result,
+                    frame_index=self.frame_count,
+                    captured_at_s=captured_at_s,
+                    history_frames_before=history_frames_before,
+                    reset_requested=reset_requested,
+                    reset_reason=(
+                        "tracking_history_restarted"
+                        if reset_requested
+                        else None
+                    ),
+                    steps_cleared=(
+                        history_frames_before if reset_requested else 0
+                    ),
+                    classification_latency_ms=classification_ms,
+                    target_range_m=result.range_m,
+                    target_state=result.state,
+                )
+            self._classification_history_frames = history_frames_after
             self.timings.add_ms("classification", classification_ms)
             result = replace(
                 result,
@@ -976,6 +1013,9 @@ def _run_frame_processor(
     model_weights_dir: Optional[Path] = None,
     calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
     calibration_complete_event: Optional[Any] = None,
+    inference_log: Optional[Path] = None,
+    evaluation_label: str = "unlabeled",
+    classification_profile_path: Optional[Path] = None,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -986,7 +1026,9 @@ def _run_frame_processor(
     processed_writer: Optional[ProcessedOutputWriter] = None
     display: Optional[DisplayPayloadSink] = None
     classifier: Optional[Any] = None
+    evaluation_logger: Optional[ClassificationEvaluationLogger] = None
     ready_reported = False
+    termination_status = "completed"
     try:
         if calibration_settings is None:
             validate_mini4_profile(config)
@@ -1007,6 +1049,29 @@ def _run_frame_processor(
                 "Real-time classification enabled: "
                 + json.dumps(classifier.metadata, separators=(",", ":"))
             )
+            if inference_log is not None:
+                if classification_profile_path is None:
+                    raise ValueError(
+                        "Inference logging requires the radar profile path"
+                    )
+                evaluation_logger = ClassificationEvaluationLogger(
+                    inference_log,
+                    ground_truth=evaluation_label,
+                    frame_period_s=(
+                        float(config.frame_periodicity_ms) * 1e-3
+                        if config.frame_periodicity_ms is not None
+                        else None
+                    ),
+                    classifier_metadata=classifier.metadata,
+                    pmm_metadata=tracker.metadata,
+                    profile_path=classification_profile_path,
+                    emit_func=worker_emit,
+                )
+                worker_emit(
+                    "Inference evaluation logging enabled: "
+                    f"path={evaluation_logger.output_path}, "
+                    f"ground_truth={evaluation_label}"
+                )
         raw_writer = RawFrameWriter(
             raw_output,
             raw_metadata,
@@ -1035,6 +1100,7 @@ def _run_frame_processor(
             pmm_config=pmm_config,
             calibration_complete_event=calibration_complete_event,
             calibration_emit_func=worker_emit,
+            evaluation_logger=evaluation_logger,
         )
         if tracker is not None:
             threshold_description = (
@@ -1070,6 +1136,7 @@ def _run_frame_processor(
             )
             _increment_shared_counter(processed_frames_counter)
     except Exception as exc:
+        termination_status = "failed"
         message = f"Frame processor failed: {type(exc).__name__}: {exc}"
         worker_emit(message)
         if not ready_reported:
@@ -1086,6 +1153,19 @@ def _run_frame_processor(
             raw_writer.close()
         if processed_writer is not None:
             processed_writer.close()
+        if evaluation_logger is not None:
+            run_summary, aggregate_summary = evaluation_logger.close(
+                termination_status
+            )
+            metrics = run_summary.get("metrics", {})
+            worker_emit(
+                "Inference evaluation log saved: "
+                f"path={evaluation_logger.output_path}, "
+                f"classified={metrics.get('classified_attempts', 0)}/"
+                f"{metrics.get('attempts', 0)}, "
+                f"accuracy={metrics.get('overall_accuracy')}, "
+                f"aggregate_runs={aggregate_summary.get('included_runs', 0)}"
+            )
         if display is not None:
             worker_emit(
                 "Processing timing summary: "
@@ -1655,6 +1735,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-metadata", type=Path)
     parser.add_argument("--processed-output", type=Path)
     parser.add_argument("--model-weights-dir", type=Path)
+    parser.add_argument(
+        "--inference-logging",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="write a separate live-classification evaluation JSONL",
+    )
+    parser.add_argument(
+        "--inference-log",
+        type=Path,
+        help="custom evaluation JSONL path; supplying it enables logging",
+    )
+    parser.add_argument(
+        "--evaluation-label",
+        choices=("drone", "not_drone", "unlabeled"),
+        default="unlabeled",
+        help="run-level ground truth used for evaluation metrics",
+    )
     parser.add_argument("--display", choices=DISPLAY_CHOICES, default="none")
     parser.add_argument(
         "--calibration-distance-m",
@@ -1734,8 +1831,39 @@ def main() -> int:
     display: Optional[LiveDisplay] = None
     calibration_settings: Optional[radar_calibration.CalibrationSettings] = None
     calibration_complete_event: Optional[Any] = None
+    resolved_inference_log: Optional[Path] = None
     exit_code = 0
     try:
+        if args.inference_logging is False and args.inference_log is not None:
+            raise CaptureStartupError(
+                "--inference-log cannot be combined with "
+                "--no-inference-logging"
+            )
+        inference_logging_enabled = bool(
+            args.inference_logging is True or args.inference_log is not None
+        )
+        if (
+            inference_logging_enabled
+            and args.display in radar_calibration.CALIBRATION_DISPLAY_MODES
+        ):
+            raise CaptureStartupError(
+                "Inference logging is unavailable in calibration modes"
+            )
+        if inference_logging_enabled and args.model_weights_dir is None:
+            raise CaptureStartupError(
+                "Inference logging requires classification to be enabled"
+            )
+        if inference_logging_enabled:
+            resolved_inference_log = (
+                _resolve_output_path(args.inference_log)
+                if args.inference_log is not None
+                else default_inference_log_path()
+            )
+            emit(
+                "Inference evaluation logging enabled: "
+                f"path={resolved_inference_log}, "
+                f"ground_truth={args.evaluation_label}"
+            )
         if args.display in radar_calibration.CALIBRATION_DISPLAY_MODES:
             calibration_type = {
                 radar_calibration.CALIBRATION_DISPLAY_MODE: "range",
@@ -1829,14 +1957,25 @@ def main() -> int:
                 "model_weights_dir": args.model_weights_dir,
                 "calibration_settings": calibration_settings,
                 "calibration_complete_event": calibration_complete_event,
+                "inference_log": resolved_inference_log,
+                "evaluation_label": args.evaluation_label,
+                "classification_profile_path": _resolve_config_path(
+                    args.config
+                ),
             },
             name="RadarFrameProcessor",
         )
         processor.start()
-        try:
-            status = status_queue.get(timeout=30.0)
-        except queue.Empty as exc:
-            raise CaptureStartupError("Frame processor did not become ready") from exc
+        status = _wait_for_processor_startup(
+            status_queue,
+            log_queue,
+            processor,
+            timeout_seconds=(
+                None
+                if args.model_weights_dir is not None
+                else PROCESSOR_STARTUP_TIMEOUT_SECONDS
+            ),
+        )
         _drain_log_queue(log_queue)
         if status.get("state") != "ready":
             raise CaptureStartupError(status.get("message", "Processor failed"))
@@ -2045,6 +2184,47 @@ def _drain_log_queue(log_queue: mp.Queue) -> None:
             emit(log_queue.get_nowait())
         except queue.Empty:
             return
+
+
+def _wait_for_processor_startup(
+    status_queue: mp.Queue,
+    log_queue: mp.Queue,
+    processor: mp.Process,
+    *,
+    timeout_seconds: Optional[float],
+) -> dict[str, Any]:
+    """Relay startup logs until the worker is ready or exits."""
+    deadline = (
+        time.monotonic() + max(float(timeout_seconds), 0.0)
+        if timeout_seconds is not None
+        else None
+    )
+    while True:
+        wait_seconds = 0.5
+        if deadline is not None:
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0.0:
+                raise CaptureStartupError(
+                    "Frame processor did not become ready"
+                )
+            wait_seconds = min(wait_seconds, remaining_seconds)
+        try:
+            status = status_queue.get(timeout=wait_seconds)
+        except queue.Empty:
+            _drain_log_queue(log_queue)
+            if processor.is_alive():
+                continue
+            try:
+                status = status_queue.get(timeout=0.1)
+            except queue.Empty as exc:
+                raise CaptureStartupError(
+                    "Frame processor exited before reporting startup status"
+                ) from exc
+        if not isinstance(status, dict):
+            raise CaptureStartupError(
+                "Frame processor returned invalid startup status"
+            )
+        return status
 
 
 def _format_capture_summary(stats: CaptureStats) -> str:

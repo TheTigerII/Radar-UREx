@@ -153,6 +153,11 @@ backgrounds used by the paper's projection subtraction.
 - `--model-weights-dir`: directory containing compatible `model.onnx` and
   `manifest.json` artifacts, plus `model.onnx.data` when declared by the
   manifest.
+- `--inference-logging` and `--no-inference-logging`: explicitly enable or
+  disable the separate live-classification evaluation log.
+- `--inference-log`: select an exact evaluation JSONL path and enable logging.
+- `--evaluation-label`: set the run truth to `drone`, `not_drone`, or
+  `unlabeled` without an interactive prompt.
 - `--dataset-destination`: select `dataset`, `uav`, or `other` without the
   combined-display save prompt.
 
@@ -337,6 +342,56 @@ window; before the history is complete it reports warm-up, and a window whose
 maximum is below threshold remains unknown. Classification metadata and
 per-frame results are also written to processed JSONL. This output is a model
 prediction, not independent ground truth.
+
+## Optional live classification evaluation log
+
+The separate evaluation log is off by default. After classification is enabled,
+the integrated launcher asks whether to create it. If enabled, it also asks for
+one run-level truth label: `drone`, `not_drone`, or `unlabeled`. For unattended
+capture, use:
+
+```bash
+python main/run.py --display combined --classification \
+  --inference-logging --evaluation-label drone
+```
+
+The default path is `log/live_inference_<timestamp>.jsonl`. Supplying an exact
+path enables logging without the logging prompt:
+
+```bash
+python main/run.py --display combined --classification \
+  --inference-log log/outdoor_not_drone.jsonl \
+  --evaluation-label not_drone
+```
+
+Do not combine `--inference-log` with `--no-inference-logging`. Evaluation
+logging also cannot be enabled without classification or in a calibration
+mode. Direct `main/livedatacapture.py` runs never prompt and accept the same
+three explicit options.
+
+The version 2 JSONL starts with run, radar, PMM, model, artifact-hash, profile,
+and compatibility metadata. Each following inference line is flushed
+immediately and contains the frame/capture timestamps, native `uav`, `other`,
+or `unknown` result, confidence, correctness, full classification latency,
+target range/state, and 36-frame history lifecycle. A shrinking history is
+recorded as `tracking_history_restarted` with the number of discarded frames.
+
+On orderly shutdown, the file receives a run summary and a compatible-run
+aggregate summary. Metrics include coverage, ready-result accuracy, operational
+correctness, confusion matrix, per-class precision/recall/F1, balanced
+accuracy, Brier score, log loss, ROC/PR AUC, predicted durations, confidence
+and latency distributions, transitions, session-majority prediction, and
+reset/recovery statistics. Metric evaluation maps native `uav` to the `drone`
+truth and native `other` to `not_drone`; the raw result is not renamed.
+`unlabeled` logs retain operational metrics but are excluded from accuracy
+aggregation.
+
+Aggregation scans completed version 2 logs in the output directory and only
+combines matching model/runtime artifacts, profile and feature fingerprints,
+and PMM configuration. Eli-branch version 1 logs, failed or interrupted files,
+unlabeled runs, and incompatible deployments are reported as exclusions. A
+hard termination may omit the final summaries, but all fully written inference
+lines remain readable.
 
 ## Replay
 

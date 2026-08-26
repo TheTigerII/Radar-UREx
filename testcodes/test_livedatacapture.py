@@ -15,6 +15,7 @@ from main.livedatacapture import (
     CaptureStats,
     DCA1000PacketHeader,
     FrameBuffer,
+    DisplayPayloadSink,
     LiveDisplay,
     RadarCaptureConfig,
     SequenceTracker,
@@ -22,12 +23,15 @@ from main.livedatacapture import (
     _format_capture_summary,
     _put_latest_queue_payload,
     _run_frame_processor,
+    _wait_for_processor_startup,
 )
+from main.inference import ClassificationResult
 from main.dsp import (
     compute_range_doppler_fft,
     frame_bytes_to_radar_cube,
 )
 from main.pmm import PmmConfig
+from main.pmm import PmmTrackResult
 
 
 class DcaHeaderTests(unittest.TestCase):
@@ -247,6 +251,45 @@ class AdcLayoutTests(unittest.TestCase):
 
 
 class FrameProcessorFailureTests(unittest.TestCase):
+    def test_gpu_startup_waits_for_status_while_relaying_logs(self) -> None:
+        status_queue = Mock()
+        status_queue.get.side_effect = (
+            queue.Empty(),
+            {"state": "ready", "message": "ready"},
+        )
+        log_queue = queue.Queue()
+        log_queue.put("TensorRT compiling layer 1")
+        processor = Mock()
+        processor.is_alive.return_value = True
+
+        with patch("main.livedatacapture.emit") as output:
+            status = _wait_for_processor_startup(
+                status_queue,
+                log_queue,
+                processor,
+                timeout_seconds=None,
+            )
+
+        self.assertEqual(status["state"], "ready")
+        output.assert_called_once_with("TensorRT compiling layer 1")
+
+    def test_gpu_startup_stops_if_worker_exits_without_status(self) -> None:
+        status_queue = Mock()
+        status_queue.get.side_effect = queue.Empty()
+        processor = Mock()
+        processor.is_alive.return_value = False
+
+        with self.assertRaisesRegex(
+            CaptureStartupError,
+            "exited before reporting",
+        ):
+            _wait_for_processor_startup(
+                status_queue,
+                queue.Queue(),
+                processor,
+                timeout_seconds=None,
+            )
+
     def test_processing_failure_is_raised_after_ready_status(self) -> None:
         config = RadarCaptureConfig.from_file(
             Path(__file__).resolve().parent.parent
@@ -287,6 +330,140 @@ class FrameProcessorFailureTests(unittest.TestCase):
             any("Frame processor failed" in message for message in messages),
             messages,
         )
+
+
+class ClassificationEvaluationWiringTests(unittest.TestCase):
+    @staticmethod
+    def _track_result(history_frames: int) -> PmmTrackResult:
+        return PmmTrackResult(
+            state="confirmed",
+            label="PMM target",
+            calibration_frames_seen=10,
+            calibration_frames_required=10,
+            history_frames=history_frames,
+            range_bin=4,
+            range_m=2.5,
+            radial_velocity_m_s=0.1,
+            azimuth_deg=0.0,
+            elevation_deg=0.0,
+            raw_pmm_score=1000.0,
+            pmm_score=1000.0,
+            folding_size=4,
+            background_projection_gain=1.0,
+            azimuth_background_projection_gain=1.0,
+            elevation_background_projection_gain=1.0,
+            threshold=700.0,
+            age_frames=40,
+            hits=40,
+            misses=0,
+            predicted=False,
+            dp_transition_bins=1,
+            dp_path_score=1000.0,
+            particle_count=100,
+        )
+
+    @staticmethod
+    def _classification(
+        status: str,
+        label: str,
+        history_frames: int,
+    ) -> ClassificationResult:
+        probabilities = (
+            {"other": 0.1, "uav": 0.9}
+            if status == "classified"
+            else None
+        )
+        return ClassificationResult(
+            status=status,
+            label=label,
+            history_frames=history_frames,
+            maximum_pmm_score=1000.0,
+            threshold=700.0,
+            probabilities=probabilities,
+            confidence=0.9 if probabilities is not None else None,
+            inference_ms=0.5 if probabilities is not None else None,
+        )
+
+    def test_attempts_remain_frame_aligned_and_history_shrink_is_reset(self) -> None:
+        tracker = Mock()
+        tracker.update.side_effect = (
+            self._track_result(36),
+            self._track_result(1),
+        )
+        tracker.spectrogram_db = np.ones((64, 36), dtype=np.float32)
+        classifier = Mock()
+        classifier.classify.side_effect = (
+            self._classification("classified", "uav", 36),
+            self._classification("warming_up", "unknown", 1),
+        )
+        evaluation_logger = Mock()
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            tracker,
+            Mock(),
+            classifier,
+            evaluation_logger=evaluation_logger,
+        )
+
+        with patch(
+            "main.livedatacapture.compute_range_doppler_fft",
+            return_value=np.empty((0,), dtype=np.float32),
+        ):
+            sink.update(
+                np.empty((0,), dtype=np.float32),
+                np.asarray([1.0], dtype=np.float32),
+                captured_at_s=10.0,
+            )
+            sink.update(
+                np.empty((0,), dtype=np.float32),
+                np.asarray([1.0], dtype=np.float32),
+                captured_at_s=10.1,
+            )
+
+        calls = evaluation_logger.record.call_args_list
+        self.assertEqual([call.kwargs["frame_index"] for call in calls], [1, 2])
+        self.assertFalse(calls[0].kwargs["reset_requested"])
+        self.assertTrue(calls[1].kwargs["reset_requested"])
+        self.assertEqual(
+            calls[1].kwargs["reset_reason"],
+            "tracking_history_restarted",
+        )
+        self.assertEqual(calls[1].kwargs["steps_cleared"], 36)
+        self.assertEqual(calls[1].kwargs["target_state"], "confirmed")
+
+    def test_classification_runs_without_evaluation_logger(self) -> None:
+        tracker = Mock()
+        tracker.update.return_value = self._track_result(1)
+        tracker.spectrogram_db = np.ones((64, 1), dtype=np.float32)
+        classifier = Mock()
+        classifier.classify.return_value = self._classification(
+            "warming_up", "unknown", 1
+        )
+        writer = Mock()
+        sink = DisplayPayloadSink(
+            "none",
+            1,
+            None,
+            SimpleNamespace(),
+            tracker,
+            writer,
+            classifier,
+        )
+
+        with patch(
+            "main.livedatacapture.compute_range_doppler_fft",
+            return_value=np.empty((0,), dtype=np.float32),
+        ):
+            sink.update(
+                np.empty((0,), dtype=np.float32),
+                np.asarray([1.0], dtype=np.float32),
+            )
+
+        classifier.classify.assert_called_once()
+        writer.write_update.assert_called_once()
 
 
 class DopplerProcessingTests(unittest.TestCase):

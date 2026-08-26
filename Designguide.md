@@ -319,6 +319,26 @@ update includes a `classification` object. Its status is `warming_up`,
 `below_pmm_threshold`, or `classified`; inadequate histories and low-PMM
 windows remain `unknown` rather than forcing an object label.
 
+Optional classification evaluation is implemented separately in
+`main/classification_evaluation.py`. `run.py` prompts for this opt-in only after
+classification is enabled; direct capture uses explicit `--inference-logging`,
+`--inference-log`, and `--evaluation-label` arguments. Calibration modes and
+classification-disabled runs reject evaluation logging.
+
+The DSP worker owns the version 2 evaluation logger so inference attempts stay
+aligned with their processed frame. It writes line-flushed metadata and one
+record for every classifier call, including warm-up and low-PMM results. Native
+`uav`/`other` results are preserved while evaluation maps them to the run-level
+`drone`/`not_drone` truth vocabulary. A decrease in the 36-frame history is
+recorded as a `tracking_history_restarted` reset.
+
+Orderly shutdown appends run and aggregate summaries. Aggregation accepts only
+completed labeled logs with matching format version, classifier/runtime
+contract, deployed artifact hashes, profile hash and fingerprints, and PMM
+configuration. This compatibility key deliberately excludes Eli's version 1
+logs. Inference lines are flushed immediately; a hard-killed run can lack
+summaries and is excluded from aggregation without losing its complete lines.
+
 ## Offline LSTM training
 
 `machinelearning/training.ipynb` implements a repository-native adaptation of mmHawkeye's UAV

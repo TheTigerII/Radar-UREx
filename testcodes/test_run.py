@@ -76,6 +76,30 @@ class CaptureCommandTests(unittest.TestCase):
         self.assertNotIn("--model-weights-dir", disabled)
         self.assertIn("--model-weights-dir", enabled)
         self.assertIn("/tmp/model_weights", enabled)
+        self.assertIn("--no-inference-logging", enabled)
+
+    def test_forwards_inference_logging_options_when_enabled(self) -> None:
+        args = _args()
+        args.inference_logging = True
+        args.inference_log = Path("/tmp/live_inference.jsonl")
+        args.evaluation_label = "drone"
+
+        command = run.build_capture_command(
+            args,
+            "combined",
+            Path("/tmp/pmm.jsonl"),
+            model_weights_dir=Path("/tmp/model_weights"),
+        )
+
+        self.assertIn("--inference-logging", command)
+        self.assertEqual(
+            command[command.index("--inference-log") + 1],
+            "/tmp/live_inference.jsonl",
+        )
+        self.assertEqual(
+            command[command.index("--evaluation-label") + 1],
+            "drone",
+        )
 
     def test_startup_uses_same_mini4_profile(self) -> None:
         command = run.build_startup_command(_args(), "/dev/ttyUSB0")
@@ -161,6 +185,71 @@ class PromptTests(unittest.TestCase):
         with patch("builtins.input", return_value="yes"):
             self.assertTrue(run.choose_realtime_classification(None))
 
+    def test_inference_logging_defaults_off_and_accepts_yes(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_inference_logging(None))
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_inference_logging(None))
+
+    def test_custom_inference_path_enables_logging_without_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(
+                run.choose_inference_logging(
+                    None,
+                    Path("log/custom.jsonl"),
+                )
+            )
+            prompt.assert_not_called()
+
+    def test_custom_inference_path_conflicts_with_explicit_disable(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            run.choose_inference_logging(
+                False,
+                Path("log/custom.jsonl"),
+            )
+
+    def test_evaluation_label_prompt_normalizes_non_drone(self) -> None:
+        with patch("builtins.input", return_value="non-drone"):
+            self.assertEqual(
+                run.choose_evaluation_label(None),
+                "not_drone",
+            )
+
+    def test_explicit_evaluation_label_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertEqual(
+                run.choose_evaluation_label("drone"),
+                "drone",
+            )
+            prompt.assert_not_called()
+
+    def test_main_rejects_logging_in_calibration_mode(self) -> None:
+        args = argparse.Namespace(
+            display="calibration",
+            capture_dir=run.DEFAULT_CAPTURE_DIR,
+            inference_logging=True,
+            inference_log=None,
+        )
+        with (
+            patch("main.run.parse_args", return_value=args),
+            patch("builtins.print"),
+        ):
+            self.assertEqual(run.main(), 2)
+
+    def test_main_rejects_logging_without_classification(self) -> None:
+        args = argparse.Namespace(
+            display="none",
+            capture_dir=run.DEFAULT_CAPTURE_DIR,
+            classification=False,
+            inference_logging=True,
+            inference_log=None,
+        )
+        with (
+            patch("main.run.parse_args", return_value=args),
+            patch("builtins.print"),
+        ):
+            self.assertEqual(run.main(), 2)
+
     def test_dataset_destination_defaults_to_dataset_root(self) -> None:
         with (
             patch("builtins.input", return_value=""),
@@ -216,6 +305,15 @@ class PromptTests(unittest.TestCase):
 
 
 class CaptureReadinessTests(unittest.TestCase):
+    def test_gpu_classification_waits_for_explicit_readiness(self) -> None:
+        self.assertIsNone(
+            run.capture_startup_timeout_seconds(Path("/tmp/model_weights"))
+        )
+        self.assertEqual(
+            run.capture_startup_timeout_seconds(None),
+            run.CAPTURE_STARTUP_TIMEOUT_SECONDS,
+        )
+
     def test_relay_sets_ready_on_listener_message(self) -> None:
         process = Mock()
         process.stdout = iter(

@@ -158,6 +158,25 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MODEL_WEIGHTS_DIR,
     )
     parser.add_argument(
+        "--inference-logging",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "write a separate live-classification evaluation JSONL; when "
+            "omitted and classification is enabled, prompt with default no"
+        ),
+    )
+    parser.add_argument(
+        "--inference-log",
+        type=Path,
+        help="custom evaluation JSONL path; supplying it enables logging",
+    )
+    parser.add_argument(
+        "--evaluation-label",
+        choices=("drone", "not_drone", "unlabeled"),
+        help="run-level ground truth; prompts when logging is enabled",
+    )
+    parser.add_argument(
         "--pmm-background-calibration-seconds",
         type=float,
         default=30.0,
@@ -224,6 +243,52 @@ def choose_realtime_classification(value: Optional[bool]) -> bool:
         if response in {"y", "yes", "on", "1"}:
             return True
         print("Choose yes or no.")
+
+
+def choose_inference_logging(
+    value: Optional[bool],
+    log_path: Optional[Path] = None,
+) -> bool:
+    if value is False and log_path is not None:
+        raise ValueError(
+            "--inference-log cannot be combined with --no-inference-logging"
+        )
+    if log_path is not None:
+        return True
+    if value is not None:
+        return bool(value)
+    while True:
+        try:
+            response = input(
+                "Enable live inference evaluation log? [y/N]: "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            return False
+        if not response or response in {"n", "no", "off", "0"}:
+            return False
+        if response in {"y", "yes", "on", "1"}:
+            return True
+        print("Choose yes or no.")
+
+
+def choose_evaluation_label(value: Optional[str]) -> str:
+    if value is not None:
+        return value
+    while True:
+        try:
+            response = input(
+                "Evaluation ground truth (drone/not_drone/unlabeled) "
+                "[unlabeled]: "
+            ).strip().lower().replace("-", "_")
+        except (EOFError, KeyboardInterrupt):
+            return "unlabeled"
+        if response in {"", "unlabeled", "none"}:
+            return "unlabeled"
+        if response in {"drone", "uav"}:
+            return "drone"
+        if response in {"not_drone", "notdrone", "non_drone", "other"}:
+            return "not_drone"
+        print("Choose drone, not_drone, or unlabeled.")
 
 
 def choose_dataset_destination(value: Optional[str]) -> Path:
@@ -450,6 +515,25 @@ def build_capture_command(
         command.extend(("--raw-output", str(raw_output)))
     if model_weights_dir is not None:
         command.extend(("--model-weights-dir", str(model_weights_dir)))
+        inference_logging = bool(
+            getattr(args, "inference_logging", False)
+        )
+        inference_log = getattr(args, "inference_log", None)
+        if inference_logging or inference_log is not None:
+            command.extend(
+                (
+                    "--inference-logging",
+                    "--evaluation-label",
+                    str(
+                        getattr(args, "evaluation_label", None)
+                        or "unlabeled"
+                    ),
+                )
+            )
+            if inference_log is not None:
+                command.extend(("--inference-log", str(inference_log)))
+        else:
+            command.append("--no-inference-logging")
     return command
 
 
@@ -546,15 +630,36 @@ def relay_capture_output(
 def wait_for_capture_ready(
     process: subprocess.Popen,
     ready_event: threading.Event,
-    timeout_seconds: float = CAPTURE_STARTUP_TIMEOUT_SECONDS,
+    timeout_seconds: Optional[float] = CAPTURE_STARTUP_TIMEOUT_SECONDS,
 ) -> bool:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if ready_event.wait(timeout=0.1):
-            return True
+    deadline = (
+        time.monotonic() + max(float(timeout_seconds), 0.0)
+        if timeout_seconds is not None
+        else None
+    )
+    while True:
+        if ready_event.is_set():
+            return process.poll() is None
         if process.poll() is not None:
             return False
-    return ready_event.is_set()
+        wait_seconds = 0.1
+        if deadline is not None:
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0.0:
+                return False
+            wait_seconds = min(wait_seconds, remaining_seconds)
+        ready_event.wait(wait_seconds)
+
+
+def capture_startup_timeout_seconds(
+    model_weights_dir: Optional[Path],
+) -> Optional[float]:
+    """Wait for TensorRT completion while retaining a bound for CPU startup."""
+    return (
+        None
+        if model_weights_dir is not None
+        else CAPTURE_STARTUP_TIMEOUT_SECONDS
+    )
 
 
 def terminate_process(process: subprocess.Popen) -> None:
@@ -863,10 +968,45 @@ def main() -> int:
     duration_minutes = 0.0
     realtime_classification = False
     default_output_directory = args.capture_dir
-    if display not in radar_calibration.CALIBRATION_DISPLAY_MODES:
+    if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
+        if args.inference_logging is True or args.inference_log is not None:
+            print(
+                "Inference logging is unavailable in calibration modes.",
+                file=sys.stderr,
+            )
+            return 2
+        args.inference_logging = False
+        args.evaluation_label = "unlabeled"
+    else:
         realtime_classification = choose_realtime_classification(
             args.classification
         )
+        if realtime_classification:
+            try:
+                args.inference_logging = choose_inference_logging(
+                    args.inference_logging,
+                    args.inference_log,
+                )
+            except ValueError as exc:
+                print(
+                    f"Invalid inference logging options: {exc}",
+                    file=sys.stderr,
+                )
+                return 2
+            args.evaluation_label = (
+                choose_evaluation_label(args.evaluation_label)
+                if args.inference_logging
+                else "unlabeled"
+            )
+        else:
+            if args.inference_logging is True or args.inference_log is not None:
+                print(
+                    "Inference logging requires classification to be enabled.",
+                    file=sys.stderr,
+                )
+                return 2
+            args.inference_logging = False
+            args.evaluation_label = "unlabeled"
         if args.processed_output is None and (
             display == "combined" or args.dataset_destination is not None
         ):
@@ -928,6 +1068,13 @@ def main() -> int:
         raw_output = ROOT / raw_output
     if raw_output is not None:
         raw_output.parent.mkdir(parents=True, exist_ok=True)
+    if args.inference_log is not None:
+        args.inference_log = (
+            args.inference_log
+            if args.inference_log.is_absolute()
+            else ROOT / args.inference_log
+        )
+        args.inference_log.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"Display mode: {display}")
     print(f"Processed output: {processed_output}")
@@ -937,6 +1084,14 @@ def main() -> int:
         + (
             f"enabled ({model_weights_dir})"
             if model_weights_dir is not None
+            else "disabled"
+        )
+    )
+    print(
+        "Inference evaluation log: "
+        + (
+            str(args.inference_log or "enabled (timestamped under log/)")
+            if args.inference_logging
             else "disabled"
         )
     )
@@ -975,7 +1130,13 @@ def main() -> int:
             daemon=True,
         )
         relay_thread.start()
-        if not wait_for_capture_ready(capture, ready):
+        if not wait_for_capture_ready(
+            capture,
+            ready,
+            timeout_seconds=capture_startup_timeout_seconds(
+                model_weights_dir
+            ),
+        ):
             print("Live capture failed to become ready.", file=sys.stderr)
             return 1
         startup = start_process(
