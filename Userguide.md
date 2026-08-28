@@ -950,7 +950,11 @@ until stopped.
 
 ## Logging and Statistics
 
-Terminal output is appended to `log\livedatacapture.log` by default:
+Each run writes terminal output to a new
+`log\livedatacapture_<run-id>.log` file by default. When performance or
+inference logging is enabled, its default filename uses the same run ID, for
+example `performance_<run-id>.jsonl` and `live_inference_<run-id>.jsonl`.
+An explicit path can still be selected with:
 
 ```powershell
 python main\livedatacapture.py `

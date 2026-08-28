@@ -11,16 +11,25 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, TextIO
 
+from .log_paths import default_run_log_path, new_run_log_id
+
 
 PERFORMANCE_LOG_FORMAT = "radar-performance-jsonl"
 PERFORMANCE_LOG_VERSION = 1
 DEFAULT_RESOURCE_SAMPLE_INTERVAL_S = 1.0
 
 
-def default_performance_log_path(log_dir: Optional[Path] = None) -> Path:
-    directory = log_dir or Path(__file__).resolve().parent.parent / "log"
-    timestamp = datetime.now().astimezone().strftime("%Y_%m_%dT%H_%M_%S")
-    return directory / f"performance_{timestamp}.jsonl"
+def default_performance_log_path(
+    log_dir: Optional[Path] = None,
+    *,
+    run_id: Optional[str] = None,
+) -> Path:
+    return default_run_log_path(
+        "performance",
+        ".jsonl",
+        run_id=run_id or new_run_log_id(),
+        log_dir=log_dir,
+    )
 
 
 def _distribution(values: list[float]) -> dict[str, Optional[float] | int]:

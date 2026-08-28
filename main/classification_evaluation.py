@@ -11,12 +11,16 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional, TextIO
 
 from .inference import InferenceResult, WINDOW_STEPS
+from .log_paths import (
+    DEFAULT_LOG_DIRECTORY,
+    default_run_log_path,
+    new_run_log_id,
+)
 
 
 FORMAT_NAME = "radar-live-inference-jsonl"
 FORMAT_VERSION = 1
 GROUND_TRUTH_LABELS = ("drone", "not_drone", "unlabeled")
-DEFAULT_LOG_DIRECTORY = Path(__file__).resolve().parent.parent / "log"
 ARTIFACT_NAMES = (
     "manifest.json",
     "calibration.joblib",
@@ -25,9 +29,16 @@ ARTIFACT_NAMES = (
 )
 
 
-def default_inference_log_path(now: Optional[datetime] = None) -> Path:
-    timestamp = (now or datetime.now().astimezone()).strftime("%Y%m%d_%H%M%S_%f")
-    return DEFAULT_LOG_DIRECTORY / f"live_inference_{timestamp}.jsonl"
+def default_inference_log_path(
+    now: Optional[datetime] = None,
+    *,
+    run_id: Optional[str] = None,
+) -> Path:
+    return default_run_log_path(
+        "live_inference",
+        ".jsonl",
+        run_id=run_id or new_run_log_id(now),
+    )
 
 
 def _iso_now() -> str:

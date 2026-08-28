@@ -72,6 +72,7 @@ if __package__ in {None, ""}:
         PerformanceMetricsLogger,
         default_performance_log_path,
     )
+    from main.log_paths import default_terminal_log_path, new_run_log_id
 else:
     from .dsp import (
         AdaptiveClutterMap,
@@ -123,6 +124,7 @@ else:
         PerformanceMetricsLogger,
         default_performance_log_path,
     )
+    from .log_paths import default_terminal_log_path, new_run_log_id
 
 
 # Default DCA1000 network parameters.
@@ -137,7 +139,6 @@ DEFAULT_PACKET_QUEUE_SIZE = 8192
 DEFAULT_PROCESSING_QUEUE_SIZE = 32
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 PROFILES_DIR = REPOSITORY_ROOT / "profiles"
-DEFAULT_LOG_PATH = REPOSITORY_ROOT / "log" / "livedatacapture.log"
 DEFAULT_CONFIG_PATH = PROFILES_DIR / "mmwave.json"
 DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
 DEFAULT_CLASSIFICATION_ARTIFACT_DIR = (
@@ -5519,8 +5520,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--log-file",
         type=Path,
-        default=DEFAULT_LOG_PATH,
-        help="Append terminal status output to this log file.",
+        help=(
+            "Terminal status log path. When omitted, each run creates a "
+            "uniquely named file under log/."
+        ),
     )
     parser.add_argument(
         "--raw-output",
@@ -6429,7 +6432,7 @@ def _bit_count(mask: int) -> int:
     return int(mask).bit_count()
 
 
-def setup_terminal_log(log_path: Path) -> None:
+def setup_terminal_log(log_path: Path, *, append: bool = True) -> None:
     global _LOG_FILE
 
     resolved_path = log_path
@@ -6437,7 +6440,8 @@ def setup_terminal_log(log_path: Path) -> None:
         resolved_path = Path.cwd() / resolved_path
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
 
-    _LOG_FILE = resolved_path.open("a", encoding="utf-8", buffering=1)
+    mode = "a" if append else "x"
+    _LOG_FILE = resolved_path.open(mode, encoding="utf-8", buffering=1)
     emit("")
     emit(f"--- Live capture log started at {_timestamp()}: {resolved_path} ---")
 
@@ -6463,7 +6467,16 @@ def _timestamp() -> str:
 
 def main() -> None:
     args = parse_args()
-    setup_terminal_log(args.log_file)
+    run_log_id = new_run_log_id()
+    terminal_log_path = (
+        args.log_file
+        if args.log_file is not None
+        else default_terminal_log_path(run_id=run_log_id)
+    )
+    setup_terminal_log(
+        terminal_log_path,
+        append=args.log_file is not None,
+    )
     process_context = mp.get_context("spawn")
     frame_queue: Optional[mp.Queue] = None
     log_queue: Optional[mp.Queue] = None
@@ -6524,7 +6537,7 @@ def main() -> None:
             resolved_performance_log = (
                 _resolve_output_path(args.performance_log)
                 if args.performance_log is not None
-                else default_performance_log_path()
+                else default_performance_log_path(run_id=run_log_id)
             )
         inference_logging_enabled = bool(
             args.inference_logging is True or args.inference_log is not None
@@ -6538,7 +6551,7 @@ def main() -> None:
             resolved_inference_log = (
                 _resolve_output_path(args.inference_log)
                 if args.inference_log is not None
-                else default_inference_log_path()
+                else default_inference_log_path(run_id=run_log_id)
             )
             emit(
                 "Inference evaluation logging enabled: "

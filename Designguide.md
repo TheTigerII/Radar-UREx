@@ -772,9 +772,11 @@ format, processing parameters, counts, and paths. An explicit `--raw-metadata`
 overrides the sidecar name. Integrated `main/run.py` enables processed output by
 default and leaves raw recording disabled unless `--raw-output` is supplied.
 
-Terminal messages are appended to `livedatacapture.log` by default. Raw files
-and logs have no rotation or size limit, so long deployments must monitor disk
-space externally.
+Each capture run writes terminal messages to a new
+`livedatacapture_<run-id>.log` by default. The terminal, performance, and live
+inference default filenames share that run ID so their files can be correlated.
+Raw files and logs have no rotation or size limit, so long deployments must
+monitor disk space externally.
 
 ## Automated Test Case Reference
 
