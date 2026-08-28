@@ -19,8 +19,8 @@ DEFAULT_LOG_DIRECTORY = Path(__file__).resolve().parent.parent / "log"
 
 
 def default_performance_log_path(now: Optional[datetime] = None) -> Path:
-    timestamp = (now or datetime.now().astimezone()).strftime("%Y%m%d_%H%M%S_%f")
-    return DEFAULT_LOG_DIRECTORY / f"runtime_performance_{timestamp}.jsonl"
+    timestamp = (now or datetime.now().astimezone()).strftime("%Y%m%d_%H%M%S")
+    return DEFAULT_LOG_DIRECTORY / f"{timestamp}_runtime_performance.jsonl"
 
 
 def _iso_now() -> str:

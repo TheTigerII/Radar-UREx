@@ -1,12 +1,14 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from main.performance_evaluation import (
     PerformanceEvaluationLogger,
     SystemResourceSampler,
+    default_performance_log_path,
 )
 from main.pmm import PmmTrackResult
 
@@ -70,6 +72,13 @@ def _resource() -> dict:
 
 
 class PerformanceEvaluationLoggerTests(unittest.TestCase):
+    def test_default_path_is_timestamped_under_log_directory(self) -> None:
+        now = datetime(2026, 8, 28, 13, 45, 12, 123456)
+        path = default_performance_log_path(now)
+
+        self.assertEqual(path.parent.name, "log")
+        self.assertEqual(path.name, "20260828_134512_runtime_performance.jsonl")
+
     def test_jetson_gpu_load_is_discovered_and_converted_from_permille(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

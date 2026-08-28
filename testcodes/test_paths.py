@@ -28,11 +28,11 @@ class RepositoryPathTests(unittest.TestCase):
         second = livedatacapture.default_terminal_log_path(now)
 
         self.assertEqual(first.parent, REPOSITORY_ROOT / "log")
-        self.assertRegex(
+        self.assertEqual(
             first.name,
-            r"^livedatacapture_20260828_134512_123456_[0-9a-f]{8}\.log$",
+            "20260828_134512_livedatacapture.log",
         )
-        self.assertNotEqual(first, second)
+        self.assertEqual(first, second)
 
     def test_terminal_log_is_created_exclusively(self) -> None:
         with TemporaryDirectory() as directory:

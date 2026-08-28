@@ -11,7 +11,6 @@ import socket
 import sys
 import threading
 import time
-import uuid
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -1849,8 +1848,8 @@ def parse_args() -> argparse.Namespace:
         "--log-file",
         type=Path,
         help=(
-            "terminal log path; defaults to a unique "
-            "log/livedatacapture_<timestamp>_<run-id>.log file"
+            "terminal log path; defaults to a "
+            "log/<timestamp>_livedatacapture.log file"
         ),
     )
     parser.add_argument("--raw-output", type=Path)
@@ -2431,11 +2430,8 @@ def _resolve_output_path(path: Optional[Path]) -> Optional[Path]:
 
 
 def default_terminal_log_path(now: Optional[datetime] = None) -> Path:
-    timestamp = (now or datetime.now().astimezone()).strftime(
-        "%Y%m%d_%H%M%S_%f"
-    )
-    run_id = uuid.uuid4().hex[:8]
-    return DEFAULT_LOG_DIRECTORY / f"livedatacapture_{timestamp}_{run_id}.log"
+    timestamp = (now or datetime.now().astimezone()).strftime("%Y%m%d_%H%M%S")
+    return DEFAULT_LOG_DIRECTORY / f"{timestamp}_livedatacapture.log"
 
 
 def setup_terminal_log(path: Optional[Path] = None) -> Path:

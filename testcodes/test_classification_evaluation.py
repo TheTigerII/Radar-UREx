@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from main.classification_evaluation import (
@@ -127,11 +128,11 @@ class EvaluationLoggerTests(unittest.TestCase):
         )
 
     def test_default_path_is_timestamped_under_log_directory(self) -> None:
-        path = default_inference_log_path()
+        now = datetime(2026, 8, 28, 13, 45, 12, 123456)
+        path = default_inference_log_path(now)
 
         self.assertEqual(path.parent.name, "log")
-        self.assertTrue(path.name.startswith("live_inference_"))
-        self.assertEqual(path.suffix, ".jsonl")
+        self.assertEqual(path.name, "20260828_134512_live_inference.jsonl")
 
     def test_stream_flushes_native_result_and_history_reset_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

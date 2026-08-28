@@ -26,12 +26,14 @@ if __package__ in {None, ""}:
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
     )
+    from main.performance_evaluation import default_performance_log_path
     from main import calibrate as radar_calibration
 else:
     from .pmm import (
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
     )
+    from .performance_evaluation import default_performance_log_path
     from . import calibrate as radar_calibration
 
 
@@ -1148,7 +1150,7 @@ def main() -> int:
             else ROOT / args.performance_log
         )
     elif args.performance_logging:
-        args.performance_log = processed_output.with_suffix(".performance.jsonl")
+        args.performance_log = default_performance_log_path()
     if args.performance_log is not None:
         args.performance_log.parent.mkdir(parents=True, exist_ok=True)
 
