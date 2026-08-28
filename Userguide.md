@@ -577,3 +577,4 @@ If live classification fails during startup, confirm that
 `model_weights/manifest.json` came from this repository's current notebook and
 capture contract. Do not bypass a fingerprint mismatch by editing checkpoint
 metadata.
+
