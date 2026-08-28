@@ -148,6 +148,9 @@ backgrounds used by the paper's projection subtraction.
 - `--pmm-coast-frames`: missing observations allowed after confirmation.
 - `--display-update-every`: reduce drawing frequency without reducing DSP rate.
 - `--processing-queue-size` and `--packet-queue-size`: bounded queue capacities.
+- `--log-file`: select an exact terminal log path. When omitted, every run
+  creates its own `log/livedatacapture_<timestamp>_<run-id>.log` file. Existing
+  files are never appended to or overwritten.
 - `--classification` and `--no-classification`: explicitly enable or disable
   real-time classification without an interactive prompt.
 - `--model-weights-dir`: directory containing compatible `model.onnx` and

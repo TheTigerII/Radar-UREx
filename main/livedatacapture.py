@@ -11,6 +11,7 @@ import socket
 import sys
 import threading
 import time
+import uuid
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -88,7 +89,7 @@ DEFAULT_PROCESSING_QUEUE_SIZE = 32
 DEFAULT_SOCKET_RECV_BUFFER_BYTES = 4 * 1024 * 1024
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 PROFILES_DIR = REPOSITORY_ROOT / "profiles"
-DEFAULT_LOG_PATH = REPOSITORY_ROOT / "log" / "livedatacapture.log"
+DEFAULT_LOG_DIRECTORY = REPOSITORY_ROOT / "log"
 DEFAULT_CONFIG_PATH = PROFILES_DIR / "profile-mini4-20m.cfg"
 DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
 DEFAULT_MAX_RANGE_M = 20.0
@@ -1844,7 +1845,14 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_PROCESSING_QUEUE_SIZE,
     )
     parser.add_argument("--socket-timeout", type=float, default=SOCKET_TIMEOUT_SECONDS)
-    parser.add_argument("--log-file", type=Path, default=DEFAULT_LOG_PATH)
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        help=(
+            "terminal log path; defaults to a unique "
+            "log/livedatacapture_<timestamp>_<run-id>.log file"
+        ),
+    )
     parser.add_argument("--raw-output", type=Path)
     parser.add_argument("--raw-metadata", type=Path)
     parser.add_argument("--processed-output", type=Path)
@@ -1954,7 +1962,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    setup_terminal_log(args.log_file)
+    try:
+        terminal_log_path = setup_terminal_log(args.log_file)
+    except OSError as exc:
+        print(f"Unable to create terminal log: {exc}", file=sys.stderr, flush=True)
+        return 2
+    emit(f"Terminal log: {terminal_log_path}")
     context = mp.get_context("spawn")
     frame_queue: Optional[mp.Queue] = None
     log_queue: Optional[mp.Queue] = None
@@ -2417,12 +2430,22 @@ def _resolve_output_path(path: Optional[Path]) -> Optional[Path]:
     return Path.cwd() / path
 
 
-def setup_terminal_log(path: Path) -> None:
+def default_terminal_log_path(now: Optional[datetime] = None) -> Path:
+    timestamp = (now or datetime.now().astimezone()).strftime(
+        "%Y%m%d_%H%M%S_%f"
+    )
+    run_id = uuid.uuid4().hex[:8]
+    return DEFAULT_LOG_DIRECTORY / f"livedatacapture_{timestamp}_{run_id}.log"
+
+
+def setup_terminal_log(path: Optional[Path] = None) -> Path:
     global _LOG_FILE
-    resolved = _resolve_output_path(path)
+    resolved = _resolve_output_path(path or default_terminal_log_path())
     assert resolved is not None
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    _LOG_FILE = resolved.open("a", encoding="utf-8", buffering=1)
+    # Exclusive creation guarantees that two runs never append to one file.
+    _LOG_FILE = resolved.open("x", encoding="utf-8", buffering=1)
+    return resolved
 
 
 def close_terminal_log() -> None:
