@@ -23,9 +23,9 @@ def new_run_log_id(
     collision_number = 2
     while any(
         (
-            directory / f"{prefix}_{run_id}{suffix}"
+            directory / f"{run_id}_{log_type}{suffix}"
         ).exists()
-        for prefix, suffix in (
+        for log_type, suffix in (
             ("livedatacapture", ".log"),
             ("performance", ".jsonl"),
             ("live_inference", ".jsonl"),
@@ -37,7 +37,7 @@ def new_run_log_id(
 
 
 def default_run_log_path(
-    prefix: str,
+    log_type: str,
     suffix: str,
     *,
     run_id: str,
@@ -46,7 +46,7 @@ def default_run_log_path(
     """Build a default log path using the capture run's shared identifier."""
 
     directory = log_dir or DEFAULT_LOG_DIRECTORY
-    return directory / f"{prefix}_{run_id}{suffix}"
+    return directory / f"{run_id}_{log_type}{suffix}"
 
 
 def default_terminal_log_path(

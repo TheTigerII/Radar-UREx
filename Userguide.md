@@ -951,9 +951,9 @@ until stopped.
 ## Logging and Statistics
 
 Each run writes terminal output to a new
-`log\livedatacapture_<run-id>.log` file by default. When performance or
+`log\<run-id>_livedatacapture.log` file by default. When performance or
 inference logging is enabled, its default filename uses the same run ID, for
-example `performance_<run-id>.jsonl` and `live_inference_<run-id>.jsonl`.
+example `<run-id>_performance.jsonl` and `<run-id>_live_inference.jsonl`.
 An explicit path can still be selected with:
 
 ```powershell

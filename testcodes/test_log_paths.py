@@ -15,7 +15,7 @@ def test_run_log_id_uses_date_and_second_only(tmp_path) -> None:
 
 def test_run_log_id_adds_counter_when_second_already_exists(tmp_path) -> None:
     now = datetime(2026, 8, 28, 15, 30, 45, tzinfo=timezone.utc)
-    (tmp_path / "livedatacapture_20260828_153045.log").touch()
+    (tmp_path / "20260828_153045_livedatacapture.log").touch()
 
     run_id = new_run_log_id(now, log_dir=tmp_path)
 
@@ -29,6 +29,6 @@ def test_default_log_filenames_share_the_capture_run_id() -> None:
     performance = default_performance_log_path(run_id=run_id)
     inference = default_inference_log_path(run_id=run_id)
 
-    assert terminal.name == f"livedatacapture_{run_id}.log"
-    assert performance.name == f"performance_{run_id}.jsonl"
-    assert inference.name == f"live_inference_{run_id}.jsonl"
+    assert terminal.name == f"{run_id}_livedatacapture.log"
+    assert performance.name == f"{run_id}_performance.jsonl"
+    assert inference.name == f"{run_id}_live_inference.jsonl"
