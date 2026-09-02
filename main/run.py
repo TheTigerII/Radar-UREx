@@ -73,6 +73,7 @@ DISPLAY_CHOICES = (
 WINDOWS_DEFAULT_RADAR_PORT = "COM4"
 LINUX_DEFAULT_RADAR_PORT = "/dev/ttyUSB0"
 CLASSIFICATION_RESULT_PREFIX = "CLASSIFICATION_RESULT "
+INITIAL_PROCESSING_READY_PREFIX = "INITIAL_PROCESSING_READY "
 CAPTURE_READY_PREFIX = "Listening for live radar stream "
 CAPTURE_STARTUP_TIMEOUT_SECONDS = 30.0
 CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS = 300.0
@@ -289,6 +290,7 @@ def parse_args() -> argparse.Namespace:
         type=float,
         help=(
             "Run duration in minutes. Use 0 for no time limit. "
+            "The timer starts after initial calibration and warm-up. "
             "When omitted, prompt with a default of 5 minutes."
         ),
     )
@@ -539,7 +541,8 @@ def choose_duration_minutes(duration_arg: Optional[float]) -> float:
 
     while True:
         choice = input(
-            f"Run duration in minutes (0 for unlimited) "
+            f"Run duration after initial calibration/warm-up in minutes "
+            f"(0 for unlimited) "
             f"[{DEFAULT_DURATION_MINUTES:g}]: "
         ).strip()
         if not choice:
@@ -745,6 +748,7 @@ def relay_capture_output(
     classification_queue: queue.SimpleQueue,
     capture_ready: Optional[threading.Event] = None,
     calibration_queue: Optional[queue.SimpleQueue] = None,
+    initial_processing_ready: Optional[threading.Event] = None,
 ) -> None:
     if process.stdout is None:
         return
@@ -752,6 +756,10 @@ def relay_capture_output(
         line = raw_line.rstrip("\r\n")
         if capture_ready is not None and line.startswith(CAPTURE_READY_PREFIX):
             capture_ready.set()
+        if line.startswith(INITIAL_PROCESSING_READY_PREFIX):
+            if initial_processing_ready is not None:
+                initial_processing_ready.set()
+            continue
         calibration_index = line.find(radar_calibration.CALIBRATION_RESULT_PREFIX)
         if calibration_index >= 0:
             payload = line[
@@ -818,6 +826,17 @@ def capture_startup_timeout_seconds(args: argparse.Namespace) -> float:
         if "nvidia" in model.lower()
         else CAPTURE_STARTUP_TIMEOUT_SECONDS
     )
+
+
+def duration_deadline(
+    duration_minutes: float,
+    *,
+    initial_processing_ready: bool,
+) -> Optional[float]:
+    """Create a deadline only after startup calibration and warm-up finish."""
+    if duration_minutes <= 0.0 or not initial_processing_ready:
+        return None
+    return time.monotonic() + (duration_minutes * 60.0)
 
 
 def report_pending_classifications(
@@ -1572,6 +1591,7 @@ def main() -> int:
     capture_output_thread: Optional[threading.Thread] = None
     classification_queue: queue.SimpleQueue = queue.SimpleQueue()
     capture_ready = threading.Event()
+    initial_processing_ready = threading.Event()
     latest_classification: Optional[dict] = None
     try:
         capture_process = start_process(
@@ -1581,7 +1601,13 @@ def main() -> int:
         )
         capture_output_thread = threading.Thread(
             target=relay_capture_output,
-            args=(capture_process, classification_queue, capture_ready),
+            args=(
+                capture_process,
+                classification_queue,
+                capture_ready,
+                None,
+                initial_processing_ready,
+            ),
             name="LiveCaptureOutputRelay",
             daemon=True,
         )
@@ -1612,11 +1638,7 @@ def main() -> int:
             "startup",
             build_startup_command(args, radar_port),
         )
-        deadline = (
-            None
-            if duration_minutes == 0
-            else time.monotonic() + (duration_minutes * 60.0)
-        )
+        deadline: Optional[float] = None
 
         while True:
             latest_classification = report_pending_classifications(
@@ -1629,6 +1651,19 @@ def main() -> int:
             if capture_process.poll() is not None:
                 print(f"live capture exited with code {capture_process.returncode}")
                 return capture_process.returncode or 0
+            if (
+                duration_minutes > 0
+                and deadline is None
+                and initial_processing_ready.is_set()
+            ):
+                deadline = duration_deadline(
+                    duration_minutes,
+                    initial_processing_ready=True,
+                )
+                print(
+                    "Initial calibration and warm-up complete. "
+                    "Run-duration timer started."
+                )
             if deadline is not None:
                 remaining_seconds = deadline - time.monotonic()
                 if remaining_seconds <= 0:

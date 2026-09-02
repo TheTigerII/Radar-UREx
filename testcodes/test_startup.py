@@ -59,13 +59,13 @@ class DCA1000PacketDelayTests(unittest.TestCase):
         self.assertEqual(int.from_bytes(payload[0:2], "little"), 1470)
         self.assertEqual(int.from_bytes(payload[2:4], "little"), 6250)
 
-    def test_repository_setup_uses_fifty_microseconds(self) -> None:
+    def test_repository_setup_uses_one_hundred_microseconds(self) -> None:
         setup_path = (
             Path(__file__).resolve().parent.parent / "profiles" / "setup.json"
         )
         setup = json.loads(setup_path.read_text(encoding="utf-8"))
 
-        self.assertEqual(setup["DCA1000Config"]["packetDelay_us"], 50)
+        self.assertEqual(setup["DCA1000Config"]["packetDelay_us"], 100)
 
 
 class SdkProfileCommandTests(unittest.TestCase):

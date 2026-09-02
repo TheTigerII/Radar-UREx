@@ -30,7 +30,9 @@ zero means unlimited), starts the capture pipeline first, and waits until it
 reports that the UDP receiver is listening before starting the hardware
 controller. The readiness wait also covers initialization of the selected
 display, frame processor, and optional rotor post-processor; its timeout is
-extended for CUDA/TensorRT startup. When the deadline expires or Ctrl+C is
+extended for CUDA/TensorRT startup. For a finite run, the deadline is created
+only after the frame processor reports that its initial clutter-map warm-up and
+static-scene calibration are complete. When the deadline expires or Ctrl+C is
 pressed, `main/run.py` stops `startup.py` first so `sensorStop` and DCA1000
 `RECORD_STOP` are attempted before capture is closed.
 
@@ -308,7 +310,7 @@ The factor 4 is two bytes for I plus two bytes for Q. The current reshape code
 supports complex, 16-bit, two-lane LVDS data.
 
 `setup.json` supplies DCA1000 settings including `packetSequenceEnable` and
-`packetDelay_us`. The current 50-us delay remains comfortably above the data
+`packetDelay_us`. The current 100-us delay remains comfortably above the data
 rate required by the 33.33-ms radar profile while smoothing Ethernet bursts.
 The supported hardware range is validated as 5 to 500 us. When packet sequence
 headers are disabled, the receiver uses synthetic sequence and byte counts; it
@@ -937,7 +939,7 @@ following inventory documents every collected case by file and test class.
 - `test_stream_contains_history_reset_metadata_and_summaries` — writes reset sequencing, history generations, confidence, latency, and both shutdown summary records.
 - `test_second_compatible_run_aggregates_both_truth_classes` — combines compatible labeled runs and produces both class accuracies and AUROC.
 
-### `test_livedatacapture.py` (91 cases)
+### `test_livedatacapture.py` (92 cases)
 
 `FrameBufferTests`:
 
@@ -959,11 +961,15 @@ following inventory documents every collected case by file and test class.
 - `test_graceful_processor_stop_does_not_discard_a_queued_frame` — drains work queued before the shutdown sentinel.
 - `test_latest_payload_replacement_is_counted` — counts display payloads replaced by the latest-only queue.
 
+`InitialProcessingReadinessTests`:
+
+- `test_scene_learning_must_finish_before_processing_is_ready` — holds the run-ready signal until clutter-map warm-up and static-scene calibration both finish.
+
 `RotorDisplayPayloadSinkTests`:
 
 - `test_dedicated_mode_accepts_proven_three_tx_profile_and_bypasses_point_cloud` — accepts the verified three-TX rotor profile without invoking point-cloud DSP.
 - `test_rotor_frame_worker_initializes_with_three_tx_profile` — initializes the rotor worker using the three-transmitter contract.
-- `test_rotor_frame_worker_processes_three_tx_frame` — produces a rotor result from a valid three-TX frame.
+- `test_rotor_frame_worker_processes_three_tx_frame` — produces a rotor result from a valid three-TX frame and emits the run-ready signal because rotor mode has no scene-map learning phase.
 
 `RotorPostprocessorTests`:
 
@@ -1069,7 +1075,7 @@ following inventory documents every collected case by file and test class.
 - `test_rotor_display_fills_time_gaps_from_nearest_spectrum` — fills display raster gaps using the nearest measured spectrum.
 - `test_gap_aware_series_inserts_nan_at_frame_gap` — inserts NaN separators into analysis series across capture gaps.
 
-### `test_run.py` (46 cases)
+### `test_run.py` (48 cases)
 
 `ChooseDurationMinutesTests`:
 
@@ -1078,6 +1084,7 @@ following inventory documents every collected case by file and test class.
 - `test_cli_value_skips_prompt` — honors a supplied duration without prompting.
 - `test_negative_cli_value_is_rejected` — rejects negative durations.
 - `test_non_finite_cli_value_is_rejected` — rejects NaN and infinite durations.
+- `test_deadline_starts_only_after_initial_processing_is_ready` — creates the requested-duration deadline only after startup learning completes.
 
 `ChooseMicroDopplerRangeTests`:
 
@@ -1140,6 +1147,7 @@ following inventory documents every collected case by file and test class.
 
 - `test_relay_extracts_structured_result_and_forwards_other_logs` — parses classification messages while relaying unrelated output.
 - `test_relay_reports_capture_readiness` — recognizes and signals the capture-ready marker.
+- `test_relay_reports_initial_processing_readiness` — recognizes the worker marker that starts the requested-duration timer.
 - `test_wait_for_capture_ready_stops_when_capture_exits` — fails readiness waiting when the capture child terminates.
 - `test_wait_for_capture_ready_accepts_ready_capture` — succeeds after a live child emits readiness.
 - `test_explicit_cuda_allows_first_engine_build` — grants the longer startup window for an explicit CUDA build.
@@ -1154,7 +1162,7 @@ following inventory documents every collected case by file and test class.
 - `test_supported_packet_delay_boundaries_are_accepted` — accepts both documented DCA1000 packet-delay limits.
 - `test_packet_delay_outside_hardware_range_is_rejected` — rejects delays outside the FPGA-supported range.
 - `test_fifty_microseconds_encodes_to_6250_fpga_cycles` — converts 50 microseconds into the expected 6,250 cycles.
-- `test_repository_setup_uses_fifty_microseconds` — verifies the committed capture setup selects the validated delay.
+- `test_repository_setup_uses_one_hundred_microseconds` — verifies the committed capture setup selects the 100-microsecond delay.
 
 `SdkProfileCommandTests`:
 

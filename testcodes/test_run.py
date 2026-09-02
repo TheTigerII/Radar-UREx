@@ -34,6 +34,22 @@ class ChooseDurationMinutesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "finite, non-negative"):
             run.choose_duration_minutes(float("nan"))
 
+    def test_deadline_starts_only_after_initial_processing_is_ready(self) -> None:
+        with patch("main.run.time.monotonic", return_value=100.0):
+            self.assertIsNone(
+                run.duration_deadline(
+                    1.5,
+                    initial_processing_ready=False,
+                )
+            )
+            self.assertEqual(
+                run.duration_deadline(
+                    1.5,
+                    initial_processing_ready=True,
+                ),
+                190.0,
+            )
+
 
 class ChooseMicroDopplerRangeTests(unittest.TestCase):
     def test_blank_input_uses_2_15_meter_default(self) -> None:
@@ -500,6 +516,25 @@ class ClassificationResultChannelTests(unittest.TestCase):
             )
 
         self.assertTrue(capture_ready.is_set())
+
+    def test_relay_reports_initial_processing_readiness(self) -> None:
+        result_queue = queue.SimpleQueue()
+        initial_processing_ready = threading.Event()
+        process = SimpleNamespace(
+            stdout=io.StringIO(
+                "INITIAL_PROCESSING_READY startup calibration and warm-up complete\n"
+            )
+        )
+
+        with patch("builtins.print") as output:
+            run.relay_capture_output(
+                process,
+                result_queue,
+                initial_processing_ready=initial_processing_ready,
+            )
+
+        self.assertTrue(initial_processing_ready.is_set())
+        output.assert_not_called()
 
     def test_wait_for_capture_ready_stops_when_capture_exits(self) -> None:
         process = SimpleNamespace(poll=lambda: 2)

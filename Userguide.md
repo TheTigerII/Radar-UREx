@@ -148,7 +148,8 @@ micro-Doppler image in one window.
 
 1. Prompts for a display mode unless `--display` is supplied.
 2. Prompts for a run duration in minutes. Press Enter for the 5-minute default,
-   or enter `0` for an unlimited run.
+   or enter `0` for an unlimited run. The timed duration begins only after the
+   initial clutter-map warm-up and static-scene calibration are complete.
 3. Detects serial ports and asks which command UART to use when needed.
 4. Starts `livedatacapture.py` with `profile.cfg` and `setup.json` by default.
 5. In combined point-cloud + micro-Doppler mode, asks whether to run live CNN
@@ -1046,8 +1047,9 @@ already owns the port.
 
 - Connect the PC directly to DCA1000 over wired Ethernet.
 - Ensure `packetDelay_us` in `setup.json` matches the DCA1000 configuration.
-- The repository default is 50 us. If loss remains after host buffering is
-  fixed, test 75 us and ensure the DCA1000 FPGA error LED remains off.
+- The repository default is 100 us. If loss remains after host buffering is
+  fixed, test a higher delay within the supported range and ensure the DCA1000
+  FPGA error LED remains off.
 - Avoid routing capture traffic through Wi-Fi, VPNs, or busy switches.
 - Increase the OS/network-adapter receive buffers where supported.
 - Check the logged requested and actual socket receive-buffer sizes.

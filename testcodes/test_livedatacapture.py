@@ -31,6 +31,7 @@ from main.livedatacapture import (
     DEFAULT_POINT_CLOUD_FOV_DEG,
     DEFAULT_ROTOR_BLADES,
     DEFAULT_ROTOR_RPM_MAX,
+    INITIAL_PROCESSING_READY_PREFIX,
     MICRO_DOPPLER_HISTORY_UPDATES,
     MICRO_DOPPLER_HOP_LOOPS,
     MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS,
@@ -293,6 +294,22 @@ class FrameDiagnosticsTests(unittest.TestCase):
         self.assertEqual(payload_queue.get_nowait(), "new")
 
 
+class InitialProcessingReadinessTests(unittest.TestCase):
+    def test_scene_learning_must_finish_before_processing_is_ready(self) -> None:
+        sink = DisplayPayloadSink.__new__(DisplayPayloadSink)
+        sink.mode = COMBINED_DISPLAY_MODE
+        sink.processed_writer = None
+        sink.inference_engine = None
+        sink.clutter_map = SimpleNamespace(is_ready=False)
+        sink.static_scene_map = SimpleNamespace(is_ready=False)
+
+        self.assertFalse(sink.initial_processing_ready)
+        sink.clutter_map.is_ready = True
+        self.assertFalse(sink.initial_processing_ready)
+        sink.static_scene_map.is_ready = True
+        self.assertTrue(sink.initial_processing_ready)
+
+
 class RotorDisplayPayloadSinkTests(unittest.TestCase):
     def test_dedicated_mode_accepts_proven_three_tx_profile_and_bypasses_point_cloud(
         self,
@@ -466,6 +483,12 @@ class RotorDisplayPayloadSinkTests(unittest.TestCase):
             messages.append(log_queue.get_nowait())
         self.assertFalse(
             any("Frame processor stopped after error" in message for message in messages)
+        )
+        self.assertTrue(
+            any(
+                message.startswith(INITIAL_PROCESSING_READY_PREFIX)
+                for message in messages
+            )
         )
 
 

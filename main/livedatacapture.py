@@ -169,6 +169,7 @@ DEFAULT_TRACK_CONFIRMATION_HITS = 3
 COMBINED_DISPLAY_MODE = "point-cloud-micro-doppler"
 ROTOR_DISPLAY_MODE = "micro-doppler"
 CLASSIFICATION_RESULT_PREFIX = "CLASSIFICATION_RESULT "
+INITIAL_PROCESSING_READY_PREFIX = "INITIAL_PROCESSING_READY "
 COMBINED_POINT_CLOUD_UPDATE_EVERY = 1
 MICRO_DOPPLER_HISTORY_UPDATES = 150
 MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS = 1
@@ -1765,6 +1766,25 @@ class DisplayPayloadSink:
             and mode != ROTOR_DISPLAY_MODE
             else None
         )
+
+    @property
+    def initial_processing_ready(self) -> bool:
+        """Report when startup learning used by normal processing is complete."""
+        uses_scene_maps = self.mode != ROTOR_DISPLAY_MODE and (
+            (
+                self.processed_writer is not None
+                and self.processed_writer.enabled
+            )
+            or self.mode in {"point-cloud", COMBINED_DISPLAY_MODE}
+            or self.inference_engine is not None
+        )
+        if not uses_scene_maps:
+            return True
+        clutter_ready = self.clutter_map is None or self.clutter_map.is_ready
+        static_ready = (
+            self.static_scene_map is None or self.static_scene_map.is_ready
+        )
+        return clutter_ready and static_ready
 
     def close(self) -> None:
         if self._classification_executor is not None:
@@ -5189,6 +5209,7 @@ def _run_frame_processor_impl(
             timeout=1.0,
         )
 
+    initial_processing_ready_reported = False
     try:
         termination_status = "completed"
         while True:
@@ -5204,6 +5225,22 @@ def _run_frame_processor_impl(
                 worker_emit,
                 performance_logger,
             )
+            if (
+                not initial_processing_ready_reported
+                and display.initial_processing_ready
+            ):
+                try:
+                    log_queue.put(
+                        INITIAL_PROCESSING_READY_PREFIX
+                        + "startup calibration and warm-up complete",
+                        timeout=1.0,
+                    )
+                except queue.Full:
+                    # This marker controls the parent process's finite-run
+                    # deadline, so retry it after the next processed frame.
+                    pass
+                else:
+                    initial_processing_ready_reported = True
             _increment_shared_counter(processed_frames_counter)
     except KeyboardInterrupt:
         pass
