@@ -8,7 +8,7 @@
     "dataTransferMode": "LVDSCapture",
     "dataCaptureMode": "ethernetStream",
     "packetSequenceEnable": 1,
-    "packetDelay_us": 50
+    "packetDelay_us": 100
   },
   "mmWaveDevice": "iwr6843",
   "operatingFreq": 60,
