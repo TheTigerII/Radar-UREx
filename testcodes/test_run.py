@@ -209,7 +209,7 @@ class PromptTests(unittest.TestCase):
 
         prompt_text = prompt.call_args.args[0]
         self.assertIn("after initial calibration", prompt_text)
-        self.assertIn("3.5 = 3m 30s", prompt_text)
+        self.assertIn("0 for unlimited", prompt_text)
 
     def test_realtime_classification_defaults_off(self) -> None:
         with patch("builtins.input", return_value=""):

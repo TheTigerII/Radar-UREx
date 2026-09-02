@@ -354,7 +354,7 @@ def choose_duration_minutes(value: Optional[float]) -> float:
         text = input(
             "Run duration after initial calibration, in minutes "
             f"[{DEFAULT_DURATION_MINUTES:g}] "
-            "(e.g. 3.5 = 3m 30s): "
+            "(0 for unlimited): "
         ).strip()
         value = DEFAULT_DURATION_MINUTES if not text else float(text)
     if not float("-inf") < float(value) < float("inf") or value < 0.0:
