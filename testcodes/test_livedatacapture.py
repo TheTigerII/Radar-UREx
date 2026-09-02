@@ -1314,6 +1314,12 @@ class TrackedDisplayPayloadTests(unittest.TestCase):
             short_time_micro_doppler.call_args.kwargs["target_range_m"],
             2.0,
         )
+        self.assertEqual(
+            short_time_micro_doppler.call_args.kwargs[
+                "range_half_width_bins"
+            ],
+            1,
+        )
         np.testing.assert_array_equal(
             sink.latest_micro_doppler_db,
             np.asarray((2.0, 5.0, 8.0, 11.0)),
@@ -2599,8 +2605,8 @@ class MicroDopplerDisplayTests(unittest.TestCase):
         self.assertEqual(MICRO_DOPPLER_WINDOW_LOOPS, 64)
         self.assertEqual(MICRO_DOPPLER_HOP_LOOPS, 32)
 
-    def test_live_range_gate_uses_five_bins(self) -> None:
-        self.assertEqual(2 * MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS + 1, 5)
+    def test_live_range_gate_matches_three_bin_ml_input(self) -> None:
+        self.assertEqual(2 * MICRO_DOPPLER_RANGE_HALF_WIDTH_BINS + 1, 3)
 
     def test_draw_sets_centered_doppler_and_history_axes(self) -> None:
         axis = Mock()
