@@ -1,0 +1,38 @@
+[2026-09-02T21:08:08+08:00] 
+[2026-09-02T21:08:08+08:00] --- Live capture log started at 2026-09-02T21:08:08+08:00: /home/rgmtc/Desktop/Radar-UREx/log/20260902_210808_livedatacapture.log ---
+[2026-09-02T21:08:08+08:00] Inference evaluation logging enabled: path=/home/rgmtc/Desktop/Radar-UREx/log/20260902_210808_live_inference.jsonl, ground_truth=drone
+[2026-09-02T21:08:08+08:00] Classification requested: device=cuda, artifacts=/home/rgmtc/Desktop/Radar-UREx/model_weights
+[2026-09-02T21:08:08+08:00] Loaded radar config: RadarCaptureConfig(num_adc_samples=64, num_rx_channels=4, num_chirps_per_frame=384, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=128, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=5000.0, frequency_slope_mhz_per_us=60.0, start_frequency_ghz=60.0, idle_time_us=7.0, ramp_end_time_us=32.0, frame_periodicity_ms=33.33, range_bias_m=0.1190787, rx_channel_compensation=((0.87565+0j), (-0.68629+0.13133j), (-0.68101+0.28645j), (0.7752-0.03156j), (0.51658-0.59936j), (-0.32232+0.66024j), (-0.23342+0.86559j), (0.39294-0.76367j), (0.44868-0.89369j), (-0.14162+0.77765j), (0.0345+0.84329j), (0.41645-0.86571j)), azimuth_bias_deg=-2.972753, elevation_bias_deg=0.1000456)
+[2026-09-02T21:08:08+08:00] DSP backend: local SciPy/NumPy kernels
+[2026-09-02T21:08:08+08:00] Loaded capture setup: CaptureSetupConfig(packet_sequence_enable=True, packet_delay_us=100, capture_hardware='DCA1000', config_used='profiles/mmwave.json')
+[2026-09-02T21:08:12+08:00] Live display ready: backend=PyQtGraph/xcb, DISPLAY=:0, screen=DP-0, geometry=1200x700+360+173.
+[2026-09-02T21:08:14+08:00] Found cached TensorRT FP16 engine: /home/rgmtc/Desktop/Radar-UREx/model_weights/generated/model_sm87_fp16.engine
+[2026-09-02T21:08:14+08:00] Using cached TensorRT FP16 engine: /home/rgmtc/Desktop/Radar-UREx/model_weights/generated/model_sm87_fp16.engine
+[2026-09-02T21:08:14+08:00] CNN classification enabled: artifacts=/home/rgmtc/Desktop/Radar-UREx/model_weights, device=cuda, threshold=0.692472, negative_training_class=bionic_bird
+[2026-09-02T21:08:14+08:00] Saving processed radar output to /home/rgmtc/Desktop/Radar-UREx/dataset/uav/processed_capture_2026_09_02T21_07_53.jsonl
+[2026-09-02T21:08:14+08:00] Performance telemetry logging enabled: path=/home/rgmtc/Desktop/Radar-UREx/log/20260902_210808_performance.jsonl
+[2026-09-02T21:08:14+08:00] Clutter map enabled: warmup_update_rate=0.02, warmup=30 updates, minimum_snr=3 dB, post_warmup_updates=disabled
+[2026-09-02T21:08:14+08:00] Static scene detection enabled: warmup=30 updates, reference=150 updates, minimum_change=3 dB, learned_noise_multiplier=2x, handoff_distance=0.4 m, background_update_rate=0. Keep the target absent until calibration is complete.
+[2026-09-02T21:08:14+08:00] Radar frame processor ready.
+[2026-09-02T21:08:14+08:00] Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=393216
+[2026-09-02T21:08:14+08:00] DCA1000 setup: packet_sequence_enable=True, packet_delay_us=100
+[2026-09-02T21:08:14+08:00] UDP socket receive buffer: requested=4194304B, actual=425984B
+[2026-09-02T21:08:14+08:00] WARNING: The operating system granted less UDP receive buffering than requested. On Linux, raise the limit before capture with 'sudo sysctl -w net.core.rmem_max=4194304'.
+[2026-09-02T21:08:14+08:00] UDP packet queue capacity: 8192 datagrams
+[2026-09-02T21:08:14+08:00] Trigger frames now. Press Ctrl+C to stop.
+[2026-09-02T21:08:24+08:00] INITIAL_PROCESSING_READY startup calibration and warm-up complete
+[2026-09-02T21:14:25+08:00] Streaming stopped.
+[2026-09-02T21:14:25+08:00] Capture summary: packets=2980177, frames=11034, valid_frames=11034, invalid_frames=0, queued_frames=11034, lost_packets=0, receiver_queue_drops=0, processing_drops=0, stream_resyncs=0
+[2026-09-02T21:14:25+08:00] Shutting down capture pipeline...
+[2026-09-02T21:14:27+08:00] Processed radar output saved: updates=11034, path=/home/rgmtc/Desktop/Radar-UREx/dataset/uav/processed_capture_2026_09_02T21_07_53.jsonl
+[2026-09-02T21:14:27+08:00] Inference evaluation log: /home/rgmtc/Desktop/Radar-UREx/log/20260902_210808_live_inference.jsonl
+[2026-09-02T21:14:27+08:00] Inference evaluation summary: accuracy=0.9660, drone=0.9660, not_drone=n/a, coverage=0.9379, resets=497, effective_resets=3
+[2026-09-02T21:14:27+08:00] Aggregate inference evaluation: runs=1, accuracy=0.9660, drone=0.9660, not_drone=n/a
+[2026-09-02T21:14:27+08:00] Performance telemetry saved: frames=11034, path=/home/rgmtc/Desktop/Radar-UREx/log/20260902_210808_performance.jsonl
+[2026-09-02T21:14:27+08:00] Static detection summary: candidate_points=358191, full_updates=6665, skipped_inactive_updates=4369, local_cluster_points_mean=6.9, local_cluster_points_max=27, handoff_pending_updates=722, validated_updates=5714
+[2026-09-02T21:14:27+08:00] Processing timing summary: frame_decode=p50:1.35ms/p95:2.05ms/max:10.69ms, range_fft=p50:1.17ms/p95:3.43ms/max:11.88ms, doppler=p50:1.42ms/p95:3.49ms/max:12.97ms, dynamic_detection=p50:4.54ms/p95:7.05ms/max:20.05ms, static_detection=p50:9.69ms/p95:13.54ms/max:26.61ms, clustering=p50:0.73ms/p95:1.24ms/max:5.95ms, micro_doppler=p50:3.37ms/p95:6.53ms/max:18.07ms, classification=p50:2.99ms/p95:5.41ms/max:20.99ms, serialization=p50:0.81ms/p95:1.13ms/max:5.48ms, total=p50:24.98ms/p95:32.81ms/max:55.49ms
+[2026-09-02T21:14:27+08:00] Processing summary: valid_frames=11034, queued_frames=11034, processed_frames=11034, processing_drops=0
+[2026-09-02T21:14:27+08:00] Live display closed.
+[2026-09-02T21:14:27+08:00] Display summary: rendered_updates=10354, coalesced_updates=680, radar_frame_redraw_coverage=93.837%, radar_frames_without_dedicated_redraw=680/11034. This is GUI cadence, not capture or processing loss.
+[2026-09-02T21:14:27+08:00] Capture pipeline shutdown complete.
+[2026-09-02T21:14:27+08:00] --- Live capture log ended at 2026-09-02T21:14:27+08:00 ---
