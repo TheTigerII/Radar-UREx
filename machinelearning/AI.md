@@ -211,7 +211,8 @@ artifacts:
 - window length or stride assumptions;
 - clipping and normalization semantics;
 - CNN configuration;
-- radar profile fingerprint.
+- CNN-relevant radar profile fingerprint (excluding host-only angle-bias
+  metadata applied after range-Doppler feature formation).
 
 Offline generation and live inference must continue to share the feature
 implementation and `_build_model` definition. Silent resizing or loading an

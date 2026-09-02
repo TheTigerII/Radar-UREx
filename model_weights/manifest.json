@@ -55,7 +55,7 @@
     "test": 0.15
   },
   "dataset_manifest_sha256": "74e13cf0f6c0ab65aa4c7a575b344fd8191ba2e6092f1672c158add2e4d177b7",
-  "compatible_profile_sha256": "5f89423fbeb8717ea2595750d3f709ecae283021272b6ca7c99a63802192f470",
+  "compatible_profile_sha256": "2e046cc8b01ac0f0465fd944a93cd759b70fc997fd66c45951f1ddbddf2e3fa9",
   "onnx_sha256": "2abc5bdf01bd5149941260fd6d302083546e14bc18a651a2f0ac62a8f2b63d0e",
   "parity_data_sha256": "495d97a5ce05688c04704f88aad11984df1eac6c9bcbb747e4c9ae1e4e9241e5",
   "deployment_backend": "TensorRT FP16 on Jetson; PyTorch CPU fallback",

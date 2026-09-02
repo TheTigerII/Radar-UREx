@@ -74,6 +74,39 @@ class FeatureExtractionTests(unittest.TestCase):
                 hashlib.sha256(lf_path.read_bytes()).hexdigest(),
             )
 
+    def test_profile_hash_ignores_host_angle_calibration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            base_path = root / "base.cfg"
+            legacy_path = root / "legacy.cfg"
+            current_path = root / "current.cfg"
+            changed_capture_path = root / "changed-capture.cfg"
+            base_path.write_text("profileCfg 1\nsensorStart\n", encoding="utf-8")
+            legacy_path.write_text(
+                "profileCfg 1\n"
+                "hostAngleCalibration azimuthBiasDeg 2 elevationBiasDeg -3\n"
+                "sensorStart\n",
+                encoding="utf-8",
+            )
+            current_path.write_text(
+                "profileCfg 1\n"
+                "% hostAngleCalibration azimuthBiasDeg -4 elevationBiasDeg 5\n"
+                "sensorStart\n",
+                encoding="utf-8",
+            )
+            changed_capture_path.write_text(
+                "profileCfg 2\nsensorStart\n",
+                encoding="utf-8",
+            )
+
+            expected = normalized_profile_sha256(base_path)
+            self.assertEqual(normalized_profile_sha256(legacy_path), expected)
+            self.assertEqual(normalized_profile_sha256(current_path), expected)
+            self.assertNotEqual(
+                normalized_profile_sha256(changed_capture_path),
+                expected,
+            )
+
 
 class _FakeTensorResult:
     def __init__(self, value: float) -> None:

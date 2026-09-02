@@ -53,10 +53,24 @@ class InferenceResult:
 
 
 def normalized_profile_sha256(profile_path: Path) -> str:
-    """Hash profile text with LF endings, matching the Linux training run."""
+    """Hash CNN-relevant profile text with normalized line endings.
+
+    Host angle calibration is applied to point-cloud coordinates after the
+    range-Doppler feature used by the CNN has been formed. Excluding both the
+    current comment marker and the legacy command form lets that localization
+    correction change without invalidating an otherwise compatible classifier.
+    """
     profile_bytes = Path(profile_path).read_bytes()
     normalized = profile_bytes.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-    return hashlib.sha256(normalized).hexdigest()
+    cnn_relevant_lines = []
+    for line in normalized.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped.startswith((b"%", b"#")):
+            stripped = stripped[1:].lstrip()
+        if stripped.split(maxsplit=1)[:1] == [b"hostAngleCalibration"]:
+            continue
+        cnn_relevant_lines.append(line)
+    return hashlib.sha256(b"".join(cnn_relevant_lines)).hexdigest()
 
 
 def _range_indices(center: int, count: int) -> tuple[np.ndarray, np.ndarray]:

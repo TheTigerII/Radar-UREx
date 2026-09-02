@@ -648,8 +648,8 @@ manifest.json        model card and compatibility metadata
 ```
 
 Initialization rejects a mismatched feature version, architecture, input
-shape, three-bin gate contract, normalized profile fingerprint, radar
-dimensions, or TX schedule. The deployed model specifically requires 64 ADC
+shape, three-bin gate contract, CNN-relevant normalized profile fingerprint,
+radar dimensions, or TX schedule. The deployed model specifically requires 64 ADC
 samples, four RX channels, 384 chirps, 128 loops, three chirps per loop, and TX
 masks `(1, 4, 2)`. Invalid feature steps and inference errors clear the history
 and return `unknown`; a complete valid history produces a calibrated drone

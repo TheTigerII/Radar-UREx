@@ -424,10 +424,13 @@ path is supplied. The operational `--config` is changed only after an explicit
 safe `% hostAngleCalibration ...` comment. In both cases, the previous profile
 is retained as a timestamped `.bak` file.
 
-Applying calibration changes the normalized profile fingerprint used by the
-CNN artifact contract. Disable classification until the model bundle has been
-trained or exported against the updated `profile.cfg`; otherwise inference
-startup intentionally rejects the profile/artifact mismatch.
+Applying range/channel calibration changes the normalized profile fingerprint
+used by the CNN artifact contract. Disable classification until the model
+bundle has been trained or exported against the updated `profile.cfg`;
+otherwise inference startup intentionally rejects the profile/artifact
+mismatch. Host-only azimuth/elevation bias metadata is excluded from this
+fingerprint because it corrects point-cloud coordinates after the CNN's
+range-Doppler feature has been formed.
 
 ## Capture Receiver Only
 

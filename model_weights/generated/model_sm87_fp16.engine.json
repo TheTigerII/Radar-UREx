@@ -11,9 +11,9 @@
   "precision_policy": "tensorrt_fp16_auto_tactics_v2",
   "onnx_sha256": "2abc5bdf01bd5149941260fd6d302083546e14bc18a651a2f0ac62a8f2b63d0e",
   "parity_data_sha256": "495d97a5ce05688c04704f88aad11984df1eac6c9bcbb747e4c9ae1e4e9241e5",
-  "calibration_sha256": "24193358f5384eb71e213d9b7729f1251d341d2b6dbdae7c74fc2892fbd1f190",
-  "model_card_sha256": "8e2d83c2c7b58f01dc63c0abad6d1799effa83fe38f2865825f501aeef474c1b",
-  "profile_sha256": "5f89423fbeb8717ea2595750d3f709ecae283021272b6ca7c99a63802192f470",
+  "calibration_sha256": "73a25015a05158f860f84c1c2fda86f0e30eba58a9d358ae6e3fb9e23d0695c7",
+  "model_card_sha256": "f3049fcf6f632506b516c443e3b3bb7292b9515b7fe27d9cc3422e67c43ebb47",
+  "profile_sha256": "2e046cc8b01ac0f0465fd944a93cd759b70fc997fd66c45951f1ddbddf2e3fa9",
   "tensorrt_version": "10.16.2.10",
   "gpu": {
     "device_index": 0,
@@ -22,7 +22,7 @@
       8,
       7
     ],
-    "total_memory_bytes": 7849046016,
+    "total_memory_bytes": 7849054208,
     "cuda_runtime_version": 13030,
     "cuda_driver_version": 13020
   },
