@@ -199,6 +199,18 @@ class PromptTests(unittest.TestCase):
         with patch("builtins.input", return_value=""):
             self.assertEqual(run.choose_duration_minutes(None), 5.0)
 
+    def test_decimal_duration_is_fractional_minutes(self) -> None:
+        with patch("builtins.input", return_value="3.5"):
+            self.assertEqual(run.choose_duration_minutes(None) * 60.0, 210.0)
+
+    def test_duration_prompt_says_calibration_is_excluded(self) -> None:
+        with patch("builtins.input", return_value="") as prompt:
+            run.choose_duration_minutes(None)
+
+        prompt_text = prompt.call_args.args[0]
+        self.assertIn("after initial calibration", prompt_text)
+        self.assertIn("3.5 = 3m 30s", prompt_text)
+
     def test_realtime_classification_defaults_off(self) -> None:
         with patch("builtins.input", return_value=""):
             self.assertFalse(run.choose_realtime_classification(None))
@@ -324,6 +336,15 @@ class PromptTests(unittest.TestCase):
     def test_negative_duration_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             run.choose_duration_minutes(-1.0)
+
+    def test_capture_deadline_excludes_background_calibration(self) -> None:
+        self.assertEqual(
+            run.capture_deadline(100.0, 3.5, 30.0),
+            340.0,
+        )
+
+    def test_zero_duration_has_no_deadline(self) -> None:
+        self.assertIsNone(run.capture_deadline(100.0, 0.0, 30.0))
 
 
 class CaptureReadinessTests(unittest.TestCase):

@@ -139,7 +139,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--calibration-output", type=Path)
     parser.add_argument("--display-update-every", type=int, default=1)
     parser.add_argument("--max-range-m", type=float, default=DEFAULT_MAX_RANGE_M)
-    parser.add_argument("--duration-minutes", type=float)
+    parser.add_argument(
+        "--duration-minutes",
+        type=float,
+        help=(
+            "capture duration after initial PMM background calibration; "
+            "decimal minutes are accepted (for example, 3.5 is 3m 30s)"
+        ),
+    )
     parser.add_argument("--capture-dir", type=Path, default=DEFAULT_CAPTURE_DIR)
     parser.add_argument("--processed-output", type=Path)
     parser.add_argument("--raw-output", type=Path)
@@ -345,12 +352,29 @@ def choose_dataset_destination(value: Optional[str]) -> Path:
 def choose_duration_minutes(value: Optional[float]) -> float:
     if value is None:
         text = input(
-            f"Run duration in minutes [{DEFAULT_DURATION_MINUTES:g}]: "
+            "Run duration after initial calibration, in minutes "
+            f"[{DEFAULT_DURATION_MINUTES:g}] "
+            "(e.g. 3.5 = 3m 30s): "
         ).strip()
         value = DEFAULT_DURATION_MINUTES if not text else float(text)
     if not float("-inf") < float(value) < float("inf") or value < 0.0:
         raise ValueError("duration must be finite and non-negative")
     return float(value)
+
+
+def capture_deadline(
+    started_at: float,
+    duration_minutes: float,
+    background_calibration_seconds: float,
+) -> Optional[float]:
+    """Return the stop deadline, leaving calibration outside the run duration."""
+    if duration_minutes <= 0.0:
+        return None
+    return (
+        float(started_at)
+        + max(float(background_calibration_seconds), 0.0)
+        + float(duration_minutes) * 60.0
+    )
 
 
 def choose_calibration_distance_m(value: Optional[float]) -> float:
@@ -1225,16 +1249,17 @@ def main() -> int:
             "radar/DCA1000 startup",
             build_startup_command(args, radar_port),
         )
-        start_time = time.monotonic()
+        deadline = capture_deadline(
+            time.monotonic(),
+            duration_minutes,
+            args.pmm_background_calibration_seconds,
+        )
         while True:
             if capture.poll() is not None:
                 return capture.returncode or 1
             if startup.poll() is not None:
                 return startup.returncode or 1
-            if (
-                duration_minutes > 0.0
-                and time.monotonic() - start_time >= duration_minutes * 60.0
-            ):
+            if deadline is not None and time.monotonic() >= deadline:
                 break
             time.sleep(0.2)
     except KeyboardInterrupt:
