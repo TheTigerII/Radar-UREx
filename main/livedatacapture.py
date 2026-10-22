@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import multiprocessing as mp
 import queue
 import signal
@@ -1298,6 +1299,187 @@ def _image_levels(values: np.ndarray) -> tuple[float, float]:
     return float(low), float(high)
 
 
+def _touch_gl_view_class(gl: Any, QtCore: Any) -> type:
+    """Create a GL view with direct-touch and click-free trackpad controls."""
+
+    class TouchGLViewWidget(gl.GLViewWidget):
+        ORBIT_DEGREES_PER_PIXEL = 0.35
+        MIN_CAMERA_DISTANCE = 0.05
+        MAX_CAMERA_DISTANCE = 100_000.0
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.setAttribute(
+                QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents,
+                True,
+            )
+            self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+            self._home_camera: Optional[
+                tuple[float, float, float, tuple[float, float, float]]
+            ] = None
+
+        def set_home_camera(
+            self,
+            *,
+            distance: float,
+            elevation: float,
+            azimuth: float,
+        ) -> None:
+            center = self.opts["center"]
+            self._home_camera = (
+                float(distance),
+                float(elevation),
+                float(azimuth),
+                (float(center.x()), float(center.y()), float(center.z())),
+            )
+            self.setCameraPosition(
+                distance=distance,
+                elevation=elevation,
+                azimuth=azimuth,
+            )
+
+        def reset_view(self) -> None:
+            if self._home_camera is None:
+                return
+            distance, elevation, azimuth, coordinates = self._home_camera
+            center_type = type(self.opts["center"])
+            self.setCameraPosition(
+                pos=center_type(*coordinates),
+                distance=distance,
+                elevation=elevation,
+                azimuth=azimuth,
+            )
+
+        def _apply_orbit_delta(self, dx: float, dy: float) -> None:
+            self.orbit(
+                -float(dx) * self.ORBIT_DEGREES_PER_PIXEL,
+                float(dy) * self.ORBIT_DEGREES_PER_PIXEL,
+            )
+
+        def _apply_pan_delta(self, dx: float, dy: float) -> None:
+            self.pan(float(dx), float(dy), 0.0, relative="view-upright")
+
+        def _apply_zoom_factor(self, factor: float) -> None:
+            if not math.isfinite(factor) or factor <= 0.0:
+                return
+            distance = float(self.opts["distance"]) / factor
+            self.opts["distance"] = min(
+                max(distance, self.MIN_CAMERA_DISTANCE),
+                self.MAX_CAMERA_DISTANCE,
+            )
+            self.update()
+
+        @staticmethod
+        def _point_distance(first: Any, second: Any, *, previous: bool) -> float:
+            first_position = (
+                first.lastPosition() if previous else first.position()
+            )
+            second_position = (
+                second.lastPosition() if previous else second.position()
+            )
+            delta = first_position - second_position
+            return math.hypot(float(delta.x()), float(delta.y()))
+
+        def _handle_touch(self, event: Any) -> bool:
+            points = [
+                point
+                for point in event.points()
+                if point.state().value
+                != QtCore.Qt.TouchPointState.TouchPointReleased.value
+            ]
+            if event.type() == QtCore.QEvent.Type.TouchUpdate:
+                if len(points) == 1:
+                    position = points[0].position()
+                    previous = points[0].lastPosition()
+                    self._apply_orbit_delta(
+                        position.x() - previous.x(),
+                        position.y() - previous.y(),
+                    )
+                elif len(points) >= 2:
+                    first, second = points[:2]
+                    center = (first.position() + second.position()) * 0.5
+                    previous_center = (
+                        first.lastPosition() + second.lastPosition()
+                    ) * 0.5
+                    self._apply_pan_delta(
+                        center.x() - previous_center.x(),
+                        center.y() - previous_center.y(),
+                    )
+                    previous_distance = self._point_distance(
+                        first, second, previous=True
+                    )
+                    current_distance = self._point_distance(
+                        first, second, previous=False
+                    )
+                    if previous_distance > 1.0:
+                        self._apply_zoom_factor(
+                            current_distance / previous_distance
+                        )
+            event.accept()
+            return True
+
+        def _handle_native_gesture(self, event: Any) -> bool:
+            gesture_type = event.gestureType()
+            if gesture_type == QtCore.Qt.NativeGestureType.ZoomNativeGesture:
+                self._apply_zoom_factor(math.exp(float(event.value())))
+            elif gesture_type == QtCore.Qt.NativeGestureType.PanNativeGesture:
+                delta = event.delta()
+                self._apply_orbit_delta(delta.x(), delta.y())
+            elif gesture_type == QtCore.Qt.NativeGestureType.RotateNativeGesture:
+                self.orbit(float(event.value()), 0.0)
+            else:
+                return False
+            event.accept()
+            return True
+
+        def event(self, event: Any) -> bool:
+            event_type = event.type()
+            if event_type in {
+                QtCore.QEvent.Type.TouchBegin,
+                QtCore.QEvent.Type.TouchUpdate,
+                QtCore.QEvent.Type.TouchEnd,
+                QtCore.QEvent.Type.TouchCancel,
+            }:
+                return self._handle_touch(event)
+            if event_type == QtCore.QEvent.Type.NativeGesture:
+                if self._handle_native_gesture(event):
+                    return True
+            return super().event(event)
+
+        def wheelEvent(self, event: Any) -> None:  # noqa: N802
+            pixel_delta = event.pixelDelta()
+            device = event.device()
+            is_trackpad = (
+                device is not None
+                and device.type() == type(device.type()).TouchPad
+            )
+            is_continuous_scroll = (
+                not pixel_delta.isNull()
+                or is_trackpad
+                or event.phase() != QtCore.Qt.ScrollPhase.NoScrollPhase
+            )
+            if is_continuous_scroll:
+                delta = (
+                    pixel_delta
+                    if not pixel_delta.isNull()
+                    else event.angleDelta() / 8.0
+                )
+                modifiers = event.modifiers()
+                if modifiers & QtCore.Qt.KeyboardModifier.ControlModifier:
+                    self._apply_zoom_factor(
+                        math.exp(float(delta.y()) / 600.0)
+                    )
+                elif modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier:
+                    self._apply_pan_delta(delta.x(), delta.y())
+                else:
+                    self._apply_orbit_delta(delta.x(), delta.y())
+                event.accept()
+                return
+            super().wheelEvent(event)
+
+    return TouchGLViewWidget
+
+
 class _PyQtGraphDisplay:
     """PyQtGraph widgets and latest-only queue polling for every GUI mode."""
 
@@ -1325,6 +1507,7 @@ class _PyQtGraphDisplay:
         self.gl = gl
         self.QtCore = QtCore
         self.QtWidgets = QtWidgets
+        self.TouchGLViewWidget = _touch_gl_view_class(gl, QtCore)
         self.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
         self.app.setApplicationName("Mini4 PMM Tracker")
         self.app.setQuitOnLastWindowClosed(True)
@@ -1334,6 +1517,8 @@ class _PyQtGraphDisplay:
         self._range_y_axis_locked = False
         self.range_doppler_image: Any = None
         self.point_status: Any = None
+        self.point_view: Any = None
+        self.reset_view_button: Any = None
         self.target_scatter: Any = None
         self.doppler_time_image: Any = None
         self._build_window()
@@ -1423,13 +1608,28 @@ class _PyQtGraphDisplay:
         self.point_status.setMinimumHeight(
             2 * self.point_status.fontMetrics().lineSpacing() + 16
         )
-        view = self.gl.GLViewWidget()
+        gesture_row = self.QtWidgets.QHBoxLayout()
+        gesture_hint = self.QtWidgets.QLabel(
+            "1 finger: orbit   •   2 fingers: pan/pinch   •   "
+            "trackpad: orbit"
+        )
+        gesture_hint.setWordWrap(True)
+        gesture_hint.setStyleSheet("color: #9ca3af; font-size: 13px;")
+        self.reset_view_button = self.QtWidgets.QPushButton("Reset view")
+        self.reset_view_button.setMinimumHeight(44)
+        self.reset_view_button.setMinimumWidth(110)
+        gesture_row.addWidget(gesture_hint, 1)
+        gesture_row.addWidget(self.reset_view_button)
+
+        view = self.TouchGLViewWidget()
+        self.point_view = view
         view.setBackgroundColor((15, 18, 24, 255))
-        view.setCameraPosition(
+        view.set_home_camera(
             distance=max(self.max_range_m * 1.8, 5.0),
             elevation=20.0,
             azimuth=-90.0,
         )
+        self.reset_view_button.clicked.connect(view.reset_view)
         lateral_limit = max(
             self.max_range_m * np.sin(np.deg2rad(self.fov_deg)),
             1.0,
@@ -1458,6 +1658,7 @@ class _PyQtGraphDisplay:
         )
         view.addItem(self.target_scatter)
         layout.addWidget(self.point_status)
+        layout.addLayout(gesture_row)
         layout.addWidget(view, 1)
         return panel
 

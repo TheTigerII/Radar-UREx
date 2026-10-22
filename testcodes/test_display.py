@@ -112,6 +112,52 @@ class PyQtGraphDisplayTests(unittest.TestCase):
                 display.point_status.sizePolicy().horizontalPolicy(),
                 QtWidgets.QSizePolicy.Policy.Ignored,
             )
+            self.assertTrue(
+                display.point_view.testAttribute(
+                    QtCore.Qt.WidgetAttribute.WA_AcceptTouchEvents
+                )
+            )
+        finally:
+            self._close(display)
+
+    def test_point_cloud_camera_supports_touch_navigation_and_reset(self) -> None:
+        display = self._display("point-cloud")
+        try:
+            view = display.point_view
+            initial_azimuth = float(view.opts["azimuth"])
+            initial_elevation = float(view.opts["elevation"])
+            initial_distance = float(view.opts["distance"])
+            initial_center = (
+                float(view.opts["center"].x()),
+                float(view.opts["center"].y()),
+                float(view.opts["center"].z()),
+            )
+
+            view._apply_orbit_delta(20.0, -10.0)
+            self.assertNotEqual(float(view.opts["azimuth"]), initial_azimuth)
+            self.assertNotEqual(float(view.opts["elevation"]), initial_elevation)
+
+            view._apply_pan_delta(25.0, 15.0)
+            moved_center = (
+                float(view.opts["center"].x()),
+                float(view.opts["center"].y()),
+                float(view.opts["center"].z()),
+            )
+            self.assertNotEqual(moved_center, initial_center)
+
+            view._apply_zoom_factor(1.25)
+            self.assertLess(float(view.opts["distance"]), initial_distance)
+
+            display.reset_view_button.click()
+            self.assertAlmostEqual(float(view.opts["azimuth"]), initial_azimuth)
+            self.assertAlmostEqual(float(view.opts["elevation"]), initial_elevation)
+            self.assertAlmostEqual(float(view.opts["distance"]), initial_distance)
+            reset_center = (
+                float(view.opts["center"].x()),
+                float(view.opts["center"].y()),
+                float(view.opts["center"].z()),
+            )
+            self.assertEqual(reset_center, initial_center)
         finally:
             self._close(display)
 

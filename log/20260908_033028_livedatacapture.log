@@ -1,0 +1,13 @@
+Terminal log: /home/rgmtc/Desktop/Radar-UREx/log/20260908_033028_livedatacapture.log
+Runtime performance log: /home/rgmtc/Desktop/Radar-UREx/log/20260908_033028_runtime_performance.jsonl
+Loaded Mini4 profile: RadarCaptureConfig(num_adc_samples=256, num_rx_channels=4, num_chirps_per_frame=96, bytes_per_frame=393216, iq_swap=True, channel_interleave=False, lvds_lanes=2, num_loops=32, num_chirps_per_loop=3, tx_channel_masks=(1, 4, 2), sample_rate_ksps=6250.0, frequency_slope_mhz_per_us=46.875, start_frequency_ghz=60.25, idle_time_us=850.0, adc_start_time_us=6.0, ramp_end_time_us=50.0, frame_periodicity_ms=100.0, range_bias_m=0.1007119, rx_channel_compensation=((0.96275-0j), (-0.61369+0.45828j), (-0.77696+0.37183j), (0.73581-0.0036j), (0.62985-0.50212j), (-0.25985+0.72323j), (-0.35259+0.6223j), (0.56624-0.55042j), (0.47269-0.88123j), (-0.00011+0.79806j), (-0.29218+0.85428j), (0.44165-0.61993j)), azimuth_bias_deg=0.0, elevation_bias_deg=0.0)
+Runtime performance logging enabled: path=/home/rgmtc/Desktop/Radar-UREx/log/20260908_033028_runtime_performance.jsonl, resource_interval=1s
+Saving PMM output to /home/rgmtc/Desktop/Radar-UREx/dataset/pmm_capture_2026_09_08T03_30_28.jsonl
+PMM tracking enabled: calibration=30s, adaptive threshold=6 sigma, minimum=700, folding=2-32, history=3.6s
+Radar frame processor ready.
+Listening for live radar stream on 192.168.33.30:4098; bytes_per_frame=393216
+Streaming stopped.
+Capture summary: packets=194717, frames=720, invalid_frames=0, lost_packets=0, receiver_queue_drops=0, processing_drops=0, stream_resyncs=0
+PMM output saved: updates=720, path=/home/rgmtc/Desktop/Radar-UREx/dataset/pmm_capture_2026_09_08T03_30_28.jsonl
+Runtime performance log saved: path=/home/rgmtc/Desktop/Radar-UREx/log/20260908_033028_runtime_performance.jsonl, frames=720, deadline_miss_rate=0.0
+Processing timing summary: {"range_fft":{"p50_ms":0.9779010001693678,"p95_ms":1.506249450631003,"max_ms":5.8064849999937},"doppler_fft":{"p50_ms":2.208608999808348,"p95_ms":3.1313339493408407,"max_ms":6.901945000208798},"pmm_tracking":{"p50_ms":19.056119000197214,"p95_ms":57.46060584956467,"max_ms":65.37199500053248},"serialization":{"p50_ms":2.9554185002780287,"p95_ms":4.7872967492367025,"max_ms":6.59786200048984},"total":{"p50_ms":31.073547499545384,"p95_ms":64.1754778504037,"max_ms":71.32349999938015}}

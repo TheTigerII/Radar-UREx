@@ -62,6 +62,54 @@ also be run on a separate CPU or CUDA workstation.
 
 ## Run
 
+### Desktop application (recommended)
+
+Open `Radar-UREx.desktop` from the repository folder to start the native
+control center without a terminal. On some Linux desktops, the first launch
+requires right-clicking the file and selecting **Allow Launching**. The
+application uses the repository's `.venv` automatically when it is present.
+
+The control center provides:
+
+- automatic radar UART discovery with a manual override;
+- all normal display modes and all three hardware-calibration modes;
+- duration, dataset destination, raw capture, classification, and logging
+  controls;
+- network, queue, PMM detection, and tracking settings;
+- graphical DCA1000 Ethernet setup through the desktop administrator prompt;
+- file and directory pickers for every profile and output;
+- Start/Stop controls with safe launcher shutdown;
+- an Activity tab containing live startup, TensorRT, capture, and error output;
+  and
+- a graphical confirmation before a successful hardware calibration is
+  applied to the operational profile.
+
+The live plots still open in their own windows so they remain responsive and
+can be arranged independently. Closing or stopping the control center shuts
+down the radar launcher and capture processes. The command-line interface
+below remains available for scripting and automated experiments.
+
+#### Touchscreen use
+
+The control center opens maximized and adapts down to a 1024×600 portable
+display. Buttons, tabs, checkboxes, dropdown items, scrollbars, and numeric
+steppers use finger-sized targets. Swipe vertically inside a settings page or
+the Activity log to scroll. On narrower displays, field labels move above
+their controls automatically so values remain readable.
+
+Tap **Full screen** or press F11 to hide the desktop chrome; tap **Exit full
+screen** or press F11 again to return. The Start and Stop controls remain fixed
+at the bottom of the screen while settings pages scroll behind them.
+
+The 3-D target panel supports direct camera navigation without a mouse:
+
+- drag with one finger to orbit around the scene;
+- drag with two fingers to pan, and pinch to zoom;
+- use a two-finger trackpad scroll to orbit;
+- hold Shift while scrolling on a trackpad to pan;
+- hold Ctrl while scrolling, or use a trackpad pinch, to zoom; and
+- tap **Reset view** to restore the original camera.
+
 From the repository root:
 
 ```bash

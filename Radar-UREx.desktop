@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Radar-UREx Control Center
+Comment=Operate the IWR6843 and DCA1000 PMM radar system
+Exec=/home/rgmtc/Desktop/Radar-UREx/scripts/launch_gui.sh
+Path=/home/rgmtc/Desktop/Radar-UREx
+Icon=applications-engineering
+Terminal=false
+Categories=Science;Engineering;
+StartupNotify=true
