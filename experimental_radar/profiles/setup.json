@@ -1,0 +1,15 @@
+{
+  "captureHardware": "DCA1000",
+  "DCA1000Config": {
+    "dataLoggingMode": "raw",
+    "dataTransferMode": "LVDSCapture",
+    "dataCaptureMode": "ethernetStream",
+    "packetSequenceEnable": 1,
+    "packetDelay_us": 50
+  },
+  "mmWaveDevice": "iwr6843",
+  "mmWaveDeviceConfig": {
+    "RS232COMPort": "COM10",
+    "RS232BaudRate": "115200"
+  }
+}
