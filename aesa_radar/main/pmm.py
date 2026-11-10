@@ -32,6 +32,12 @@ MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM = 700.0
 LONG_RANGE_MIMO_ADAPTIVE_THRESHOLD_MINIMUM = 250.0
 FIXED_BEAM_ADAPTIVE_THRESHOLD_MINIMUM = 350.0
 PHASED_STT_ADAPTIVE_THRESHOLD_MINIMUM = 250.0
+LITERATURE_TBD_ADAPTIVE_THRESHOLD_MINIMUM = 250.0
+LITERATURE_TBD_OPERATION_MODE = "literature-tbd-mimo"
+LITERATURE_TBD_WINDOW_FRAMES = 12
+LITERATURE_TBD_MINIMUM_FRAMES = 8
+LITERATURE_TBD_NORMALIZED_THRESHOLD = 0.65
+LITERATURE_TBD_CURRENT_FRAME_MINIMUM = 0.15
 # Mode 3 uses the same full angular limits as the original 20 m baseline.
 # The names are retained for metadata/backward compatibility, but values at
 # the 60-degree array limit represent an absolute -60..+60 scan rather than a
@@ -46,8 +52,14 @@ EXPERIMENT_OPERATION_MODES = (
     "fixed-beam",
     "single-tx-scan",
     "phased-array-stt",
+    LITERATURE_TBD_OPERATION_MODE,
 )
-HOST_ANGLE_BACKGROUND_MODES = {"baseline", "long-range-mimo", "fixed-beam"}
+HOST_ANGLE_BACKGROUND_MODES = {
+    "baseline",
+    "long-range-mimo",
+    "fixed-beam",
+    LITERATURE_TBD_OPERATION_MODE,
+}
 LONG_RANGE_SLOPE_MHZ_PER_US = 9.994
 LONG_RANGE_IDLE_TIME_US = 707.88
 LONG_RANGE_RAMP_END_TIME_US = 192.12
@@ -215,6 +227,9 @@ class PmmTrackResult:
     predicted: bool
     dp_transition_bins: int
     dp_path_score: Optional[float]
+    tbd_integrated_score: Optional[float]
+    tbd_threshold: Optional[float]
+    tbd_window_frames: int
     particle_count: int
     processing_ms: Optional[dict[str, float]] = None
 
@@ -469,6 +484,32 @@ def constrained_maximum_path(
     for time_index in range(time_count - 1, 0, -1):
         path[time_index - 1] = parents[time_index, path[time_index]]
     return path, float(cumulative[-1, path[-1]])
+
+
+def normalized_track_before_detect(
+    normalized_scores: np.ndarray,
+    maximum_step_bins: int | np.ndarray | list[int] | tuple[int, ...],
+    *,
+    integrated_threshold: float = LITERATURE_TBD_NORMALIZED_THRESHOLD,
+    current_frame_minimum: float = LITERATURE_TBD_CURRENT_FRAME_MINIMUM,
+) -> tuple[np.ndarray, float, bool]:
+    """Integrate a physically reachable weak-target path before thresholding.
+
+    Inputs are PMM residuals divided by each range bin's calibrated threshold.
+    A persistent sub-threshold path can therefore be detected, while the
+    present-frame guard prevents an old path from coasting without evidence.
+    """
+    path, cumulative_score = constrained_maximum_path(
+        normalized_scores,
+        maximum_step_bins,
+    )
+    integrated_score = cumulative_score / float(normalized_scores.shape[0])
+    current_score = float(normalized_scores[-1, int(path[-1])])
+    detected = (
+        integrated_score >= float(integrated_threshold)
+        and current_score >= float(current_frame_minimum)
+    )
+    return path, integrated_score, detected
 
 
 class ParticleFilter1D:
@@ -1175,6 +1216,19 @@ class PmmTracker:
                 "azimuth_deg": self.config.beam_azimuth_deg,
                 "elevation_deg": self.config.beam_elevation_deg,
             }
+        if self.config.operation_mode == LITERATURE_TBD_OPERATION_MODE:
+            feature_values["track_before_detect"] = {
+                "type": "normalized constrained multi-frame PMM path integration",
+                "window_frames": LITERATURE_TBD_WINDOW_FRAMES,
+                "minimum_frames": LITERATURE_TBD_MINIMUM_FRAMES,
+                "integrated_threshold": LITERATURE_TBD_NORMALIZED_THRESHOLD,
+                "current_frame_minimum": LITERATURE_TBD_CURRENT_FRAME_MINIMUM,
+            }
+            feature_values["receive_beamforming"] = {
+                "type": "Capon/MVDR angle estimation after TDM-MIMO range detection",
+                "angle_limit_deg": self.config.angle_limit_deg,
+                "step_deg": self.config.angle_step_deg,
+            }
         feature_fingerprint = hashlib.sha256(
             json.dumps(
                 feature_values,
@@ -1453,11 +1507,9 @@ class PmmTracker:
         )
         if self.adaptive_thresholds is None:
             raise RuntimeError("PMM adaptive thresholds are not calibrated")
-        if self.config.detection_threshold is None:
-            path_scores = corrected / self.adaptive_thresholds
-        else:
-            # A constant threshold does not change the relative path ranking.
-            path_scores = corrected
+        # Normalization preserves the ranking for a fixed threshold and makes
+        # scores comparable across range bins for adaptive-threshold modes.
+        path_scores = corrected / self.adaptive_thresholds
         if self.score_history:
             self.transition_history.append(self.dp_transition_bins)
         self.score_history.append(path_scores)
@@ -1467,17 +1519,45 @@ class PmmTracker:
             self.latest_result = self._empty_result("searching")
             return self.latest_result
 
-        path, path_score = constrained_maximum_path(
-            np.stack(tuple(self.score_history), axis=0),
-            tuple(self.transition_history),
-        )
+        tbd_integrated_score: Optional[float] = None
+        tbd_threshold: Optional[float] = None
+        tbd_window_frames = 0
+        if self.config.operation_mode == LITERATURE_TBD_OPERATION_MODE:
+            tbd_window_frames = min(
+                len(self.score_history),
+                LITERATURE_TBD_WINDOW_FRAMES,
+            )
+            if tbd_window_frames < LITERATURE_TBD_MINIMUM_FRAMES:
+                self.state = "searching"
+                self.latest_result = self._empty_result("searching")
+                return self.latest_result
+            recent_scores = np.stack(
+                tuple(self.score_history)[-tbd_window_frames:],
+                axis=0,
+            )
+            recent_transitions = tuple(self.transition_history)[
+                -(tbd_window_frames - 1) :
+            ]
+            path, tbd_integrated_score, detected = normalized_track_before_detect(
+                recent_scores,
+                recent_transitions,
+            )
+            path_score = tbd_integrated_score * tbd_window_frames
+            tbd_threshold = LITERATURE_TBD_NORMALIZED_THRESHOLD
+        else:
+            path, path_score = constrained_maximum_path(
+                np.stack(tuple(self.score_history), axis=0),
+                tuple(self.transition_history),
+            )
+            detected = False
         local_bin = int(path[-1])
         range_bin = int(self.range_indices[local_bin])
         measured_range_m = float(self.range_axis[range_bin])
         score = float(corrected[local_bin])
         threshold = float(self.adaptive_thresholds[local_bin])
         folding_size = int(raw_sizes[range_bin])
-        detected = score >= threshold
+        if self.config.operation_mode != LITERATURE_TBD_OPERATION_MODE:
+            detected = score >= threshold
         if detected and self.range_filter.initialized:
             previous_range_m = self.range_filter.estimate[0]
             ownership_gate_m = max(
@@ -1713,6 +1793,9 @@ class PmmTracker:
             predicted=not detected,
             dp_transition_bins=self.dp_transition_bins,
             dp_path_score=path_score,
+            tbd_integrated_score=tbd_integrated_score,
+            tbd_threshold=tbd_threshold,
+            tbd_window_frames=tbd_window_frames,
             particle_count=self.config.particle_count,
         )
         return self.latest_result
@@ -1746,5 +1829,12 @@ class PmmTracker:
             predicted=False,
             dp_transition_bins=self.dp_transition_bins,
             dp_path_score=None,
+            tbd_integrated_score=None,
+            tbd_threshold=(
+                LITERATURE_TBD_NORMALIZED_THRESHOLD
+                if self.config.operation_mode == LITERATURE_TBD_OPERATION_MODE
+                else None
+            ),
+            tbd_window_frames=0,
             particle_count=self.config.particle_count,
         )

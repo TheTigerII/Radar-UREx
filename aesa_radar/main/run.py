@@ -27,6 +27,8 @@ if __package__ in {None, ""}:
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
         EXPERIMENT_OPERATION_MODES,
         FIXED_BEAM_ADAPTIVE_THRESHOLD_MINIMUM,
+        LITERATURE_TBD_ADAPTIVE_THRESHOLD_MINIMUM,
+        LITERATURE_TBD_OPERATION_MODE,
         PHASED_STT_ADAPTIVE_THRESHOLD_MINIMUM,
         LONG_RANGE_MIMO_ADAPTIVE_THRESHOLD_MINIMUM,
         LONG_RANGE_MAX_RANGE_M,
@@ -43,6 +45,8 @@ else:
         MINI4_DEFAULT_ADAPTIVE_THRESHOLD_SIGMA,
         EXPERIMENT_OPERATION_MODES,
         FIXED_BEAM_ADAPTIVE_THRESHOLD_MINIMUM,
+        LITERATURE_TBD_ADAPTIVE_THRESHOLD_MINIMUM,
+        LITERATURE_TBD_OPERATION_MODE,
         PHASED_STT_ADAPTIVE_THRESHOLD_MINIMUM,
         LONG_RANGE_MIMO_ADAPTIVE_THRESHOLD_MINIMUM,
         LONG_RANGE_MAX_RANGE_M,
@@ -63,6 +67,7 @@ LONG_RANGE_CONFIG_PATH = PROFILES_DIR / "profile-mini4-long-range.cfg"
 FIXED_BEAM_CONFIG_PATH = PROFILES_DIR / "profile-mini4-fixed-beam.cfg"
 SINGLE_TX_SCAN_CONFIG_PATH = PROFILES_DIR / "profile-mini4-simo-scan.cfg"
 PHASED_STT_CONFIG_PATH = PROFILES_DIR / "profile-mini4-phased-stt.cfg"
+LITERATURE_TBD_CONFIG_PATH = PROFILES_DIR / "profile-mini4-literature-tbd.cfg"
 DEFAULT_CALIBRATION_PROFILE_PATH = ROOT / "profiles" / "profile_calibration.cfg"
 DEFAULT_SETUP_PATH = PROFILES_DIR / "setup.json"
 DEFAULT_DATASET_DIR = ROOT / "dataset"
@@ -1096,6 +1101,8 @@ def main() -> int:
             args.config = SINGLE_TX_SCAN_CONFIG_PATH
         elif args.operation_mode == PHASED_STT_OPERATION_MODE:
             args.config = PHASED_STT_CONFIG_PATH
+        elif args.operation_mode == LITERATURE_TBD_OPERATION_MODE:
+            args.config = LITERATURE_TBD_CONFIG_PATH
     args.performance_logging = bool(
         getattr(args, "performance_logging", True)
     )
@@ -1255,6 +1262,11 @@ def main() -> int:
             "Two-TX phased-array STT: "
             f"azimuth={args.beam_azimuth_deg:+.1f} deg, "
             f"receive elevation={args.beam_elevation_deg:+.1f} deg"
+        )
+    elif args.operation_mode == LITERATURE_TBD_OPERATION_MODE:
+        print(
+            "Literature TBD MIMO: 12-channel TDM-MIMO, normalized "
+            "multi-frame path integration, and Capon/MVDR angles"
         )
     print(f"Processed output: {processed_output}")
     print(f"Raw output: {raw_output or 'disabled'}")

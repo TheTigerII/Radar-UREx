@@ -8,12 +8,16 @@ from main import calibrate
 from main.inference import RealtimeUavClassifier
 from main.livedatacapture import RadarCaptureConfig
 from main.pmm import (
+    LITERATURE_TBD_MINIMUM_FRAMES,
+    LITERATURE_TBD_NORMALIZED_THRESHOLD,
+    LITERATURE_TBD_OPERATION_MODE,
     LONG_RANGE_MAX_RANGE_M,
     PmmConfig,
     PmmTracker,
     _ods_virtual_coordinates,
     _ods_rx_coordinates,
     fixed_receive_beam_magnitude,
+    normalized_track_before_detect,
     phased_stt_receive_magnitude,
     sector_receive_beam_magnitude,
     single_tx_receive_scan,
@@ -38,6 +42,7 @@ def load_profile(name: str) -> RadarCaptureConfig:
     (
         ("profile-mini4-fixed-beam.cfg", "fixed-beam"),
         ("profile-mini4-phased-stt.cfg", "phased-array-stt"),
+        ("profile-mini4-literature-tbd.cfg", LITERATURE_TBD_OPERATION_MODE),
     ),
 )
 def test_classifier_allows_logged_cross_profile_inference_for_test_modes(
@@ -103,6 +108,52 @@ def test_all_three_profile_mode_combinations_validate() -> None:
         np.diff(fixed_beam.range_axis_m()),
         atol=1e-5,
     )
+
+
+def test_literature_tbd_profile_is_long_range_three_tx_mimo() -> None:
+    config = load_profile("profile-mini4-literature-tbd.cfg")
+    validate_mini4_profile(config, LITERATURE_TBD_OPERATION_MODE)
+    assert config.tx_channel_masks == (1, 4, 2)
+    assert config.num_chirps_per_frame == 96
+    assert 93.0 < float(config.range_axis_m()[-1]) < 94.0
+
+
+def test_track_before_detect_accepts_persistent_subthreshold_path() -> None:
+    scores = np.zeros((12, 10), dtype=np.float32)
+    scores[:, 4] = LITERATURE_TBD_NORMALIZED_THRESHOLD + 0.05
+    path, integrated_score, detected = normalized_track_before_detect(
+        scores,
+        maximum_step_bins=1,
+    )
+    assert detected
+    assert np.all(path == 4)
+    assert integrated_score < 1.0
+
+
+def test_track_before_detect_rejects_old_spike_without_current_evidence() -> None:
+    scores = np.zeros((LITERATURE_TBD_MINIMUM_FRAMES, 10), dtype=np.float32)
+    scores[0, 4] = 8.0
+    path, _integrated_score, detected = normalized_track_before_detect(
+        scores,
+        maximum_step_bins=1,
+    )
+    assert path[-1] in range(10)
+    assert not detected
+
+
+def test_literature_tbd_metadata_records_integration_and_angles() -> None:
+    config = load_profile("profile-mini4-literature-tbd.cfg")
+    tracker = PmmTracker(
+        config,
+        PmmConfig(
+            operation_mode=LITERATURE_TBD_OPERATION_MODE,
+            max_range_m=LONG_RANGE_MAX_RANGE_M,
+        ),
+    )
+    metadata = tracker.metadata
+    assert metadata["operation_mode"] == LITERATURE_TBD_OPERATION_MODE
+    assert metadata["config"]["max_range_m"] == LONG_RANGE_MAX_RANGE_M
+    assert metadata["feature_version"]
 
 
 def test_single_tx_scan_profile_validates_as_non_mimo() -> None:

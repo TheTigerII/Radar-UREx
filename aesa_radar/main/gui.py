@@ -104,7 +104,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Radar-UREx Two-Mode Range Test")
+        self.setWindowTitle("Radar-UREx Long-Range Test Center")
         self.setMinimumSize(720, 480)
         self.resize(1100, 760)
         self.process: QtCore.QProcess | None = None
@@ -137,10 +137,10 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         outer = QtWidgets.QVBoxLayout(central)
 
         title_row = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel("Radar-UREx Two-Mode Range Test")
+        title = QtWidgets.QLabel("Radar-UREx Long-Range Test Center")
         title.setObjectName("title")
         subtitle = QtWidgets.QLabel(
-            "MIMO sector STT · two-TX phased-array STT"
+            "MIMO sector STT · phased-array STT · literature TBD MIMO"
         )
         subtitle.setObjectName("subtitle")
         title_column = QtWidgets.QVBoxLayout()
@@ -290,6 +290,10 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         self.operation.addItem(
             "2 — Phased-array STT (proposed Mode 5)",
             "phased-array-stt",
+        )
+        self.operation.addItem(
+            "6 — Literature MIMO track-before-detect",
+            run.LITERATURE_TBD_OPERATION_MODE,
         )
         self.operation.currentIndexChanged.connect(self._operation_changed)
         form.addRow("Radar operation", self.operation)
@@ -691,13 +695,15 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             "fixed-beam": run.FIXED_BEAM_CONFIG_PATH,
             "single-tx-scan": run.SINGLE_TX_SCAN_CONFIG_PATH,
             "phased-array-stt": run.PHASED_STT_CONFIG_PATH,
+            run.LITERATURE_TBD_OPERATION_MODE: run.LITERATURE_TBD_CONFIG_PATH,
         }
         max_ranges = {
             "baseline": 20.0,
-            "long-range-mimo": 20.0,
-            "fixed-beam": 20.0,
-            "single-tx-scan": 20.0,
-            "phased-array-stt": 20.0,
+            "long-range-mimo": run.LONG_RANGE_MAX_RANGE_M,
+            "fixed-beam": run.LONG_RANGE_MAX_RANGE_M,
+            "single-tx-scan": run.LONG_RANGE_MAX_RANGE_M,
+            "phased-array-stt": run.LONG_RANGE_MAX_RANGE_M,
+            run.LITERATURE_TBD_OPERATION_MODE: run.LONG_RANGE_MAX_RANGE_M,
         }
         threshold_minimums = {
             "baseline": run.MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
@@ -705,6 +711,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             "fixed-beam": run.FIXED_BEAM_ADAPTIVE_THRESHOLD_MINIMUM,
             "single-tx-scan": run.LONG_RANGE_MIMO_ADAPTIVE_THRESHOLD_MINIMUM,
             "phased-array-stt": run.PHASED_STT_ADAPTIVE_THRESHOLD_MINIMUM,
+            run.LITERATURE_TBD_OPERATION_MODE: run.LITERATURE_TBD_ADAPTIVE_THRESHOLD_MINIMUM,
         }
         notes = {
             "baseline": "Current validated waveform and PMM processing; classifier remains available.",
@@ -712,6 +719,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             "fixed-beam": "Enhanced Mode 3: calibrated 12-channel coherent MIMO detection scans the original baseline field of view (+/-60 degrees azimuth and elevation), using 10-degree azimuth and 30-degree elevation detection beams for real-time ARM operation. It then refines direction at 2 degrees with Capon/MVDR.",
             "single-tx-scan": "Non-MIMO range mode: one transmitter and four receivers scan a wide receive-beam grid and report top-down position and estimated altitude. This is electronic receive steering, not simultaneous phased-array transmission.",
             "phased-array-stt": "Non-MIMO phased STT: TX0 and TX1 transmit coherently with calibrated 6-bit phase steering, while all four receivers combine coherently in the selected look direction. The standard-board safety limit of two simultaneous transmitters is enforced; this mode must still be range-tested against Mode 1.",
+            run.LITERATURE_TBD_OPERATION_MODE: "Mode 6: long-range three-TX/four-RX TDM-MIMO PMM. It integrates a physically reachable weak-target path over 0.8-1.2 seconds before declaring detection, then measures azimuth/elevation with Capon/MVDR. The present-frame guard limits stale and phantom tracks. Classifier input remains 64 Doppler bins over 3.6 seconds, but drone accuracy still requires field validation.",
         }
         self.config.edit.setText(str(profile_paths[operation]))
         # Both coherent modes use the long-range waveform. Measure channel

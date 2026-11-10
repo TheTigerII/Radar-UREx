@@ -915,12 +915,22 @@ class DisplayPayloadSink:
         classification: Optional[dict[str, Any]] = None
         classification_ms = 0.0
         if self.classifier is not None:
+            classification_score = (
+                result.tbd_integrated_score
+                if result.tbd_integrated_score is not None
+                else result.pmm_score
+            )
+            classification_threshold = (
+                result.tbd_threshold
+                if result.tbd_threshold is not None
+                else result.threshold
+            )
             history_frames_before = self._classification_history_frames
             started = time.perf_counter()
             classification_result = self.classifier.classify(
                 self.tracker.spectrogram_db,
-                pmm_score=result.pmm_score,
-                threshold=result.threshold,
+                pmm_score=classification_score,
+                threshold=classification_threshold,
             )
             classification_ms = (time.perf_counter() - started) * 1_000.0
             classification = classification_result.to_dict()
@@ -997,8 +1007,23 @@ class DisplayPayloadSink:
                 heatmap = compute_range_doppler_heatmap(range_fft, self.config)
                 payload = (range_axis[gate], heatmap[:, gate])
             else:
-                score_text = _fixed_width_number(result.pmm_score)
-                threshold_text = _fixed_width_number(result.threshold)
+                display_score = (
+                    result.tbd_integrated_score
+                    if result.tbd_integrated_score is not None
+                    else result.pmm_score
+                )
+                display_threshold = (
+                    result.tbd_threshold
+                    if result.tbd_threshold is not None
+                    else result.threshold
+                )
+                score_text = _fixed_width_number(display_score)
+                threshold_text = _fixed_width_number(display_threshold)
+                score_label = (
+                    f"TBD({result.tbd_window_frames})"
+                    if result.tbd_threshold is not None
+                    else "score"
+                )
                 range_text = (
                     "—"
                     if not result.has_track
@@ -1045,7 +1070,7 @@ class DisplayPayloadSink:
                         f"{result.calibration_frames_seen}/"
                         f"{result.calibration_frames_required}"
                         + _classification_status_text(classification)
-                        + f"\nscore {score_text}/{threshold_text} | range "
+                        + f"\n{score_label} {score_text}/{threshold_text} | range "
                         f"{range_text} | fold {folding_text}"
                         + angle_status
                     ),

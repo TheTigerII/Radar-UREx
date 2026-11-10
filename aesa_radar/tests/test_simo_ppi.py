@@ -82,7 +82,7 @@ def test_ppi_renders_target_and_altitude_status() -> None:
         display.app.processEvents()
 
 
-def test_gui_exposes_only_mimo_and_phased_stt_modes() -> None:
+def test_gui_exposes_range_test_modes_including_literature_tbd() -> None:
     QtWidgets = pytest.importorskip("PySide6.QtWidgets")
     from main import run
     from main.gui import RadarControlCenter
@@ -90,11 +90,11 @@ def test_gui_exposes_only_mimo_and_phased_stt_modes() -> None:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = RadarControlCenter()
     try:
-        assert window.operation.count() == 2
+        assert window.operation.count() == 3
         assert [
             window.operation.itemData(index)
             for index in range(window.operation.count())
-        ] == ["fixed-beam", "phased-array-stt"]
+        ] == ["fixed-beam", "phased-array-stt", "literature-tbd-mimo"]
         assert window.operation.currentData() == "fixed-beam"
         assert window.config.required_path() == run.FIXED_BEAM_CONFIG_PATH
         assert window.mode.currentData() == "combined"
@@ -109,6 +109,12 @@ def test_gui_exposes_only_mimo_and_phased_stt_modes() -> None:
         assert window.calibration_window.value() == 0.75
         assert window.beam_azimuth.minimum() == -30.0
         assert window.beam_azimuth.maximum() == 30.0
+        assert window.mode.currentData() == "ppi"
+
+        window.operation.setCurrentIndex(2)
+        assert window.operation.currentData() == "literature-tbd-mimo"
+        assert window.config.required_path() == run.LITERATURE_TBD_CONFIG_PATH
+        assert window.max_range.value() == run.LONG_RANGE_MAX_RANGE_M
         assert window.mode.currentData() == "ppi"
     finally:
         window.close()
