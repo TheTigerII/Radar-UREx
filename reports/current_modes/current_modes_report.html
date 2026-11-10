@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Extension of a Portable COTS mmWave Radar</title>
+<style>
+@page { size: A4; margin: 20mm 18mm 20mm 22mm; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5pt; line-height: 1.36; color: #17202a; }
+h1 { font-size: 20pt; color: #12395b; margin: 0 0 8pt; }
+h2 { font-size: 15pt; color: #12395b; border-bottom: 1.2pt solid #5b88aa; padding-bottom: 3pt; margin-top: 18pt; }
+h3 { font-size: 12pt; color: #194f72; margin-top: 14pt; margin-bottom: 5pt; }
+p { margin: 4pt 0 8pt; text-align: justify; }
+.title-page { text-align: center; page-break-after: always; padding-top: 40mm; }
+.title-page p { text-align: center; }
+.subtitle { font-size: 14pt; color: #3f5668; margin: 14pt auto 42pt; max-width: 150mm; }
+.meta { margin-top: 36pt; line-height: 1.8; }
+.note { border-left: 5px solid #2382b8; background: #eef7fc; padding: 9pt 12pt; margin: 10pt 0; }
+.warning { border-left-color: #d18900; background: #fff7df; }
+.status { border-left-color: #417d41; background: #eff8ef; }
+table { width: 100%; border-collapse: collapse; margin: 9pt 0 13pt; font-size: 9pt; }
+th { background: #16496c; color: white; text-align: left; padding: 6pt; vertical-align: top; }
+td { border: 0.5pt solid #9aaab6; padding: 5pt 6pt; vertical-align: top; }
+tr:nth-child(even) td { background: #f5f8fa; }
+.small { font-size: 8.7pt; }
+.equation { text-align: center; font-family: "Times New Roman", serif; font-size: 13pt; margin: 12pt; }
+.page-break { page-break-before: always; }
+.blank { min-height: 42mm; border: 1pt solid #9aaab6; margin: 8pt 0 14pt; background: white; }
+.blank-large { min-height: 68mm; }
+.caption { font-size: 8.5pt; color: #44515c; margin-top: -8pt; }
+ol, ul { margin-top: 4pt; }
+li { margin-bottom: 4pt; }
+code { font-family: "DejaVu Sans Mono", monospace; font-size: 8.5pt; background: #f0f2f4; }
+.toc li { margin-bottom: 2pt; }
+.footer-note { font-size: 8pt; color: #5a6570; }
+</style>
+</head>
+<body>
+
+<section class="title-page">
+  <p><strong>UNDERGRADUATE RESEARCH EXPERIENCE (UREx)</strong></p>
+  <p>PROJECT REPORT — DRAFT</p>
+  <h1>Extension of a Portable COTS mmWave Radar</h1>
+  <p class="subtitle">Long-range waveform evaluation, coherent receive-beam processing, single-transmitter electronic receive scanning, and a touchscreen operator interface</p>
+  <div class="meta">
+    <p><strong>[Student Name] ([Student Number])</strong></p>
+    <p>Supervised by: [Supervisor Name]</p>
+    <p>Department of Electrical and Computer Engineering<br>
+       College of Design and Engineering<br>
+       National University of Singapore</p>
+    <p>November 2026</p>
+  </div>
+</section>
+
+<h2>Abstract</h2>
+<p>
+This report documents an extension of a portable commercial off-the-shelf (COTS) millimetre-wave radar prototype based on the Texas Instruments IWR6843ISK-ODS, DCA1000EVM and NVIDIA Jetson Orin Nano. The inherited repository contained two distinct processing approaches: a conventional range–Doppler, constant-false-alarm-rate, point-cloud and convolutional-neural-network pipeline; and a periodic-micro-motion (PMM) pipeline using spectrum folding, background subtraction, continuity-constrained tracking, particle filtering and long short-term memory classification. The present extension does not replace those approaches. It preserves the deployed PMM baseline and adds three experimental PMM operating modes: a lower-slope long-range TDM-MIMO waveform, coherent receive-sector beamforming over the twelve-element virtual array, and a non-MIMO single-transmitter/four-receiver electronic receive scan. A touchscreen-oriented graphical interface, tactical top-down display, live calibration/readiness indication, target-attached status annotation and structured performance logging were also developed. The waveform and receive-beam changes address different limitations: the lower chirp slope increases sampled unambiguous range but does not itself improve the radar link budget, whereas coherent receive combination can provide array-processing gain inside a restricted look sector. Final controlled hardware testing has not yet been completed; range, detection probability, false-alarm and tracking results are therefore intentionally left blank.
+</p>
+
+<h2>Contribution and evidence boundary</h2>
+<div class="note">
+<strong>Work covered by this draft.</strong> The extension comprises the repository/mode audit, isolated experimental copies, Modes 2–4 described below, receive-beam processing, mode-aware GUI, touchscreen and PPI presentation, calibration/readiness display, target annotation, and logging/test planning. The conventional and original PMM pipelines are inherited team work and are summarized only to establish continuity and differences. Confirm the exact per-person attribution with the project team before final submission.
+</div>
+<p>
+This document is based on the repository snapshot inspected on 10 November 2026, the supplied project reports by the two team members, the deployed desktop launchers and the source/profile files in <code>main/</code>, <code>experimental_radar/</code> and <code>aesa_radar/</code>. No missing final trial is reconstructed and no detection-range improvement is claimed without a controlled measurement.
+</p>
+
+<h2>Contents</h2>
+<ol class="toc">
+  <li>Introduction</li>
+  <li>Inherited processing approaches and current availability</li>
+  <li>Extended operating modes</li>
+  <li>Technical basis for range and sensitivity changes</li>
+  <li>Operator interface, calibration and logging</li>
+  <li>Planned final validation</li>
+  <li>Final experimental results — blank</li>
+  <li>Discussion of final results — blank</li>
+  <li>Limitations and future work</li>
+  <li>Conclusion</li>
+</ol>
+
+<h2 class="page-break">1 Introduction</h2>
+<h3>1.1 Context</h3>
+<p>
+Small UAVs are difficult radar targets because their body radar cross section is low, their return varies with aspect, and hovering produces little translational Doppler. The project’s portable architecture uses a 60–64&nbsp;GHz IWR6843ISK-ODS radar, a DCA1000EVM raw-data capture card and a Jetson Orin Nano for local processing and display. Earlier team work established the hardware start-up sequence, packet acquisition, calibration, target processing and UAV/non-UAV inference. It also established two conceptually different processing pipelines: a broad conventional moving-target pipeline and a rotor-sensitive PMM pipeline.
+</p>
+<h3>1.2 Objective of the extension</h3>
+<p>
+The extension investigates whether the existing hardware can obtain a more useful range envelope or directional sensitivity without replacing the radar board. Four selectable PMM configurations are retained in one isolated application for controlled comparison. The work also aims to make the platform practical on a portable touchscreen by reducing terminal dependence and presenting clear calibration, readiness and target state information.
+</p>
+<h3>1.3 Research questions</h3>
+<ol>
+  <li>Are the two inherited processing approaches still preserved and operationally accessible?</li>
+  <li>What physical or processing quantity is changed by each added mode?</li>
+  <li>Does a lower-slope waveform, coherent receive-sector processing or single-transmitter receive scanning increase useful target range or tracking continuity under matched conditions?</li>
+  <li>Can these modes run within the Jetson’s 100&nbsp;ms PMM frame period without capture or processing loss?</li>
+</ol>
+
+<h2>2 Inherited processing approaches and current availability</h2>
+<h3>2.1 Original conventional approach</h3>
+<p>
+The conventional implementation performs a range FFT and TDM-aware Doppler FFT, learns a clutter reference, applies two-dimensional ordered-statistic CFAR, estimates angle, converts detections to XYZ points, clusters them with DBSCAN and maintains a constant-velocity target track. A target-gated micro-Doppler history feeds a CNN classifier. This path is general-purpose because it does not require a periodic rotor response, but a weak or hovering target must first produce sufficient conventional detection evidence.
+</p>
+<h3>2.2 Original PMM approach</h3>
+<p>
+The PMM implementation forms range–Doppler data, folds the Doppler spectrum over candidate periodicities, subtracts a calibrated projected background, and follows a continuity-constrained maximum through range and time. Particle filtering and track lifecycle logic provide smoothed range/velocity state. Capon-based angular processing estimates azimuth and elevation, and a 36-by-64 Doppler–time sequence can feed an LSTM UAV/non-UAV classifier. This path is specialised toward periodic rotary-wing evidence and is the processing basis used by all four modes in the currently deployed extension.
+</p>
+
+<table>
+<tr><th>Inherited approach</th><th>Preserved?</th><th>Selectable in current four-mode GUI?</th><th>Current location/status</th></tr>
+<tr><td>Conventional CFAR/DBSCAN/CNN</td><td>Yes</td><td><strong>No</strong></td><td>Preserved in Git, most completely on branch <code>Eli</code>; earlier variants remain on <code>2TX-bpm</code>, <code>3TX-mode</code> and <code>Test</code>. It requires a separate worktree/launcher or later integration.</td></tr>
+<tr><td>PMM folding/tracking/LSTM</td><td>Yes</td><td><strong>Yes — Mode 1</strong></td><td>The untouched root application remains under <code>main/</code> and <code>profiles/</code>. The same baseline is copied into the isolated experimental applications.</td></tr>
+</table>
+<p class="caption"><strong>Important distinction:</strong> the original two approaches are two different processing pipelines. The four numbered GUI modes are waveform/beamforming variants of the PMM pipeline, not replacements for both original pipelines.</p>
+
+<h2 class="page-break">3 Extended PMM operating modes</h2>
+<table class="small">
+<tr><th>Mode</th><th>RF configuration</th><th>Host processing</th><th>Purpose</th><th>Current status</th></tr>
+<tr><td><strong>1 Baseline 20&nbsp;m TDM-MIMO</strong></td><td>3 sequential TX, 4 RX; 96 chirps/frame; 46.875&nbsp;MHz/µs slope</td><td>Original non-coherent PMM input and Capon angle path</td><td>Control and inherited PMM operation</td><td>Available; baseline classifier compatible</td></tr>
+<tr><td><strong>2 Long-range TDM-MIMO</strong></td><td>3 sequential TX, 4 RX; 96 chirps/frame; 9.994&nbsp;MHz/µs slope</td><td>Same PMM tracker with lower initial threshold floor</td><td>Increase sampled unambiguous range, accepting coarser range bins</td><td>Available; final matched range test pending</td></tr>
+<tr><td><strong>3 Sector receive beam</strong></td><td>Mode 2 waveform and 3-TX TDM-MIMO virtual array</td><td>15 calibrated delay-and-sum receive beams over ±20° azimuth and ±10° elevation about a selected centre; TDM Doppler-phase compensation; non-coherent fallback</td><td>Trade field of view for coherent receive sensitivity where bearing is approximately known</td><td>Available; classifier disabled; final matched test pending</td></tr>
+<tr><td><strong>4 Single-TX electronic receive scan</strong></td><td>1 TX, 4 RX; 32 chirps/frame; 9.994&nbsp;MHz/µs slope</td><td>169 receive beams on a ±60° azimuth/elevation grid at 10° spacing, PMM tracking and tactical PPI</td><td>Evaluate non-MIMO electronically scanned receive operation and operator-friendly directional display</td><td>Available; classifier disabled; final matched test pending</td></tr>
+</table>
+
+<h3>3.1 Mode 1 — retained control</h3>
+<p>
+Mode 1 deliberately retains the original PMM waveform and feature contract. Its 46.875&nbsp;MHz/µs slope and 6.25&nbsp;MS/s ADC sampling give an approximate 20&nbsp;m sampled unambiguous range and approximately 0.078&nbsp;m range-bin spacing. It is the required reference for deciding whether later modes improve useful detection rather than merely changing display limits or thresholds. The existing LSTM model is fingerprinted to this profile and remains valid only here.
+</p>
+
+<h3>3.2 Mode 2 — lower-slope long-range waveform</h3>
+<p>
+Mode 2 follows the long-chirp direction reported in the mmHawkeye literature: 60.25&nbsp;GHz start frequency, 9.994&nbsp;MHz/µs slope, 6.25&nbsp;MS/s sampling and a 900&nbsp;µs chirp repetition period. The implementation retains 32 complete three-transmitter groups, giving 96 chirps per frame. Lowering slope increases the sampled unambiguous range to approximately 93.8&nbsp;m, but the ADC-observed bandwidth gives coarser range bins of approximately 0.366&nbsp;m. The current GUI initially limits acquisition/display to 20&nbsp;m for controlled testing; changing the mathematical range gate does not demonstrate detection at that range.
+</p>
+
+<h3>3.3 Mode 3 — coherent sector receive beamforming</h3>
+<p>
+Mode 3 uses the Mode 2 RF waveform but coherently combines the twelve TDM virtual channels. A small beam bank covers five azimuth positions and three elevation positions around the operator’s selected centre. The strongest coherent response is retained for each range/Doppler cell. Because each transmitter fires at a different time, the implementation compensates Doppler-dependent inter-transmitter phase before spatial combination. A non-coherent channel-average floor is retained so an imperfect phase calibration cannot suppress a target solely through destructive summation.
+</p>
+<p>
+An ideal twelve-channel coherent combination has an upper-bound power gain of about 10.8&nbsp;dB relative to one channel. Real improvement over the existing non-coherent average will be lower and depends on calibration, target direction, multipath and motion. This is host-side receive beamforming; it does not steer transmitter phase and does not increase EIRP.
+</p>
+
+<h3>3.4 Mode 4 — single-transmitter receive scanning</h3>
+<p>
+Mode 4 disables TDM-MIMO and uses one transmitter with four receivers. It scans a two-dimensional receive steering grid from −60° to +60° in azimuth and elevation. The strongest beam provides coarse bearing/elevation information after PMM range detection. A tactical top-down PPI plots cross-range, down-range, target trail, slant range and relative altitude, with altitude estimated as <em>R</em>sin(elevation). The four physical receive channels provide a smaller aperture and less ideal coherent gain than Mode 3’s twelve virtual channels. Mode 4 is therefore an operator/display and non-MIMO receive-scan experiment, not a claim of military-style transmit AESA operation.
+</p>
+
+<div class="note warning">
+<strong>Transmit steering boundary.</strong> Modes 3 and 4 steer only the host-side receive weights. The standard board/profile path does not apply validated multi-transmitter phase steering. Mode 4 intentionally uses one transmitter and therefore does not increase transmit gain or EIRP.
+</div>
+
+<h2>4 Technical basis for range and sensitivity changes</h2>
+<h3>4.1 Sampled range</h3>
+<p>For FMCW sampling rate <em>f</em><sub>s</sub>, chirp slope <em>S</em>, and <em>N</em> ADC samples, the approximate sampled maximum range and range-bin spacing are:</p>
+<p class="equation">R<sub>max</sub> ≈ c f<sub>s</sub> / (2S), &nbsp;&nbsp;&nbsp; ΔR ≈ c f<sub>s</sub> / (2SN).</p>
+<p>
+Mode 2 changes <em>S</em>. It therefore changes where beat frequencies map in range and extends the unambiguous range represented by the samples. It does not increase transmitted power, target radar cross section or antenna gain. A weak small UAV may still disappear well before the theoretical limit.
+</p>
+
+<h3>4.2 Radar equation and receive processing gain</h3>
+<p class="equation">P<sub>r</sub> = P<sub>t</sub> G<sub>t</sub> G<sub>r</sub> λ² σ / ((4π)³ R⁴ L).</p>
+<table>
+<tr><th>Quantity</th><th>Changed by this extension?</th><th>Interpretation</th></tr>
+<tr><td>Transmit power <em>P</em><sub>t</sub> / transmit gain <em>G</em><sub>t</sub></td><td>No</td><td>No validated transmit phased-array or higher-EIRP mode was enabled.</td></tr>
+<tr><td>Receive gain / processing SNR <em>G</em><sub>r</sub></td><td>Yes, algorithmically in Modes 3 and 4</td><td>Coherent receive weights reinforce signals arriving from a selected direction while reducing response elsewhere.</td></tr>
+<tr><td>Wavelength λ and target RCS σ</td><td>No</td><td>The radar frequency and target remain unchanged.</td></tr>
+<tr><td>Aggregate loss <em>L</em></td><td>Potentially</td><td>Calibration error, beam mismatch and multipath can reduce effective coherent gain.</td></tr>
+<tr><td>Detection threshold / temporal processing</td><td>Yes</td><td>PMM integration and adaptive thresholds change the minimum usable evidence, but do not alter physical received power.</td></tr>
+</table>
+
+<h3>4.3 Expected trade-offs</h3>
+<ul>
+  <li>Mode 2: wider unambiguous range, coarser range bins, no direct link-budget gain.</li>
+  <li>Mode 3: strongest possible receive-processing gain of the added modes, but only inside a limited manually centred sector and with calibration dependence.</li>
+  <li>Mode 4: wide electronic receive scan and simpler non-MIMO acquisition, but only four receive channels, a coarse angle grid, single-target PMM tracking and no transmit beam gain.</li>
+</ul>
+
+<h2 class="page-break">5 Operator interface, calibration and logging</h2>
+<h3>5.1 Isolated deployment and reversibility</h3>
+<p>
+The extensions were added as separate copies. The original PMM application remains under <code>main/</code>. Modes 1–3 are in <code>experimental_radar/</code>, while the deployed four-mode application is in <code>aesa_radar/</code>. Separate desktop launchers preserve a recoverable baseline and prevent experimental profiles, logs and datasets from overwriting the root application by default.
+</p>
+<h3>5.2 Touch-oriented GUI and tactical display</h3>
+<p>
+The GUI exposes operation mode, display type, UART, capture duration, dataset destination, radar profile, network settings and PMM parameters without requiring terminal commands. Touch scrolling, responsive layout, larger controls and a maximised window support the portable monitor. The Mode 4 PPI presents the panel at the bottom centre, target position/trail and altitude indication in a familiar top-down format.
+</p>
+<h3>5.3 Calibration and readiness state</h3>
+<p>
+The PMM background is formed from a target-free 30-second interval. The PPI readiness banner is driven by the tracker’s actual accepted-frame count rather than a separate wall-clock timer. It displays amber calibration progress and instructs the operator to keep the field clear; it changes to green only when the tracker reports readiness. Search, target-track and classifier states are displayed separately to avoid treating calibration completion as target identification.
+</p>
+<h3>5.4 Classification boundary</h3>
+<p>
+The available LSTM classifier was trained and fingerprinted for Mode 1. Modes 2–4 change the waveform or array feature contract, so the GUI disables that model rather than applying an unsupported inference. PPI target annotations show a class and confidence only for a compatible classified run; otherwise they state that classification is off, warming or below the signal-quality gate. Valid classification in Modes 2–4 requires labelled captures from each intended configuration and retraining with capture-grouped validation.
+</p>
+<h3>5.5 Evidence logging</h3>
+<p>
+Each run can write processed PMM JSONL records and runtime-performance JSONL records. The logs retain PMM scores, thresholds, folding size, track state, estimated range/angle, frame timing, deadline misses, packet/capture integrity and sampled CPU/GPU/memory use. Raw complex ADC capture remains necessary for offline beam-weight optimisation because processed JSONL does not retain per-channel phase.
+</p>
+
+<h2>6 Planned final validation</h2>
+<h3>6.1 Controlled comparison</h3>
+<ol>
+  <li>Use the same radar height, panel direction, target, route, environment and five-minute post-calibration duration for Modes 1–4.</li>
+  <li>Mark measured ranges and bearings. Begin at 3, 5 and 8&nbsp;m; increase only after stable nearer operation.</li>
+  <li>Keep the field target-free until the readiness banner becomes green.</li>
+  <li>For Mode 3, repeat at sector centres that place the target inside and outside the intended sector.</li>
+  <li>For Mode 4, record target and radar height so relative-altitude error can be evaluated.</li>
+  <li>Repeat each condition and include empty-scene runs to estimate false-alarm behaviour.</li>
+</ol>
+<h3>6.2 Measures</h3>
+<ul>
+  <li>maximum confirmed static and moving-target range under a stated criterion;</li>
+  <li>confirmed-track coverage and detection probability at each distance;</li>
+  <li>false tracks during target-free intervals;</li>
+  <li>range, azimuth and relative-altitude error against measured references;</li>
+  <li>track fragmentation, reacquisition and incorrect distant snap events;</li>
+  <li>packets lost, invalid frames, queue/processing drops and stream resynchronisations;</li>
+  <li>pipeline p50/p95/max timing, deadline misses and CPU/GPU/memory use.</li>
+</ul>
+
+<h2 class="page-break">7 Final experimental results</h2>
+<table>
+<tr><th>Mode</th><th>Maximum static range</th><th>Maximum moving range</th><th>Track coverage</th><th>False alarms</th><th>Pipeline p95</th></tr>
+<tr><td>1 Baseline TDM-MIMO</td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>2 Long-range TDM-MIMO</td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>3 Sector receive beam</td><td></td><td></td><td></td><td></td><td></td></tr>
+<tr><td>4 Single-TX receive scan</td><td></td><td></td><td></td><td></td><td></td></tr>
+</table>
+<div class="blank blank-large"></div>
+
+<h2>8 Discussion of final results</h2>
+<div class="blank blank-large"></div>
+
+<h2>9 Limitations and future work</h2>
+<ul>
+  <li>The four current GUI modes all use the PMM processing lane. The conventional teammate-developed pipeline is preserved in Git but has not yet been integrated as a fifth selectable lane.</li>
+  <li>The current PMM tracker intentionally follows one dominant target. Multi-target association and identity continuity are not established.</li>
+  <li>Mode 3 gain depends on phase calibration and target position within the sector. Mode 4 has only four physical receive channels and coarse two-dimensional angle estimates.</li>
+  <li>The lower-slope profile increases unambiguous range but does not guarantee sufficient SNR for a small drone at long range.</li>
+  <li>The classifier is not valid for Modes 2–4 until mode-specific labelled data are collected and a compatible model is trained.</li>
+  <li>A future comparison should deploy the conventional pipeline in a separate worktree/launcher first, then integrate it only after reproducing its baseline tests.</li>
+  <li>True transmit beam steering requires a separate hardware, power, phase-calibration, firmware and regulatory study; it is outside this implementation.</li>
+</ul>
+
+<h2>10 Conclusion</h2>
+<p>
+The repository still preserves both original team approaches, but only the PMM approach is directly selectable in the current four-mode application. The conventional CFAR/DBSCAN/CNN implementation remains recoverable from its Git branches and should not be described as removed, although it is not presently deployed in the new GUI. The present extension retains the original PMM mode as a control and adds three distinct experiments: sampled-range extension through a lower chirp slope, coherent directional receive gain through a twelve-channel sector beam bank, and non-MIMO electronic receive scanning through one transmitter and four receivers. It also adds a portable touchscreen workflow, tactical PPI, explicit calibration/readiness state, target annotation and structured evidence logging. These changes establish a controlled platform for evaluating range and directional sensitivity, but final performance conclusions remain pending the matched hardware tests defined in this report.
+</p>
+
+<h2>References</h2>
+<ol class="small">
+  <li>W. X. Yang, <em>Portable COTS mmWave Radar for UAV Detection, Tracking and Classification</em>, UREx project report, National University of Singapore, September 2026.</li>
+  <li>Q. You, <em>Radar-UREx: Portable COTS mmWave Radar for UAV Detection, Tracking and Classification</em>, UREx project report draft V6, National University of Singapore, 2026.</li>
+  <li>Y. He, J. Zhang, R. Xi, X. Na, Y. Sun and B. Li, “Detection and Identification of Non-cooperative UAV Using a COTS mmWave Radar,” <em>ACM Transactions on Sensor Networks</em>, vol. 20, no. 2, Article 44, 2024, doi: 10.1145/3638767.</li>
+  <li>Texas Instruments, <em>DCA1000EVM Data Capture Card User’s Guide</em>, SPRUIJ4.</li>
+  <li>Texas Instruments, <em>IWR6843ISK-ODS Evaluation Module User’s Guide</em>, SWRU546E.</li>
+  <li>Radar-UREx source repository, branch and worktree snapshot inspected 10 November 2026.</li>
+</ol>
+
+<h2>Appendix A — implementation map</h2>
+<table>
+<tr><th>Item</th><th>Location</th></tr>
+<tr><td>Original deployed PMM baseline</td><td><code>main/</code>, <code>profiles/profile-mini4-20m.cfg</code></td></tr>
+<tr><td>Modes 1–3 isolated experiment</td><td><code>experimental_radar/</code></td></tr>
+<tr><td>Four-mode deployed application</td><td><code>aesa_radar/</code></td></tr>
+<tr><td>Mode 2 profile</td><td><code>experimental_radar/profiles/profile-mini4-long-range.cfg</code></td></tr>
+<tr><td>Mode 3 profile and processing</td><td><code>experimental_radar/profiles/profile-mini4-fixed-beam.cfg</code>, <code>main/pmm.py</code> within the isolated copy</td></tr>
+<tr><td>Mode 4 profile, PPI and GUI</td><td><code>aesa_radar/profiles/profile-mini4-simo-scan.cfg</code>, <code>aesa_radar/main/pmm.py</code>, <code>aesa_radar/main/livedatacapture.py</code>, <code>aesa_radar/main/gui.py</code></td></tr>
+<tr><td>Conventional inherited pipeline</td><td>Git branch <code>Eli</code> (earlier variants on <code>2TX-bpm</code>, <code>3TX-mode</code>, <code>Test</code>)</td></tr>
+</table>
+
+<p class="footer-note">Draft status: final student/supervisor details, exact contribution attribution and controlled hardware-test results remain to be completed.</p>
+</body>
+</html>

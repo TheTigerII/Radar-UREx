@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Radar-UREx Mode Extension — Executive Summary</title>
+<style>
+@page { size: A4; margin: 11mm 12mm 10mm; }
+body { font-family: Arial, Helvetica, sans-serif; font-size: 8.6pt; line-height: 1.18; color: #16232d; margin: 0; }
+h1 { font-size: 17pt; color: #123f60; margin: 0 0 2pt; }
+h2 { font-size: 10.5pt; color: #123f60; margin: 6pt 0 2pt; border-bottom: 0.7pt solid #6e94ae; }
+p { margin: 2pt 0 4pt; text-align: justify; }
+.head { text-align: center; margin-bottom: 5pt; }
+.head p { text-align: center; margin: 1pt; }
+.grid { display: table; width: 100%; table-layout: fixed; }
+.col { display: table-cell; width: 50%; vertical-align: top; padding-right: 5mm; }
+.col + .col { padding-right: 0; padding-left: 5mm; border-left: 0.7pt solid #a8b7c2; }
+table { width: 100%; border-collapse: collapse; font-size: 7.7pt; margin: 3pt 0 4pt; }
+th { background: #16496c; color: white; text-align: left; padding: 3pt; }
+td { border: 0.4pt solid #9caab4; padding: 2.5pt 3pt; vertical-align: top; }
+.callout { background: #edf6fb; border-left: 3pt solid #2382b8; padding: 4pt 6pt; margin: 4pt 0; }
+.blank { height: 21mm; border: 0.7pt solid #9caab4; margin-top: 3pt; }
+ul { margin: 2pt 0 4pt 13pt; padding: 0; }
+li { margin-bottom: 1.5pt; }
+code { font-size: 7.3pt; }
+</style>
+</head>
+<body>
+<div class="head">
+  <h1>Portable COTS mmWave Radar Mode Extension</h1>
+  <p><strong>Executive Summary of the UREx Extension</strong></p>
+  <p>[Student Name] &nbsp; [Student Number] &nbsp; National University of Singapore &nbsp; November 2026</p>
+</div>
+
+<div class="grid">
+<div class="col">
+<h2>Purpose</h2>
+<p>
+This work extends the IWR6843ISK-ODS, DCA1000EVM and Jetson Orin Nano prototype to investigate longer sampled range and directional receive sensitivity while preserving the earlier project baselines. It also replaces routine terminal operation with a touchscreen-oriented GUI and tactical top-down display. Final controlled range testing has not yet been completed, so this summary describes implementation and test intent rather than claiming a performance improvement.
+</p>
+
+<h2>Are the two original approaches still available?</h2>
+<table>
+<tr><th>Original approach</th><th>Availability now</th></tr>
+<tr><td>Conventional range–Doppler, OS-CFAR, DBSCAN, tracking and CNN</td><td>Preserved in Git, mainly branch <code>Eli</code>, but <strong>not selectable</strong> in the current four-mode GUI.</td></tr>
+<tr><td>PMM spectrum folding, background subtraction, constrained tracking, particle filter and LSTM</td><td>Preserved in the root application and directly selectable as <strong>Mode 1</strong>.</td></tr>
+</table>
+<div class="callout"><strong>Key distinction:</strong> the original pair are different processing pipelines. The four current GUI modes are PMM waveform/beamforming variants; they do not include the conventional pipeline.</div>
+
+<h2>Developments in this extension</h2>
+<ul>
+  <li>Created isolated experimental copies so the original PMM application remains recoverable.</li>
+  <li>Added lower-slope long-range TDM-MIMO, coherent receive-sector, and single-TX receive-scan modes.</li>
+  <li>Added mode/profile selection, desktop launchers and touchscreen-responsive controls.</li>
+  <li>Added a tactical PPI with range, bearing, trail and estimated relative altitude.</li>
+  <li>Added tracker-driven calibration progress, ready/search/track state and target-attached annotation.</li>
+  <li>Retained processed and performance JSONL logging for later evidence-based comparison.</li>
+</ul>
+
+<h2>Final test results</h2>
+<div class="blank"></div>
+</div>
+
+<div class="col">
+<h2>Current PMM operating modes</h2>
+<table>
+<tr><th>Mode</th><th>Main change</th><th>Expected trade-off</th></tr>
+<tr><td><strong>1 Baseline</strong></td><td>3-TX TDM-MIMO, 46.875&nbsp;MHz/µs slope</td><td>Inherited control; ≈0.078&nbsp;m bins; classifier compatible.</td></tr>
+<tr><td><strong>2 Long-range MIMO</strong></td><td>Slope reduced to 9.994&nbsp;MHz/µs</td><td>≈93.8&nbsp;m sampled unambiguous range but ≈0.366&nbsp;m bins; no direct SNR gain.</td></tr>
+<tr><td><strong>3 Sector beam</strong></td><td>15 coherent receive beams over 12 virtual channels</td><td>Directional receive gain in a narrow sector; needs good phase calibration.</td></tr>
+<tr><td><strong>4 Single-TX scan</strong></td><td>1 TX/4 RX and 169-beam receive grid</td><td>Wide electronic receive scan and PPI; smaller aperture, coarse angle/altitude, single dominant track.</td></tr>
+</table>
+
+<h2>How range is being changed</h2>
+<p>
+Mode 2 changes chirp slope and therefore the sampled range mapping; it does not change transmit power or antenna gain. Mode 3 changes effective receive processing gain by coherently combining channels in selected directions. Mode 4 also uses coherent receive weights, but only across four physical receivers. None of the new modes performs validated transmit phase steering or raises EIRP. Lower thresholds and PMM integration change the evidence required for a detection, not the physical received power.
+</p>
+
+<h2>Classification and operating limits</h2>
+<p>
+The existing LSTM model is fingerprinted to Mode 1. It is deliberately disabled for Modes 2–4 until labelled mode-specific data are collected and a compatible model is trained. Mode 4 is receive-steered SIMO, not military-style transmit AESA. The present PMM tracker follows one dominant target.
+</p>
+
+<h2>Planned verification</h2>
+<ul>
+  <li>Run all four modes from the same position against the same target and marked route.</li>
+  <li>Keep the field clear for the full tracker-reported background calibration.</li>
+  <li>Measure confirmed static/moving range, track coverage, false alarms, range/angle error and distant snap events.</li>
+  <li>Compare packet integrity, processing drops, p95 latency, deadline misses and Jetson resource use.</li>
+  <li>Repeat each condition and include empty-scene controls.</li>
+</ul>
+
+<h2>Pre-test conclusion</h2>
+<p>
+The original PMM mode remains directly usable and the conventional mode remains recoverable from Git, although it is not deployed in the current GUI. The extension provides three technically different PMM experiments and a more practical field interface. Whether any new mode increases useful drone-detection range must remain open until matched final tests are completed.
+</p>
+</div>
+</div>
+</body>
+</html>

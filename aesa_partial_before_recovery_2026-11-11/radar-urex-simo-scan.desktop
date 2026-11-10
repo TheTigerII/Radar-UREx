@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Radar-UREx SIMO Scan
+Comment=Run the single-transmitter electronic receive scan and tactical PPI
+Exec=/home/rgmtc/Desktop/Radar-UREx/aesa_radar/launch_gui.sh
+Path=/home/rgmtc/Desktop/Radar-UREx/aesa_radar
+Icon=applications-engineering
+Terminal=false
+Categories=Science;Engineering;
+StartupNotify=true
+StartupWMClass=radar-urex-simo-scan
