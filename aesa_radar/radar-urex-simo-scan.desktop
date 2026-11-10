@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=Radar-UREx Two-Mode Range Test
-Comment=Compare MIMO sector STT and two-TX phased-array STT
+Name=Radar-UREx Five-Mode Test Center
+Comment=Run original, recovered and literature-guided radar modes with PPI
 Exec=/home/rgmtc/Desktop/Radar-UREx/aesa_radar/launch_gui.sh
 Path=/home/rgmtc/Desktop/Radar-UREx/aesa_radar
 Icon=applications-engineering

@@ -1,0 +1,625 @@
+import io
+import queue
+import threading
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import main.run as run
+
+
+class ChooseDurationMinutesTests(unittest.TestCase):
+    def test_blank_input_uses_five_minute_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(
+                run.choose_duration_minutes(None),
+                5.0,
+            )
+
+    def test_zero_means_unlimited(self) -> None:
+        with patch("builtins.input", return_value="0"):
+            self.assertEqual(run.choose_duration_minutes(None), 0.0)
+
+    def test_cli_value_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertEqual(run.choose_duration_minutes(1.5), 1.5)
+            prompt.assert_not_called()
+
+    def test_negative_cli_value_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finite, non-negative"):
+            run.choose_duration_minutes(-1.0)
+
+    def test_non_finite_cli_value_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finite, non-negative"):
+            run.choose_duration_minutes(float("nan"))
+
+    def test_deadline_starts_only_after_initial_processing_is_ready(self) -> None:
+        with patch("main.run.time.monotonic", return_value=100.0):
+            self.assertIsNone(
+                run.duration_deadline(
+                    1.5,
+                    initial_processing_ready=False,
+                )
+            )
+            self.assertEqual(
+                run.duration_deadline(
+                    1.5,
+                    initial_processing_ready=True,
+                ),
+                190.0,
+            )
+
+
+class ChooseMicroDopplerRangeTests(unittest.TestCase):
+    def test_blank_input_uses_2_15_meter_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(
+                run.choose_micro_doppler_range_m(None),
+                2.15,
+            )
+
+    def test_explicit_positive_range_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertEqual(
+                run.choose_micro_doppler_range_m(3.25),
+                3.25,
+            )
+            prompt.assert_not_called()
+
+    def test_invalid_explicit_range_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "finite positive"):
+            run.choose_micro_doppler_range_m(0.0)
+
+
+class ChooseDisplayTests(unittest.TestCase):
+    def test_blank_input_uses_combined_display_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(
+                run.choose_display(None),
+                "point-cloud-micro-doppler",
+            )
+
+    def test_combined_display_menu_choice(self) -> None:
+        with patch("builtins.input", return_value="5"):
+            self.assertEqual(
+                run.choose_display(None),
+                "point-cloud-micro-doppler",
+            )
+
+    def test_combined_display_is_a_cli_choice(self) -> None:
+        self.assertIn("point-cloud-micro-doppler", run.DISPLAY_CHOICES)
+
+    def test_touchscreen_ppi_is_a_cli_choice(self) -> None:
+        self.assertIn("ppi", run.DISPLAY_CHOICES)
+
+    def test_dedicated_rotor_display_is_a_cli_choice(self) -> None:
+        self.assertIn("micro-doppler", run.DISPLAY_CHOICES)
+        with patch("builtins.input", return_value="6"):
+            self.assertEqual(run.choose_display(None), "micro-doppler")
+
+    def test_calibration_is_menu_option_seven(self) -> None:
+        self.assertIn("calibration", run.DISPLAY_CHOICES)
+        with patch("builtins.input", return_value="7"):
+            self.assertEqual(run.choose_display(None), "calibration")
+
+    def test_angular_calibrations_are_menu_options_eight_and_nine(self) -> None:
+        with patch("builtins.input", return_value="8"):
+            self.assertEqual(run.choose_display(None), "azimuth-calibration")
+        with patch("builtins.input", return_value="9"):
+            self.assertEqual(run.choose_display(None), "elevation-calibration")
+        self.assertIn("azimuth-calibration", run.DISPLAY_CHOICES)
+        self.assertIn("elevation-calibration", run.DISPLAY_CHOICES)
+
+    def test_dedicated_rotor_defaults_match_current_drone(self) -> None:
+        with patch("sys.argv", ("run.py",)):
+            args = run.parse_args()
+
+        self.assertEqual(args.rotor_blades, 2)
+        self.assertEqual(args.rotor_rpm_max, 10_700.0)
+        self.assertEqual(args.clutter_map_min_snr_db, 3.0)
+        self.assertEqual(args.static_min_change_db, 3.0)
+        self.assertEqual(args.static_background_update_rate, 0.0)
+        self.assertEqual(args.static_reference_frames, 150)
+
+
+class ChooseLiveClassificationTests(unittest.TestCase):
+    def test_blank_input_disables_classification_by_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_live_classification(None))
+
+    def test_yes_enables_classification(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_live_classification(None))
+
+    def test_explicit_cli_value_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(run.choose_live_classification(True))
+            self.assertFalse(run.choose_live_classification(False))
+            prompt.assert_not_called()
+
+
+class ChooseInferenceLoggingTests(unittest.TestCase):
+    def test_blank_input_disables_logging_by_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_inference_logging(None))
+
+    def test_yes_enables_logging(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_inference_logging(None))
+
+    def test_cli_values_skip_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(run.choose_inference_logging(True))
+            self.assertFalse(run.choose_inference_logging(False))
+            prompt.assert_not_called()
+
+    def test_custom_path_enables_logging(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(
+                run.choose_inference_logging(None, Path("log/custom.jsonl"))
+            )
+            prompt.assert_not_called()
+
+    def test_custom_path_conflicts_with_explicit_disable(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            run.choose_inference_logging(False, Path("log/custom.jsonl"))
+
+    def test_evaluation_label_prompt_normalizes_non_drone(self) -> None:
+        with patch("builtins.input", return_value="non-drone"):
+            self.assertEqual(run.choose_evaluation_label(None), "not_drone")
+
+    def test_explicit_evaluation_label_skips_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertEqual(
+                run.choose_evaluation_label("drone"),
+                "drone",
+            )
+            prompt.assert_not_called()
+
+
+class ChoosePerformanceLoggingTests(unittest.TestCase):
+    def test_blank_input_disables_logging_by_default(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertFalse(run.choose_performance_logging(None))
+
+    def test_yes_enables_logging(self) -> None:
+        with patch("builtins.input", return_value="yes"):
+            self.assertTrue(run.choose_performance_logging(None))
+
+    def test_cli_values_skip_prompt(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(run.choose_performance_logging(True))
+            self.assertFalse(run.choose_performance_logging(False))
+            prompt.assert_not_called()
+
+    def test_custom_path_enables_logging(self) -> None:
+        with patch("builtins.input") as prompt:
+            self.assertTrue(
+                run.choose_performance_logging(
+                    None,
+                    Path("log/performance.jsonl"),
+                )
+            )
+            prompt.assert_not_called()
+
+    def test_custom_path_conflicts_with_explicit_disable(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
+            run.choose_performance_logging(
+                False,
+                Path("log/performance.jsonl"),
+            )
+
+
+class ChooseDatasetOutputDirectoryTests(unittest.TestCase):
+    def test_blank_input_uses_dataset_root(self) -> None:
+        with patch("builtins.input", return_value=""):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.DEFAULT_DATASET_DIR,
+            )
+
+    def test_uav_and_others_choices(self) -> None:
+        with patch("builtins.input", return_value="1"):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.UAV_DATASET_DIR,
+            )
+        with patch("builtins.input", return_value="2"):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.OTHERS_DATASET_DIR,
+            )
+
+    def test_option_three_uses_dataset_root(self) -> None:
+        with patch("builtins.input", return_value="3"):
+            self.assertEqual(
+                run.choose_dataset_output_directory(),
+                run.DEFAULT_DATASET_DIR,
+            )
+
+
+class CaptureCommandTests(unittest.TestCase):
+    def test_calibration_command_disables_normal_processing(self) -> None:
+        args = SimpleNamespace(
+            display_update_every=1,
+            config=Path("profile.cfg"),
+            setup=Path("setup.json"),
+            host_ip="192.168.33.30",
+            data_port=4098,
+            socket_recv_buffer=1024,
+            packet_queue_size=8,
+            processing_queue_size=4,
+            max_range_m=10.0,
+            cluster_eps_m=0.4,
+            cluster_min_samples=2,
+            clutter_map_update_rate=0.02,
+            clutter_map_warmup_frames=30,
+            clutter_map_min_snr_db=3.0,
+            static_detection=True,
+            static_warmup_frames=30,
+            static_reference_frames=150,
+            static_min_change_db=3.0,
+            static_background_update_rate=0.0,
+            static_cluster_min_samples=1,
+            classification=True,
+            calibration_distance_m=1.0,
+            calibration_search_window_m=0.15,
+            calibration_warmup_frames=16,
+            calibration_frames=64,
+            calibration_timeout_seconds=90.0,
+        )
+        command = run.build_capture_command(
+            args,
+            "calibration",
+            None,
+            config_path=Path("runtime.cfg"),
+        )
+        self.assertIn("runtime.cfg", command)
+        self.assertIn("--no-classification", command)
+        self.assertIn("--no-static-detection", command)
+        self.assertNotIn("--processed-output", command)
+        self.assertIn("--calibration-frames", command)
+
+        angular_command = run.build_capture_command(
+            args,
+            "azimuth-calibration",
+            None,
+            config_path=Path("runtime.cfg"),
+            host_compensation_profile=Path("profile.cfg"),
+        )
+        self.assertIn("--host-compensation-profile", angular_command)
+        self.assertIn("profile.cfg", angular_command)
+        with self.assertRaisesRegex(ValueError, "host compensation"):
+            run.build_capture_command(
+                args,
+                "azimuth-calibration",
+                None,
+                config_path=Path("runtime.cfg"),
+            )
+
+    def test_processed_output_is_default_and_raw_output_is_opt_in(self) -> None:
+        args = SimpleNamespace(
+            display_update_every=1,
+            config=Path("profile.cfg"),
+            setup=Path("setup.json"),
+            host_ip="192.168.33.30",
+            data_port=4098,
+            socket_recv_buffer=4 * 1024 * 1024,
+            packet_queue_size=8192,
+            processing_queue_size=32,
+            max_range_m=10.0,
+            cluster_eps_m=0.5,
+            cluster_min_samples=2,
+            clutter_map_update_rate=0.02,
+            clutter_map_warmup_frames=30,
+            clutter_map_min_snr_db=6.0,
+            static_detection=True,
+            static_warmup_frames=30,
+            static_reference_frames=90,
+            static_min_change_db=6.0,
+            static_background_update_rate=0.01,
+            static_cluster_min_samples=3,
+        )
+
+        command = run.build_capture_command(
+            args,
+            "point-cloud-micro-doppler",
+            Path("processed.jsonl"),
+        )
+
+        self.assertIn("--processed-output", command)
+        self.assertIn("processed.jsonl", command)
+        self.assertIn("--socket-recv-buffer", command)
+        self.assertIn("--packet-queue-size", command)
+        self.assertIn("--processing-queue-size", command)
+        self.assertIn("--static-detection", command)
+        self.assertIn("--static-warmup-frames", command)
+        self.assertIn("--static-reference-frames", command)
+        self.assertIn("--static-min-change-db", command)
+        self.assertIn("--static-background-update-rate", command)
+        self.assertIn("--static-cluster-min-samples", command)
+        self.assertIn("--classification", command)
+        self.assertIn("--classification-artifacts", command)
+        self.assertIn("--classification-device", command)
+        self.assertIn("--no-inference-logging", command)
+        self.assertEqual(
+            command[command.index("--classification-device") + 1],
+            "auto",
+        )
+        self.assertNotIn("--raw-output", command)
+        self.assertEqual(command[1], "-u")
+
+        args.inference_logging = True
+        args.inference_log = Path("log/evaluation.jsonl")
+        args.evaluation_label = "drone"
+        logging_command = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--inference-logging", logging_command)
+        self.assertIn("--inference-log", logging_command)
+        self.assertIn("log/evaluation.jsonl", logging_command)
+        self.assertIn("--evaluation-label", logging_command)
+        self.assertIn("drone", logging_command)
+
+        args.performance_logging = True
+        args.performance_log = Path("log/performance.jsonl")
+        args.performance_sample_interval = 2.5
+        performance_command = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--performance-logging", performance_command)
+        self.assertIn("--performance-log", performance_command)
+        self.assertIn("log/performance.jsonl", performance_command)
+        self.assertEqual(
+            performance_command[
+                performance_command.index("--performance-sample-interval") + 1
+            ],
+            "2.5",
+        )
+
+        args.static_detection = False
+        disabled_command = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--no-static-detection", disabled_command)
+        self.assertNotIn("--static-detection", disabled_command)
+
+        args.classification = False
+        classification_disabled = run.build_capture_command(
+            args,
+            "point-cloud",
+            Path("processed.jsonl"),
+        )
+        self.assertIn("--no-classification", classification_disabled)
+
+    def test_rotor_command_forwards_gate_and_estimator_settings(self) -> None:
+        args = SimpleNamespace(
+            display_update_every=1,
+            config=Path("profile.cfg"),
+            setup=Path("setup.json"),
+            host_ip="192.168.33.30",
+            data_port=4098,
+            socket_recv_buffer=4 * 1024 * 1024,
+            packet_queue_size=8192,
+            processing_queue_size=32,
+            max_range_m=10.0,
+            cluster_eps_m=0.5,
+            cluster_min_samples=2,
+            clutter_map_update_rate=0.02,
+            clutter_map_warmup_frames=30,
+            clutter_map_min_snr_db=6.0,
+            static_detection=False,
+            static_warmup_frames=30,
+            static_reference_frames=90,
+            static_min_change_db=6.0,
+            static_background_update_rate=0.01,
+            static_cluster_min_samples=1,
+            micro_doppler_range_m=2.15,
+            micro_doppler_range_half_width_bins=1,
+            rotor_blades=2,
+            rotor_count=2,
+            rotor_radius_m=0.05,
+            rotor_rpm_min=2_000.0,
+            rotor_rpm_max=12_000.0,
+        )
+
+        command = run.build_capture_command(
+            args,
+            "micro-doppler",
+            Path("processed.jsonl"),
+        )
+
+        self.assertIn("--micro-doppler-range-m", command)
+        self.assertIn("2.15", command)
+        self.assertIn("--rotor-radius-m", command)
+        self.assertIn("--rotor-rpm-max", command)
+
+
+class SubprocessEnvironmentTests(unittest.TestCase):
+    def test_linux_vnc_environment_defaults_to_display_zero(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {"PATH": "/usr/bin"},
+                clear=True,
+            ),
+            patch("main.run.os.name", "posix"),
+            patch("main.run.os.getuid", return_value=1000, create=True),
+            patch("main.run.Path.exists", return_value=True),
+            patch("main.run.Path.is_file", return_value=True),
+        ):
+            environment = run.subprocess_environment()
+
+        self.assertEqual(environment["DISPLAY"], ":0")
+        self.assertEqual(
+            environment["XAUTHORITY"],
+            "/run/user/1000/gdm/Xauthority",
+        )
+
+    def test_existing_display_environment_is_preserved(self) -> None:
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "DISPLAY": ":7",
+                    "XAUTHORITY": "/tmp/custom-xauthority",
+                },
+                clear=True,
+            ),
+            patch("main.run.os.name", "posix"),
+        ):
+            environment = run.subprocess_environment()
+
+        self.assertEqual(environment["DISPLAY"], ":7")
+        self.assertEqual(
+            environment["XAUTHORITY"],
+            "/tmp/custom-xauthority",
+        )
+
+
+class ClassificationResultChannelTests(unittest.TestCase):
+    def test_relay_extracts_structured_result_and_forwards_other_logs(self) -> None:
+        result_queue = queue.SimpleQueue()
+        process = SimpleNamespace(
+            stdout=io.StringIO(
+                "ordinary capture log\n"
+                'CLASSIFICATION_RESULT {"label":"drone","p_drone":0.99,'
+                '"status":"ready","reason":null,"valid_steps":48}\n'
+            )
+        )
+
+        with patch("builtins.print") as output:
+            run.relay_capture_output(process, result_queue)
+
+        output.assert_called_once_with("ordinary capture log", flush=True)
+        self.assertEqual(result_queue.get_nowait()["label"], "drone")
+
+    def test_relay_reports_capture_readiness(self) -> None:
+        result_queue = queue.SimpleQueue()
+        capture_ready = threading.Event()
+        process = SimpleNamespace(
+            stdout=io.StringIO(
+                "Loaded radar config\n"
+                "Listening for live radar stream on 192.168.33.30:4098\n"
+            )
+        )
+
+        with patch("builtins.print"):
+            run.relay_capture_output(
+                process,
+                result_queue,
+                capture_ready,
+            )
+
+        self.assertTrue(capture_ready.is_set())
+
+    def test_relay_reports_initial_processing_readiness(self) -> None:
+        result_queue = queue.SimpleQueue()
+        initial_processing_ready = threading.Event()
+        process = SimpleNamespace(
+            stdout=io.StringIO(
+                "INITIAL_PROCESSING_READY startup calibration and warm-up complete\n"
+            )
+        )
+
+        with patch("builtins.print") as output:
+            run.relay_capture_output(
+                process,
+                result_queue,
+                initial_processing_ready=initial_processing_ready,
+            )
+
+        self.assertTrue(initial_processing_ready.is_set())
+        output.assert_not_called()
+
+    def test_wait_for_capture_ready_stops_when_capture_exits(self) -> None:
+        process = SimpleNamespace(poll=lambda: 2)
+
+        self.assertFalse(
+            run.wait_for_capture_ready(
+                process,
+                threading.Event(),
+                timeout_seconds=1.0,
+            )
+        )
+
+    def test_wait_for_capture_ready_accepts_ready_capture(self) -> None:
+        capture_ready = threading.Event()
+        capture_ready.set()
+        process = SimpleNamespace(poll=lambda: None)
+
+        self.assertTrue(
+            run.wait_for_capture_ready(
+                process,
+                capture_ready,
+                timeout_seconds=0.0,
+            )
+        )
+
+    def test_explicit_cuda_allows_first_engine_build(self) -> None:
+        args = SimpleNamespace(
+            classification=True,
+            classification_device="cuda",
+        )
+
+        self.assertEqual(
+            run.capture_startup_timeout_seconds(args),
+            run.CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS,
+        )
+
+    def test_cpu_classification_keeps_normal_startup_timeout(self) -> None:
+        args = SimpleNamespace(
+            classification=True,
+            classification_device="cpu",
+        )
+
+        self.assertEqual(
+            run.capture_startup_timeout_seconds(args),
+            run.CAPTURE_STARTUP_TIMEOUT_SECONDS,
+        )
+
+    def test_auto_uses_gpu_timeout_on_jetson(self) -> None:
+        args = SimpleNamespace(
+            classification=True,
+            classification_device="auto",
+        )
+
+        with patch.object(
+            run,
+            "JETSON_MODEL_PATH",
+            SimpleNamespace(
+                read_text=lambda **_kwargs: "NVIDIA Jetson Orin Nano"
+            ),
+        ):
+            timeout = run.capture_startup_timeout_seconds(args)
+
+        self.assertEqual(timeout, run.CAPTURE_GPU_STARTUP_TIMEOUT_SECONDS)
+
+    def test_report_drains_ready_classification_without_printing(self) -> None:
+        result_queue = queue.SimpleQueue()
+        result_queue.put(
+            {
+                "label": "not_drone",
+                "p_drone": 0.125,
+                "status": "ready",
+                "reason": None,
+                "valid_steps": 48,
+            }
+        )
+
+        with patch("builtins.print") as output:
+            latest = run.report_pending_classifications(result_queue)
+
+        self.assertEqual(latest["label"], "not_drone")
+        output.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

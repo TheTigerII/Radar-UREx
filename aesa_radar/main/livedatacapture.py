@@ -1226,7 +1226,12 @@ def _run_frame_processor(
             classifier = RealtimeUavClassifier(
                 model_weights_dir,
                 tracker.metadata,
-                allow_cross_profile=(pmm_config.operation_mode != "baseline"),
+                # The recovered tracker is feature-contract v10 while the
+                # available LSTM was trained on v8.  All modes retain the
+                # required 36x64 Doppler-Time tensor, so permit inference but
+                # preserve the mismatch warning/log rather than crashing at
+                # startup.  Accuracy must be reported from field evaluation.
+                allow_cross_profile=True,
             )
             worker_emit(
                 "Real-time classification enabled: "

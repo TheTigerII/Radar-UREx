@@ -141,6 +141,62 @@ def test_track_before_detect_rejects_old_spike_without_current_evidence() -> Non
     assert not detected
 
 
+def test_literature_tbd_tracker_integrates_persistent_subthreshold_target() -> None:
+    """Mode 6 must acquire weak persistent evidence without a one-frame hit."""
+
+    config = load_profile("profile-mini4-literature-tbd.cfg")
+    tracker = PmmTracker(
+        config,
+        PmmConfig(
+            operation_mode=LITERATURE_TBD_OPERATION_MODE,
+            max_range_m=LONG_RANGE_MAX_RANGE_M,
+            background_calibration_seconds=0.1,
+            detection_threshold=1.0,
+            provisional_frames=1,
+            confirmation_window_frames=1,
+            confirmation_hits=1,
+        ),
+    )
+    range_axis = config.range_axis_m()
+    empty_range_fft = np.zeros((96, 4, 256), dtype=np.complex64)
+    empty_cube = np.zeros((64, 3, 4, 256), dtype=np.complex64)
+    assert tracker.update(empty_cube, empty_range_fft, range_axis).state == "searching"
+
+    target_range_m = 20.0
+    range_bin = int(np.argmin(np.abs(range_axis - target_range_m)))
+    target_range_fft = synthetic_mimo_frame(
+        config,
+        range_bin=range_bin,
+        azimuth_deg=12.0,
+        elevation_deg=5.0,
+        amplitude=0.04,
+    )
+    target_cube = np.fft.fftshift(
+        np.fft.fft(
+            target_range_fft.reshape(32, 3, 4, 256),
+            n=64,
+            axis=0,
+        ),
+        axes=0,
+    ).astype(np.complex64)
+
+    result = None
+    for _ in range(LITERATURE_TBD_MINIMUM_FRAMES - 1):
+        result = tracker.update(target_cube, target_range_fft, range_axis)
+        assert not result.has_track
+    result = tracker.update(target_cube, target_range_fft, range_axis)
+
+    assert result.has_track
+    assert result.pmm_score is not None
+    assert result.pmm_score < result.threshold
+    assert result.tbd_integrated_score is not None
+    assert result.tbd_integrated_score >= LITERATURE_TBD_NORMALIZED_THRESHOLD
+    assert result.tbd_window_frames == LITERATURE_TBD_MINIMUM_FRAMES
+    assert result.range_m == pytest.approx(target_range_m, abs=0.15)
+    assert result.azimuth_deg == pytest.approx(12.0, abs=3.0)
+    assert result.elevation_deg == pytest.approx(5.0, abs=3.0)
+
+
 def test_literature_tbd_metadata_records_integration_and_angles() -> None:
     config = load_profile("profile-mini4-literature-tbd.cfg")
     tracker = PmmTracker(

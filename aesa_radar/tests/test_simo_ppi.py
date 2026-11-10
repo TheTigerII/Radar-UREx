@@ -90,16 +90,22 @@ def test_gui_exposes_range_test_modes_including_literature_tbd() -> None:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = RadarControlCenter()
     try:
-        assert window.operation.count() == 3
+        assert window.operation.count() == 5
         assert [
             window.operation.itemData(index)
             for index in range(window.operation.count())
-        ] == ["fixed-beam", "phased-array-stt", "literature-tbd-mimo"]
+        ] == [
+            "conventional",
+            "baseline",
+            "fixed-beam",
+            "phased-array-stt",
+            "literature-tbd-mimo",
+        ]
         assert window.operation.currentData() == "fixed-beam"
         assert window.config.required_path() == run.FIXED_BEAM_CONFIG_PATH
-        assert window.mode.currentData() == "combined"
+        assert window.mode.currentData() == "ppi"
 
-        window.operation.setCurrentIndex(1)
+        window.operation.setCurrentIndex(3)
         assert window.operation.currentData() == "phased-array-stt"
         assert window.config.required_path() == run.PHASED_STT_CONFIG_PATH
         assert window.calibration_profile.required_path() == (
@@ -111,7 +117,7 @@ def test_gui_exposes_range_test_modes_including_literature_tbd() -> None:
         assert window.beam_azimuth.maximum() == 30.0
         assert window.mode.currentData() == "ppi"
 
-        window.operation.setCurrentIndex(2)
+        window.operation.setCurrentIndex(4)
         assert window.operation.currentData() == "literature-tbd-mimo"
         assert window.config.required_path() == run.LITERATURE_TBD_CONFIG_PATH
         assert window.max_range.value() == run.LONG_RANGE_MAX_RANGE_M

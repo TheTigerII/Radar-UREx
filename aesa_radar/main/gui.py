@@ -19,7 +19,15 @@ if __package__ in {None, ""}:
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from main import calibrate, run
-from main.gui_config import GuiSettings
+from main.gui_config import (
+    CONVENTIONAL_CALIBRATION_PROFILE_PATH,
+    CONVENTIONAL_CAPTURE_DIR,
+    CONVENTIONAL_CONFIG_PATH,
+    CONVENTIONAL_MODEL_WEIGHTS_DIR,
+    CONVENTIONAL_OPERATION_MODE,
+    CONVENTIONAL_SETUP_PATH,
+    GuiSettings,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -104,7 +112,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Radar-UREx Long-Range Test Center")
+        self.setWindowTitle("Radar-UREx Five-Mode Test Center")
         self.setMinimumSize(720, 480)
         self.resize(1100, 760)
         self.process: QtCore.QProcess | None = None
@@ -137,10 +145,10 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         outer = QtWidgets.QVBoxLayout(central)
 
         title_row = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel("Radar-UREx Long-Range Test Center")
+        title = QtWidgets.QLabel("Radar-UREx Five-Mode Test Center")
         title.setObjectName("title")
         subtitle = QtWidgets.QLabel(
-            "MIMO sector STT · phased-array STT · literature TBD MIMO"
+            "Original conventional + PMM · recovered Modes 3/4 · literature Mode 6"
         )
         subtitle.setObjectName("subtitle")
         title_column = QtWidgets.QVBoxLayout()
@@ -284,11 +292,19 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         form = self._form(primary)
         self.operation = QtWidgets.QComboBox()
         self.operation.addItem(
-            "1 — Enhanced MIMO PMM STT (fixed Mode 3)",
+            "1 — Original conventional range-Doppler/CNN",
+            CONVENTIONAL_OPERATION_MODE,
+        )
+        self.operation.addItem(
+            "2 — Original PMM/mmHawkeye LSTM (20 m)",
+            "baseline",
+        )
+        self.operation.addItem(
+            "3 — Enhanced MIMO PMM STT (recovered)",
             "fixed-beam",
         )
         self.operation.addItem(
-            "2 — Phased-array STT (proposed Mode 5)",
+            "4 — Two-TX phased-array STT (recovered)",
             "phased-array-stt",
         )
         self.operation.addItem(
@@ -353,9 +369,10 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         self.classification.toggled.connect(self._classification_changed)
         class_form.addRow(self.classification)
         self.classification_note = QtWidgets.QLabel(
-            "Uses the available labelled baseline UAV/other model. In Modes 3 "
-            "and 4 this is experimental cross-profile inference; use the "
-            "evaluation log to validate it."
+            "Uses the available labelled UAV/other model and the required "
+            "36 x 64 Doppler-time input. PMM tracker revisions and Modes 3, "
+            "4 and 6 are logged as experimental cross-profile inference; "
+            "report accuracy only after labelled field validation."
         )
         self.classification_note.setWordWrap(True)
         class_form.addRow("", self.classification_note)
@@ -690,6 +707,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             30.0 if is_phased_stt else 60.0,
         )
         profile_paths = {
+            CONVENTIONAL_OPERATION_MODE: CONVENTIONAL_CONFIG_PATH,
             "baseline": run.DEFAULT_CONFIG_PATH,
             "long-range-mimo": run.LONG_RANGE_CONFIG_PATH,
             "fixed-beam": run.FIXED_BEAM_CONFIG_PATH,
@@ -698,6 +716,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             run.LITERATURE_TBD_OPERATION_MODE: run.LITERATURE_TBD_CONFIG_PATH,
         }
         max_ranges = {
+            CONVENTIONAL_OPERATION_MODE: 10.0,
             "baseline": 20.0,
             "long-range-mimo": run.LONG_RANGE_MAX_RANGE_M,
             "fixed-beam": run.LONG_RANGE_MAX_RANGE_M,
@@ -706,6 +725,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             run.LITERATURE_TBD_OPERATION_MODE: run.LONG_RANGE_MAX_RANGE_M,
         }
         threshold_minimums = {
+            CONVENTIONAL_OPERATION_MODE: run.MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
             "baseline": run.MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
             "long-range-mimo": run.LONG_RANGE_MIMO_ADAPTIVE_THRESHOLD_MINIMUM,
             "fixed-beam": run.FIXED_BEAM_ADAPTIVE_THRESHOLD_MINIMUM,
@@ -714,7 +734,8 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             run.LITERATURE_TBD_OPERATION_MODE: run.LITERATURE_TBD_ADAPTIVE_THRESHOLD_MINIMUM,
         }
         notes = {
-            "baseline": "Current validated waveform and PMM processing; classifier remains available.",
+            CONVENTIONAL_OPERATION_MODE: "Original teammate pipeline restored from the Eli/3TX history: range-Doppler processing, ordered-statistic CFAR, single-target 3D tracking, static handoff, and its own two-channel CNN/TensorRT classifier. The tactical PPI is an operator-view addition; the detection and classification feature contract is unchanged.",
+            "baseline": "Original teammate PMM/mmHawkeye pipeline and 20 m waveform: spectrum folding, background subtraction, constrained path tracking, particle filtering, Capon angles, and the original LSTM classifier.",
             "long-range-mimo": "Lower-slope Tsinghua-inspired waveform; wider unambiguous range but coarser range bins.",
             "fixed-beam": "Enhanced Mode 3: calibrated 12-channel coherent MIMO detection scans the original baseline field of view (+/-60 degrees azimuth and elevation), using 10-degree azimuth and 30-degree elevation detection beams for real-time ARM operation. It then refines direction at 2 degrees with Capon/MVDR.",
             "single-tx-scan": "Non-MIMO range mode: one transmitter and four receivers scan a wide receive-beam grid and report top-down position and estimated altitude. This is electronic receive steering, not simultaneous phased-array transmission.",
@@ -727,14 +748,36 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         # first four coefficients for RX combining and the first two TX groups
         # for its inter-TX phase correction. The +/-0.75 m interval safely
         # contains multiple 0.366 m range bins.
-        self.calibration_profile.edit.setText(str(run.FIXED_BEAM_CONFIG_PATH))
+        if operation == CONVENTIONAL_OPERATION_MODE:
+            self.setup.edit.setText(str(CONVENTIONAL_SETUP_PATH))
+            self.model_weights.edit.setText(
+                str(CONVENTIONAL_MODEL_WEIGHTS_DIR)
+            )
+            self.capture_dir.edit.setText(str(CONVENTIONAL_CAPTURE_DIR))
+            self.calibration_profile.edit.setText(
+                str(CONVENTIONAL_CALIBRATION_PROFILE_PATH)
+            )
+            self.calibration_window.setValue(0.2)
+        else:
+            self.setup.edit.setText(str(run.DEFAULT_SETUP_PATH))
+            self.model_weights.edit.setText(str(run.DEFAULT_MODEL_WEIGHTS_DIR))
+            self.capture_dir.edit.setText(str(run.DEFAULT_CAPTURE_DIR))
+            self.calibration_profile.edit.setText(
+                str(
+                    run.DEFAULT_CALIBRATION_PROFILE_PATH
+                    if operation == "baseline"
+                    else run.FIXED_BEAM_CONFIG_PATH
+                )
+            )
+            self.calibration_window.setValue(
+                0.2 if operation == "baseline" else 0.75
+            )
         self.calibration_distance.setValue(1.5)
-        self.calibration_window.setValue(0.75)
         self.max_range.setValue(max_ranges[operation])
         self.threshold_minimum.setValue(threshold_minimums[operation])
         self.operation_note.setText(notes[operation])
         if self.mode.currentData() not in calibrate.CALIBRATION_DISPLAY_MODES:
-            # Both deployed test modes open directly in the tactical display.
+            # Every deployed test mode opens directly in the tactical display.
             # Classification is enabled by default and annotates the PPI track.
             preferred_display = "ppi"
             display_index = self.mode.findData(preferred_display)
@@ -1004,8 +1047,8 @@ class RadarControlCenter(QtWidgets.QMainWindow):
 
 def main() -> int:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("Radar-UREx Two-Mode Range Test")
-    app.setApplicationDisplayName("Radar-UREx Two-Mode Range Test")
+    app.setApplicationName("Radar-UREx Five-Mode Test Center")
+    app.setApplicationDisplayName("Radar-UREx Five-Mode Test Center")
     app.setDesktopFileName("radar-urex-simo-scan")
     app.setOrganizationName("Radar-UREx")
     window = RadarControlCenter()

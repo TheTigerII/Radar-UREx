@@ -7,12 +7,25 @@ validation can be tested in headless environments.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import math
 from pathlib import Path
 import sys
 
 from main import calibrate
 from main import run
+
+
+CONVENTIONAL_OPERATION_MODE = "conventional"
+CONVENTIONAL_ROOT = run.ROOT.parent / "conventional_radar"
+CONVENTIONAL_MAIN = CONVENTIONAL_ROOT / "main" / "run.py"
+CONVENTIONAL_CONFIG_PATH = CONVENTIONAL_ROOT / "profiles" / "profile.cfg"
+CONVENTIONAL_SETUP_PATH = CONVENTIONAL_ROOT / "profiles" / "setup.json"
+CONVENTIONAL_CALIBRATION_PROFILE_PATH = (
+    CONVENTIONAL_ROOT / "profiles" / "profile_calibration.cfg"
+)
+CONVENTIONAL_MODEL_WEIGHTS_DIR = CONVENTIONAL_ROOT / "model_weights"
+CONVENTIONAL_CAPTURE_DIR = CONVENTIONAL_ROOT / "dataset"
 
 
 @dataclass
@@ -81,7 +94,10 @@ class GuiSettings:
         errors: list[str] = []
         if self.display not in run.DISPLAY_CHOICES:
             errors.append("Choose a valid display or calibration mode.")
-        if self.operation_mode not in run.EXPERIMENT_OPERATION_MODES:
+        if (
+            self.operation_mode not in run.EXPERIMENT_OPERATION_MODES
+            and self.operation_mode != CONVENTIONAL_OPERATION_MODE
+        ):
             errors.append("Choose a valid radar operation mode.")
         if not -60.0 <= self.beam_azimuth_deg <= 60.0:
             errors.append("Beam azimuth must be between -60 and +60 degrees.")
@@ -107,10 +123,20 @@ class GuiSettings:
         if self.duration_minutes < 0 or not math.isfinite(self.duration_minutes):
             errors.append("Duration must be finite and non-negative.")
         if self.classification and not self.is_calibration:
-            required = (
+            required = [
                 self.model_weights_dir / "model.onnx",
                 self.model_weights_dir / "manifest.json",
-            )
+            ]
+            if self.operation_mode == CONVENTIONAL_OPERATION_MODE:
+                required.extend(
+                    (
+                        self.model_weights_dir / "calibration.joblib",
+                        self.model_weights_dir / "parity.npz",
+                        self.model_weights_dir
+                        / "generated"
+                        / "model_sm87_fp16.engine",
+                    )
+                )
             missing = [str(path) for path in required if not path.is_file()]
             if missing:
                 errors.append("Missing classification file(s): " + ", ".join(missing))
@@ -131,6 +157,8 @@ class GuiSettings:
 
     def command(self, python_executable: str | None = None) -> list[str]:
         """Return a prompt-free ``main/run.py`` command for these settings."""
+        if self.operation_mode == CONVENTIONAL_OPERATION_MODE:
+            return self._conventional_command(python_executable)
         command = [
             python_executable or sys.executable,
             "-u",
@@ -244,6 +272,118 @@ class GuiSettings:
         )
         if self.processed_output is not None:
             command.extend(("--processed-output", str(self.processed_output)))
+        if self.raw_output is not None:
+            command.extend(("--raw-output", str(self.raw_output)))
+        if self.performance_log is not None and self.performance_logging:
+            command.extend(("--performance-log", str(self.performance_log)))
+        if self.classification:
+            command.append(
+                "--inference-logging"
+                if self.inference_logging
+                else "--no-inference-logging"
+            )
+            if self.inference_logging:
+                command.extend(("--evaluation-label", self.evaluation_label))
+                if self.inference_log is not None:
+                    command.extend(("--inference-log", str(self.inference_log)))
+        return command
+
+    def _conventional_command(
+        self,
+        python_executable: str | None,
+    ) -> list[str]:
+        """Build the teammate conventional CFAR/CNN pipeline command."""
+        command = [
+            python_executable or sys.executable,
+            "-u",
+            str(CONVENTIONAL_MAIN),
+            "--display",
+            self.display,
+            "--radar-port",
+            self.radar_port.strip(),
+            "--config",
+            str(self.config),
+            "--setup",
+            str(self.setup),
+            "--host-ip",
+            self.host_ip.strip(),
+            "--data-port",
+            str(self.data_port),
+            "--radar-baud",
+            str(self.radar_baud),
+            "--radar-command-timeout",
+            str(self.radar_command_timeout),
+            "--dca-timeout",
+            str(self.dca_timeout),
+            "--dca-retries",
+            str(self.dca_retries),
+            "--socket-recv-buffer",
+            str(self.socket_recv_buffer),
+            "--packet-queue-size",
+            str(self.packet_queue_size),
+            "--processing-queue-size",
+            str(self.processing_queue_size),
+            "--display-update-every",
+            str(self.display_update_every),
+            "--max-range-m",
+            str(self.max_range_m),
+            "--capture-dir",
+            str(self.capture_dir),
+        ]
+        if self.is_calibration:
+            command.extend(
+                (
+                    "--calibration-profile",
+                    str(self.calibration_profile),
+                    "--calibration-distance-m",
+                    str(self.calibration_distance_m),
+                    "--calibration-search-window-m",
+                    str(self.calibration_search_window_m),
+                    "--calibration-warmup-frames",
+                    str(self.calibration_warmup_frames),
+                    "--calibration-frames",
+                    str(self.calibration_frames),
+                    "--calibration-timeout-seconds",
+                    str(self.calibration_timeout_seconds),
+                    "--calibration-angle-deg",
+                    str(self.calibration_angle_deg),
+                    "--no-classification",
+                )
+            )
+            if self.calibration_output is not None:
+                command.extend(("--calibration-output", str(self.calibration_output)))
+            return command
+
+        output_path = self.processed_output
+        if output_path is None:
+            destination = {
+                "uav": "uav",
+                "other": "others",
+            }.get(self.dataset_destination, "unlabelled")
+            timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
+            output_path = (
+                self.capture_dir
+                / destination
+                / f"conventional_capture_{timestamp}.jsonl"
+            )
+        command.extend(
+            (
+                "--duration-minutes",
+                str(self.duration_minutes),
+                "--processed-output",
+                str(output_path),
+                "--classification-artifacts",
+                str(self.model_weights_dir),
+                "--classification-device",
+                "auto",
+                "--performance-sample-interval",
+                str(self.resource_sample_interval_seconds),
+                "--classification" if self.classification else "--no-classification",
+                "--performance-logging"
+                if self.performance_logging
+                else "--no-performance-logging",
+            )
+        )
         if self.raw_output is not None:
             command.extend(("--raw-output", str(self.raw_output)))
         if self.performance_log is not None and self.performance_logging:
