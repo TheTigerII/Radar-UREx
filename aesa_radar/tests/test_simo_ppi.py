@@ -104,6 +104,8 @@ def test_gui_exposes_range_test_modes_including_literature_tbd() -> None:
         assert window.operation.currentData() == "fixed-beam"
         assert window.config.required_path() == run.FIXED_BEAM_CONFIG_PATH
         assert window.mode.currentData() == "ppi"
+        assert window.stop_all_button.text() == "Stop all radar processes"
+        assert window.stop_all_button.isEnabled()
 
         window.operation.setCurrentIndex(3)
         assert window.operation.currentData() == "phased-array-stt"

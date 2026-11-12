@@ -11,6 +11,8 @@ import signal
 import socket
 import sys
 
+import psutil
+
 if __package__ in {None, ""}:
     repository_root = str(Path(__file__).resolve().parent.parent)
     if repository_root not in sys.path:
@@ -32,6 +34,22 @@ from main.gui_config import (
 
 ROOT = Path(__file__).resolve().parent.parent
 TOUCH_BREAKPOINT_PX = 900
+STOP_ALL_SCRIPT = ROOT / "main" / "stop_all.py"
+GRACEFUL_STOP_TIMEOUT_MS = 30_000
+
+
+def network_interface_for_address(address: str) -> tuple[str, bool] | None:
+    """Return the interface and carrier state owning an IPv4 address."""
+
+    statistics = psutil.net_if_stats()
+    for interface, addresses in psutil.net_if_addrs().items():
+        if any(
+            item.family == socket.AF_INET and item.address == address
+            for item in addresses
+        ):
+            state = statistics.get(interface)
+            return interface, bool(state is not None and state.isup)
+    return None
 
 
 class PathPicker(QtWidgets.QWidget):
@@ -122,6 +140,8 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         self._output_tail = ""
         self._calibration_question_answered = False
         self._close_when_finished = False
+        self.cleanup_process: QtCore.QProcess | None = None
+        self._retry_start_after_cleanup = False
 
         self._build_ui()
         self._refresh_ports()
@@ -184,9 +204,16 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         self.stop_button = QtWidgets.QPushButton("Stop")
         self.stop_button.setObjectName("stopButton")
         self.stop_button.clicked.connect(self._stop)
+        self.stop_all_button = QtWidgets.QPushButton("Stop all radar processes")
+        self.stop_all_button.setObjectName("stopAllButton")
+        self.stop_all_button.setToolTip(
+            "Emergency cleanup: stop orphaned radar, receiver, PPI and startup processes"
+        )
+        self.stop_all_button.clicked.connect(self._confirm_stop_all)
         self.start_button.setMinimumWidth(170)
         self.stop_button.setMinimumWidth(130)
         controls.addWidget(self.open_output_button)
+        controls.addWidget(self.stop_all_button)
         controls.addStretch()
         controls.addWidget(self.stop_button)
         controls.addWidget(self.start_button)
@@ -244,6 +271,9 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             QPushButton#stopButton { min-height: 54px; background: #b91c1c;
                                      font-weight: 700; font-size: 17px; }
             QPushButton#stopButton:disabled { color: #6b7280; background: #1f2937; }
+            QPushButton#stopAllButton { min-height: 54px; background: #9a3412;
+                                       font-weight: 700; font-size: 16px; }
+            QPushButton#stopAllButton:hover { background: #c2410c; }
             QPushButton:disabled { color: #6b7280; background: #1f2937; }
             QScrollBar:vertical { background: #111827; width: 22px; margin: 0; }
             QScrollBar::handle:vertical { background: #64748b; min-height: 48px;
@@ -871,6 +901,17 @@ class RadarControlCenter(QtWidgets.QMainWindow):
                 self, "Check settings", "Please correct the following:\n\n• " + "\n• ".join(errors)
             )
             return
+        interface = network_interface_for_address(settings.host_ip)
+        if interface is not None and not interface[1]:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "DCA1000 Ethernet link is down",
+                f"{settings.host_ip} is assigned to {interface[0]}, but that "
+                "interface has no active carrier.\n\nCheck DCA1000 power and the "
+                "Ethernet cable, wait for the link light, then try again.",
+            )
+            self.tabs.setCurrentIndex(1)
+            return
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
                 probe.bind((settings.host_ip, settings.data_port))
@@ -885,8 +926,20 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             elif exc.errno == errno.EADDRINUSE:
                 message = (
                     f"UDP {settings.host_ip}:{settings.data_port} is already in use.\n\n"
-                    "Stop the other radar capture and try again."
+                    "A previous radar receiver is probably still running.\n\n"
+                    "Stop all Radar-UREx processes and retry automatically?"
                 )
+                answer = QtWidgets.QMessageBox.question(
+                    self,
+                    "Receiver already running",
+                    message,
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.Yes,
+                )
+                if answer == QtWidgets.QMessageBox.StandardButton.Yes:
+                    self._run_stop_all(retry_start=True)
+                return
             else:
                 message = f"The UDP receiver cannot start: {exc}"
             QtWidgets.QMessageBox.warning(self, "Receiver network not ready", message)
@@ -906,6 +959,84 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         self.process.finished.connect(self._process_finished)
         self._set_running(True, "Starting…")
         self.process.start(command[0], command[1:])
+
+    def _confirm_stop_all(self) -> None:
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            "Stop all radar processes?",
+            "This stops every Radar-UREx launcher, receiver, hardware-start "
+            "controller and PPI worker. The control-center window remains open.\n\n"
+            "Use this if Start reports that the receiver or UDP port is not ready.",
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.Cancel,
+            QtWidgets.QMessageBox.StandardButton.Yes,
+        )
+        if answer == QtWidgets.QMessageBox.StandardButton.Yes:
+            self._run_stop_all(retry_start=False)
+
+    def _run_stop_all(self, *, retry_start: bool) -> None:
+        if (
+            self.cleanup_process is not None
+            and self.cleanup_process.state()
+            != QtCore.QProcess.ProcessState.NotRunning
+        ):
+            return
+        self._retry_start_after_cleanup = retry_start
+        self.tabs.setCurrentIndex(3)
+        self.console.appendPlainText(
+            "\nEmergency cleanup: stopping all Radar-UREx processes...\n"
+        )
+        self.status.setText("Stopping all…")
+        self.stop_all_button.setEnabled(False)
+        self.cleanup_process = QtCore.QProcess(self)
+        self.cleanup_process.setWorkingDirectory(str(ROOT.parent))
+        self.cleanup_process.setProcessChannelMode(
+            QtCore.QProcess.ProcessChannelMode.MergedChannels
+        )
+        self.cleanup_process.readyReadStandardOutput.connect(
+            self._read_cleanup_output
+        )
+        self.cleanup_process.finished.connect(self._stop_all_finished)
+        self.cleanup_process.start(sys.executable, ["-u", str(STOP_ALL_SCRIPT)])
+
+    def _read_cleanup_output(self) -> None:
+        if self.cleanup_process is None:
+            return
+        text = bytes(self.cleanup_process.readAllStandardOutput()).decode(
+            errors="replace"
+        )
+        if text:
+            self.console.moveCursor(QtGui.QTextCursor.MoveOperation.End)
+            self.console.insertPlainText(text)
+            self.console.moveCursor(QtGui.QTextCursor.MoveOperation.End)
+
+    def _stop_all_finished(
+        self,
+        exit_code: int,
+        exit_status: QtCore.QProcess.ExitStatus,
+    ) -> None:
+        del exit_status
+        retry = self._retry_start_after_cleanup and exit_code == 0
+        self._retry_start_after_cleanup = False
+        self.stop_all_button.setEnabled(True)
+        self.console.appendPlainText(
+            f"Emergency cleanup finished with exit code {exit_code}."
+        )
+        if self.cleanup_process is not None:
+            self.cleanup_process.deleteLater()
+        self.cleanup_process = None
+        if exit_code == 0:
+            self.status.setText("Receiver ports released")
+            if retry:
+                QtCore.QTimer.singleShot(750, self._start)
+        else:
+            self.status.setText("Cleanup needs attention")
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Could not release receiver",
+                "Some radar process or UDP port is still active. See Activity "
+                "for details, then press Stop all radar processes again.",
+            )
 
     def _read_output(self) -> None:
         if self.process is None:
@@ -986,6 +1117,9 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             form.setRowWrapPolicy(policy)
         self.tabs.tabBar().setExpanding(wrap)
         self.open_output_button.setText("Data" if wrap else "Open data folder")
+        self.stop_all_button.setText(
+            "Stop all" if wrap else "Stop all radar processes"
+        )
         self.fullscreen_button.setText(
             ("Exit" if wrap else "Exit full screen")
             if self.isFullScreen()
@@ -1008,12 +1142,26 @@ class RadarControlCenter(QtWidgets.QMainWindow):
                 pass
         else:
             self.process.terminate()
-        QtCore.QTimer.singleShot(10000, self._force_stop_if_needed)
+        # The launcher stops the hardware controller and live-capture process
+        # sequentially.  Each child is allowed its own graceful timeout, so a
+        # 10-second GUI timeout could kill only the launcher midway through
+        # cleanup and leave an orphaned UDP receiver behind.
+        QtCore.QTimer.singleShot(
+            GRACEFUL_STOP_TIMEOUT_MS,
+            self._force_stop_if_needed,
+        )
 
     def _force_stop_if_needed(self) -> None:
-        if self.process is not None and self.process.state() != QtCore.QProcess.ProcessState.NotRunning:
-            self.console.appendPlainText("\nShutdown timed out; forcing the launcher to stop.")
-            self.process.kill()
+        if (
+            self.process is not None
+            and self.process.state()
+            != QtCore.QProcess.ProcessState.NotRunning
+        ):
+            self.console.appendPlainText(
+                "\nGraceful shutdown timed out; stopping the complete radar "
+                "process tree.\n"
+            )
+            self._run_stop_all(retry_start=False)
 
     def _open_output_folder(self) -> None:
         exact_output = self.processed_output.optional_path()

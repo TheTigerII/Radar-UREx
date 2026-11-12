@@ -5,3 +5,7 @@ __pycache__/
 *.pre-rebuild-*
 /dataset/
 /training_output/
+/aesa_radar/dataset/
+/aesa_radar/log/
+/conventional_radar/dataset/
+/conventional_radar/log/

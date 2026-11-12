@@ -32,8 +32,9 @@ and must be evaluated from labelled runs before reporting accuracy.
 4. Select the enhanced CP2105 command UART, normally `/dev/ttyUSB0`.
 5. Confirm no other capture is running. Only one process may bind UDP port
    4098. If the GUI reports "address already in use" or "receiver not ready",
-   use its stop control, close old radar windows, and retry once the activity
-   log reports the process has exited.
+   press **Stop all radar processes**. This cleans orphaned launchers,
+   receivers, hardware controllers and PPI workers and verifies that UDP 4096
+   and 4098 are free before the next run.
 6. Fix the panel position, height, pitch and heading. Mark the target route and
    measure slant range/bearing independently. Do not move the radar between
    modes.
