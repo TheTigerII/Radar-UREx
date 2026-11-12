@@ -14,14 +14,16 @@ enhanced detection (`conventional_radar/README_MODE4.md`).
 |---|---|---|
 | 1 — Original conventional | Range-Doppler, OS-CFAR, XYZ/DBSCAN, single-target tracking and CNN/TensorRT | Inherited teammate pipeline; 10 m GUI range initially |
 | 2 — Original PMM | Original 20 m waveform, PMM folding/tracking, Capon angles and LSTM/TensorRT | Inherited teammate pipeline and control |
-| 3 — Enhanced MIMO PMM STT | Long-range three-TX TDM-MIMO, coherent 12-channel beam bank over +/-60 degrees and Capon refinement | Recovered Mode 3; strongest receive-processing experiment |
+| 3 — Beam-space MIMO TBD/STT | Existing long-range three-TX TDM waveform, coherent 12-channel virtual array, joint beam-range-Doppler path integration over +/-60 degrees and focused 2-degree refinement | Distinct from PMM and CFAR; reuses the checked-in channel correction and 36 x 64 LSTM input |
 | 4 — Enhanced conventional | Mode 1's waveform, calibration, tracker and CNN with four switchable detection stages: calibrated CFAR threshold, averaged clutter reference, coherent 12-channel beam detection, 8-frame integration | New on 2026-11-13; simulated only, not yet run on the radar; 12 m GUI range |
 
 Every choice supports the tactical PPI, structured performance logging and a
 target-attached classification label. Modes 1 and 4 use the recovered CNN. Modes 2
-and 3 use the available LSTM. PMM inference keeps the correct 36 x 64
-input contract, but revised/cross-waveform predictions are marked experimental
-and must be evaluated from labelled runs before reporting accuracy.
+and 3 use the available LSTM. Mode 3 supplies the same 36 x 64 Doppler-time
+shape from its selected coherent beam, so no replacement training dataset is
+needed to run it. Its feature distribution is still cross-profile, so its
+predictions are marked experimental and must be checked against labelled runs
+before reporting accuracy.
 
 ## Before the first run
 
@@ -46,6 +48,12 @@ and must be evaluated from labelled runs before reporting accuracy.
 Do not overwrite a known-good hardware calibration immediately before the
 comparison unless the radar board, mounting, enclosure, cables or waveform
 calibration has changed.
+
+Mode 3 deliberately reuses the checked-in range bias and 12-channel complex
+correction. Selecting or testing Mode 3 is not a reason to recalibrate with a
+corner reflector. The ordinary target-free background interval at the start
+of every run is still required; it measures the current scene, not the RF
+hardware.
 
 When calibration is required, place the IFM E23012 corner reflector 1.5 m from
 the antenna phase centre, at the same height and on boresight. Aim its opening
@@ -87,8 +95,9 @@ For each mode:
 
 Mode-specific controls:
 
-- Mode 3 scans the recovered +/-60 degree field automatically. Leave its beam
-  centre at zero for the initial matched comparison.
+- Mode 3 scans +/-60 degrees automatically; no manual beam centre or reflector
+  capture is needed. Keep the scene empty during its amber background phase,
+  then introduce the target only after **RADAR READY**.
 - Mode 4 has four "Mode 4 stages" checkboxes, all on by default. Before the
   range test, run it for a few minutes on an empty scene and check the
   runtime-performance log for period overruns and the PPI for false tracks.
@@ -117,7 +126,7 @@ distance that meets the same confirmation rule in repeated trials. Compare:
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | 1 Original conventional |  |  |  |  |  |  |  |  |  |  |  |
 | 2 Original PMM |  |  |  |  |  |  |  |  |  |  |  |
-| 3 Enhanced MIMO STT |  |  |  |  |  |  |  |  |  |  |  |
+| 3 Beam-space MIMO TBD/STT |  |  |  |  |  |  |  |  |  |  |  |
 | 4 Enhanced conventional: threshold + reference only |  |  |  |  |  |  |  |  |  |  |  |
 | 4 Enhanced conventional: + coherent beams |  |  |  |  |  |  |  |  |  |  |  |
 | 4 Enhanced conventional: all four stages |  |  |  |  |  |  |  |  |  |  |  |

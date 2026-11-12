@@ -17,16 +17,19 @@ PMM method using spectrum folding, background subtraction, constrained
 tracking, Capon angles and LSTM classification. Both are now selectable in one
 touchscreen GUI.
 
-Three experimental choices are also available:
+Two experimental choices are exposed alongside those controls:
 
-- **Mode 3 — Enhanced MIMO PMM STT:** three sequential transmitters and four
-  receivers form 12 virtual channels. Calibrated coherent beams cover +/-60
-  degrees before Capon angle refinement.
-- **Mode 4 — Two-TX phased STT:** two transmitters emit simultaneously with a
-  quantised relative phase and four receivers combine coherently in one
-  selected look direction (azimuth limited to +/-30 degrees).
-- **Mode 5 — Literature MIMO TBD:** three-TX/four-RX long-range TDM-MIMO with
-  constrained 8–12-frame PMM path integration for persistent weak evidence.
+- **Mode 3 — Beam-space MIMO TBD/STT:** the existing three-TX/four-RX TDM
+  waveform forms 12 calibrated virtual channels. A +/-60-degree beam/range
+  cube is integrated over eight frames before focused 2-degree tracking. This
+  lane uses neither PMM folding nor a per-frame CFAR point declaration.
+- **Mode 4 — Enhanced conventional:** the inherited Mode 1 waveform, tracker
+  and CNN with independently switchable calibrated threshold, averaged clutter
+  reference, coherent receive-beam detection and eight-frame integration.
+
+The earlier two-TX phased-look and literature PMM-TBD experiments remain
+available by CLI for reference but are intentionally hidden from the final
+four-mode GUI.
 
 The application includes a portable PPI, live calibration/readiness banner,
 range/azimuth/elevation and relative-altitude display, target-attached class
@@ -35,25 +38,26 @@ rebuilt for the Jetson ARM platform.
 
 ## Technical basis
 
-Lowering chirp slope extends the sampled unambiguous range to about 93.8 m but
-does not improve transmitted power or guarantee detection. Mode 3 changes
-effective receive processing gain through coherent combination (ideal upper
-bound 10.8 dB over one channel). Mode 4 changes the directional transmit
-pattern and coherently combines four receivers, within the sensor's hardware
-limits. Mode 5 adds temporal processing gain by integrating a reachable weak
-path. Since received power varies as `R^-4`, even array gain produces a much
-smaller range factor, and field evidence is essential.
+Lowering Mode 3's chirp slope extends sampled unambiguous range to about
+93.8 m but does not improve transmitted power or guarantee detection. Its
+coherent 12-channel combination changes effective receive processing gain
+(ideal upper bound 10.8 dB over one channel), while its constrained temporal
+path lowers the evidence required for a persistent target. Mode 4 changes
+detection processing while retaining Mode 1's RF waveform. Since received
+power varies as `R^-4`, even array gain gives a much smaller range factor and
+field evidence is essential.
 
 ## Verification and classification boundary
 
-The recovered conventional suite passes 252 tests and the enhanced PMM/GUI
-suite passes 28 tests. A synthetic Mode 5 target with individual frames below
-the ordinary threshold is acquired after eight frames at approximately 20 m,
-with range and angles recovered. Jetson synthetic tracker timing is about
-46 ms median / 52 ms p95 within a 100 ms frame period; LSTM TensorRT inference
-is about 2.9 ms median / 4.4 ms p95. The available PMM model accepts the same
-36 x 64 Doppler-time tensor, but its revised/cross-waveform accuracy is
-unverified and will be reported only from labelled tests.
+The recovered conventional suite passes 270 tests and the enhanced PMM/GUI
+suite passes 36 tests. Synthetic Mode 3 tests cover TDM phase compensation,
+wide-angle acquisition, stale-echo rejection, angle recovery and the complete
+36 x 64 classifier segment. On the Jetson, random-cube Mode 3 tracking measured
+about 75 ms median / 77 ms p95 within the 100 ms frame period. The existing
+TensorRT LSTM accepts and classifies the Mode 3 tensor without a new model or
+dataset. Its accuracy is still experimental cross-profile accuracy and will be
+reported only from labelled field runs. Mode 3 reuses the checked-in channel
+correction; only the ordinary target-free run-start background is required.
 
 ## Final matched test — results pending
 
@@ -66,10 +70,8 @@ point and a 60-second empty-scene false-track interval.
 |---|---:|---:|---:|---|---:|---:|
 | 1 Original conventional |  |  |  |  |  |  |
 | 2 Original PMM |  |  |  |  |  |  |
-| 3 Enhanced MIMO STT |  |  |  |  |  |  |
-| 4 Two-TX phased STT |  |  |  |  |  |  |
-| 6 Literature MIMO TBD |  |  |  |  |  |  |
+| 3 Beam-space MIMO TBD/STT |  |  |  |  |  |  |
+| 4 Enhanced conventional |  |  |  |  |  |  |
 
 **Conclusion after final test:**  
-
 

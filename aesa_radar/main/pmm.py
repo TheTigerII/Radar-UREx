@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional, Protocol
 
 import numpy as np
 from scipy import fft as scipy_fft
+from scipy.ndimage import maximum_filter
 
 
 SPEED_OF_LIGHT_M_PER_S = 299_792_458.0
@@ -44,8 +45,15 @@ LITERATURE_TBD_CURRENT_FRAME_MINIMUM = 0.15
 # sector translated around the legacy manually selected centre.
 FIXED_BEAM_AZIMUTH_HALF_WIDTH_DEG = 60.0
 FIXED_BEAM_ELEVATION_HALF_WIDTH_DEG = 60.0
-FIXED_BEAM_SCAN_STEP_DEG = 10.0
+FIXED_BEAM_SCAN_STEP_DEG = 12.0
 FIXED_BEAM_ELEVATION_SCAN_STEP_DEG = 30.0
+MODE3_BEAMSPACE_WINDOW_FRAMES = 8
+MODE3_BEAMSPACE_MINIMUM_FRAMES = 6
+MODE3_BEAMSPACE_INTEGRATED_THRESHOLD = 4.5
+MODE3_BEAMSPACE_CURRENT_FRAME_MINIMUM = 2.0
+MODE3_BEAMSPACE_TOP_DOPPLER_BINS = 4
+MODE3_BEAMSPACE_REFINEMENT_HALF_WIDTH_DEG = 16.0
+MODE3_BEAMSPACE_REFINEMENT_STEP_DEG = 2.0
 EXPERIMENT_OPERATION_MODES = (
     "baseline",
     "long-range-mimo",
@@ -847,6 +855,267 @@ def sector_receive_beam_magnitude(
     return coherent.astype(np.float32, copy=False)
 
 
+@dataclass(frozen=True)
+class Mode3BeamSpaceFrame:
+    """One calibrated three-TX beam-space measurement.
+
+    ``score_cube`` is indexed by elevation, azimuth and range.  It is a
+    top-Doppler-bin energy statistic rather than the PMM folding score used by
+    Mode 2.  A focused beam is formed only after acquisition, which supplies
+    the 64-bin spectrum needed by the existing 36x64 classifier contract.
+    """
+
+    score_cube: np.ndarray
+    azimuths_deg: np.ndarray
+    elevations_deg: np.ndarray
+
+
+def _mode3_calibrated_virtual_channels(
+    doppler_cube: np.ndarray,
+    config: PmmRadarConfig,
+) -> np.ndarray:
+    """Return Doppler-compensated calibrated virtual channels for Mode 3."""
+
+    cube = np.asarray(doppler_cube, dtype=np.complex64)
+    expected = (
+        MINI4_DOPPLER_FFT_SIZE,
+        MINI4_NUM_TX,
+        MINI4_NUM_RX_CHANNELS,
+        MINI4_NUM_ADC_SAMPLES,
+    )
+    if tuple(cube.shape) != expected:
+        raise ValueError(
+            f"Mode 3 beam space expected Doppler cube {expected}, got {cube.shape}"
+        )
+    coordinates, phase_corrections = _ods_virtual_coordinates(config)
+    doppler_bins = (
+        np.arange(cube.shape[0], dtype=np.float32) - cube.shape[0] // 2
+    )
+    tx_offsets = np.arange(cube.shape[1], dtype=np.float32) / cube.shape[1]
+    tdm_compensation = np.exp(
+        -1j
+        * 2.0
+        * np.pi
+        * doppler_bins[:, np.newaxis]
+        / cube.shape[0]
+        * tx_offsets[np.newaxis, :]
+    ).astype(np.complex64)
+    compensated = cube * tdm_compensation[:, :, np.newaxis, np.newaxis]
+    channels = compensated.reshape(
+        cube.shape[0],
+        coordinates.shape[0],
+        cube.shape[-1],
+    )
+    return channels * phase_corrections[np.newaxis, :, np.newaxis]
+
+
+def _mode3_steering_matrix(
+    coordinates: np.ndarray,
+    azimuths_deg: np.ndarray,
+    elevations_deg: np.ndarray,
+) -> np.ndarray:
+    azimuth_grid, elevation_grid = np.meshgrid(
+        np.asarray(azimuths_deg, dtype=np.float32),
+        np.asarray(elevations_deg, dtype=np.float32),
+        indexing="xy",
+    )
+    azimuth_rad = np.deg2rad(azimuth_grid.ravel())
+    elevation_rad = np.deg2rad(elevation_grid.ravel())
+    direction_x = np.sin(azimuth_rad) * np.cos(elevation_rad)
+    direction_z = -np.sin(elevation_rad)
+    return np.exp(
+        1j
+        * np.pi
+        * (
+            coordinates[:, 0:1] * direction_x[np.newaxis, :]
+            + coordinates[:, 1:2] * direction_z[np.newaxis, :]
+        )
+    ).astype(np.complex64)
+
+
+def _mode3_top_doppler_score(beam_values: np.ndarray) -> np.ndarray:
+    """Return a sparse-Doppler energy score without PMM spectrum folding."""
+
+    values = np.asarray(beam_values)
+    if values.ndim < 2 or values.shape[0] != MINI4_DOPPLER_FFT_SIZE:
+        raise ValueError("Mode 3 beam spectra must start with 64 Doppler bins")
+    if np.iscomplexobj(values):
+        power = (
+            np.square(values.real, dtype=np.float32)
+            + np.square(values.imag, dtype=np.float32)
+        )
+    else:
+        power = np.square(values, dtype=np.float32)
+    # Static clutter is represented by the centred zero-Doppler bin.  A
+    # hovering rotor still contributes sidebands, while walking/drifting
+    # targets occupy adjacent bins.  Suppressing only the exact centre avoids
+    # throwing away slow targets.
+    power[MINI4_DOPPLER_FFT_SIZE // 2] = 0.0
+    top_count = min(MODE3_BEAMSPACE_TOP_DOPPLER_BINS, power.shape[0] - 1)
+    partitioned = np.partition(power, power.shape[0] - top_count, axis=0)
+    return np.sqrt(
+        np.mean(partitioned[-top_count:], axis=0, dtype=np.float32)
+    ).astype(np.float32, copy=False)
+
+
+def mode3_beam_space_frame(
+    doppler_cube: np.ndarray,
+    config: PmmRadarConfig,
+    *,
+    azimuth_step_deg: float = FIXED_BEAM_SCAN_STEP_DEG,
+    elevation_step_deg: float = FIXED_BEAM_ELEVATION_SCAN_STEP_DEG,
+) -> Mode3BeamSpaceFrame:
+    """Form a wide-FOV calibrated beam cube for the rebuilt Mode 3.
+
+    All three TDM transmitters and all four receivers contribute to each
+    software beam.  The transmitted waveform and stored 12-channel
+    compensation remain unchanged, so no new corner-reflector calibration or
+    classifier dataset is required.
+    """
+
+    if azimuth_step_deg <= 0.0 or elevation_step_deg <= 0.0:
+        raise ValueError("Mode 3 beam-space scan steps must be positive")
+    channels = _mode3_calibrated_virtual_channels(doppler_cube, config)
+    coordinates, _phase_corrections = _ods_virtual_coordinates(config)
+    azimuths = np.arange(
+        -60.0,
+        60.0 + azimuth_step_deg * 0.5,
+        azimuth_step_deg,
+        dtype=np.float32,
+    )
+    elevations = np.arange(
+        -60.0,
+        60.0 + elevation_step_deg * 0.5,
+        elevation_step_deg,
+        dtype=np.float32,
+    )
+    steering = _mode3_steering_matrix(coordinates, azimuths, elevations)
+    weights = steering / np.sqrt(float(coordinates.shape[0]))
+    beamformed = np.einsum(
+        "dcr,cb->dbr",
+        channels,
+        weights.conj(),
+        optimize=True,
+    )
+    score = _mode3_top_doppler_score(beamformed)
+    score_cube = score.reshape(
+        elevations.size,
+        azimuths.size,
+        score.shape[-1],
+    )
+    return Mode3BeamSpaceFrame(
+        score_cube=score_cube,
+        azimuths_deg=azimuths,
+        elevations_deg=elevations,
+    )
+
+
+def mode3_track_before_detect(
+    normalized_evidence: np.ndarray,
+    maximum_range_step_bins: int,
+    *,
+    integrated_threshold: float = MODE3_BEAMSPACE_INTEGRATED_THRESHOLD,
+    current_frame_minimum: float = MODE3_BEAMSPACE_CURRENT_FRAME_MINIMUM,
+) -> tuple[tuple[int, int, int], float, bool]:
+    """Integrate a reachable path through elevation/azimuth/range space.
+
+    Unlike Mode 1/4, no per-frame CFAR point cloud is produced first.  Unlike
+    Mode 2/5, the evidence is not a folded PMM score.  A local maximum filter
+    implements one beam step in each angular dimension and a speed-limited
+    range transition between frames.
+    """
+
+    evidence = np.asarray(normalized_evidence, dtype=np.float32)
+    if evidence.ndim != 4 or evidence.shape[0] == 0:
+        raise ValueError(
+            "Mode 3 TBD evidence must have shape [time, elevation, azimuth, range]"
+        )
+    if not np.isfinite(evidence).all():
+        raise ValueError("Mode 3 TBD evidence contains non-finite values")
+    range_step = max(int(maximum_range_step_bins), 0)
+    cumulative = evidence[0].copy()
+    filter_size = (3, 3, 2 * range_step + 1)
+    for current in evidence[1:]:
+        reachable = maximum_filter(
+            cumulative,
+            size=filter_size,
+            mode="constant",
+            cval=-np.inf,
+        )
+        cumulative = current + reachable
+    integrated = cumulative / float(evidence.shape[0])
+    present = evidence[-1]
+    guarded = np.where(
+        present >= float(current_frame_minimum),
+        integrated,
+        -np.inf,
+    )
+    if np.isfinite(guarded).any():
+        flat_index = int(np.argmax(guarded))
+    else:
+        flat_index = int(np.argmax(integrated))
+    cell = tuple(int(value) for value in np.unravel_index(flat_index, integrated.shape))
+    score = float(integrated[cell])
+    detected = (
+        evidence.shape[0] >= MODE3_BEAMSPACE_MINIMUM_FRAMES
+        and score >= float(integrated_threshold)
+        and float(present[cell]) >= float(current_frame_minimum)
+    )
+    return cell, score, detected
+
+
+def mode3_refine_beam(
+    doppler_cube: np.ndarray,
+    config: PmmRadarConfig,
+    *,
+    range_bin: int,
+    coarse_azimuth_deg: float,
+    coarse_elevation_deg: float,
+) -> tuple[float, float, np.ndarray]:
+    """Refine one Mode 3 look locally and return its 64-bin spectrum."""
+
+    if not 0 <= int(range_bin) < MINI4_NUM_ADC_SAMPLES:
+        raise ValueError("Mode 3 refinement range bin is outside the ADC window")
+    channels = _mode3_calibrated_virtual_channels(doppler_cube, config)[
+        :, :, int(range_bin)
+    ]
+    coordinates, _phase_corrections = _ods_virtual_coordinates(config)
+    half_width = MODE3_BEAMSPACE_REFINEMENT_HALF_WIDTH_DEG
+    step = MODE3_BEAMSPACE_REFINEMENT_STEP_DEG
+    azimuths = np.arange(
+        max(-60.0, float(coarse_azimuth_deg) - half_width),
+        min(60.0, float(coarse_azimuth_deg) + half_width) + step * 0.5,
+        step,
+        dtype=np.float32,
+    )
+    elevations = np.arange(
+        max(-60.0, float(coarse_elevation_deg) - half_width),
+        min(60.0, float(coarse_elevation_deg) + half_width) + step * 0.5,
+        step,
+        dtype=np.float32,
+    )
+    steering = _mode3_steering_matrix(coordinates, azimuths, elevations)
+    weights = steering / np.sqrt(float(coordinates.shape[0]))
+    beamformed = np.einsum(
+        "dc,cb->db",
+        channels,
+        weights.conj(),
+        optimize=True,
+    )
+    magnitude = np.abs(beamformed).astype(np.float32, copy=False)
+    scores = _mode3_top_doppler_score(magnitude)
+    best = int(np.argmax(scores))
+    elevation_index, azimuth_index = np.unravel_index(
+        best,
+        (elevations.size, azimuths.size),
+    )
+    return (
+        float(azimuths[azimuth_index]),
+        float(elevations[elevation_index]),
+        magnitude[:, best].copy(),
+    )
+
+
 def single_tx_receive_scan(
     doppler_cube: np.ndarray,
     config: PmmRadarConfig,
@@ -1099,6 +1368,12 @@ class PmmTracker:
         self.evidence_history: deque[bool] = deque(
             maxlen=config.confirmation_window_frames
         )
+        self.mode3_calibration_samples: list[np.ndarray] = []
+        self.mode3_background: Optional[np.ndarray] = None
+        self.mode3_noise_scale: Optional[np.ndarray] = None
+        self.mode3_score_history: deque[np.ndarray] = deque(
+            maxlen=MODE3_BEAMSPACE_WINDOW_FRAMES
+        )
         self.state: TrackState = "calibrating"
         self.age_frames = 0
         self.hits = 0
@@ -1186,16 +1461,40 @@ class PmmTracker:
         if self.config.operation_mode != "baseline":
             feature_values["operation_mode"] = self.config.operation_mode
         if self.config.operation_mode == "fixed-beam":
+            feature_values["tracking_clutter_suppression"] = (
+                "per-beam/per-range median background with MAD noise scaling"
+            )
+            feature_values["detection_threshold"] = (
+                "integrated normalized beam-range-Doppler path plus current-frame guard"
+            )
+            feature_values["angle_clutter_suppression"] = (
+                "joint calibrated beam-space background; no post-detection A-PMM"
+            )
             feature_values["receive_beamforming"] = {
                 "type": (
-                    "calibrated wide-FOV delay-and-sum detection with "
-                    "Capon/MVDR angle refinement"
+                    "calibrated three-TX TDM virtual-array beam-space search "
+                    "with focused digital STT refinement"
                 ),
                 "azimuth_half_width_deg": FIXED_BEAM_AZIMUTH_HALF_WIDTH_DEG,
                 "elevation_half_width_deg": FIXED_BEAM_ELEVATION_HALF_WIDTH_DEG,
                 "azimuth_step_deg": FIXED_BEAM_SCAN_STEP_DEG,
                 "elevation_step_deg": FIXED_BEAM_ELEVATION_SCAN_STEP_DEG,
                 "noncoherent_fallback": False,
+                "transmit_schedule": "existing calibrated 3-TX TDM",
+                "new_hardware_calibration_required": False,
+            }
+            feature_values["track_before_detect"] = {
+                "type": "joint beam-range-Doppler robust-likelihood path integration",
+                "window_frames": MODE3_BEAMSPACE_WINDOW_FRAMES,
+                "minimum_frames": MODE3_BEAMSPACE_MINIMUM_FRAMES,
+                "integrated_threshold": MODE3_BEAMSPACE_INTEGRATED_THRESHOLD,
+                "current_frame_minimum": MODE3_BEAMSPACE_CURRENT_FRAME_MINIMUM,
+                "per_frame_cfar_or_pmm": False,
+            }
+            feature_values["classification_feature"] = {
+                "shape": [36, MINI4_DOPPLER_FFT_SIZE],
+                "source": "selected calibrated beam Doppler magnitude",
+                "dataset_contract_changed": False,
             }
         if self.config.operation_mode == "single-tx-scan":
             feature_values["receive_beamforming"] = {
@@ -1238,12 +1537,21 @@ class PmmTracker:
         ).hexdigest()
         return {
             "enabled": True,
-            "label": "PMM target",
+            "label": (
+                "Beam-space target"
+                if self.config.operation_mode == "fixed-beam"
+                else "PMM target"
+            ),
             "feature_version": MINI4_FEATURE_VERSION,
             "profile_fingerprint": mini4_profile_fingerprint(self.radar_config),
             "feature_fingerprint": feature_fingerprint,
             "doppler_fft_size": MINI4_DOPPLER_FFT_SIZE,
-            "folding_score": "maximum column-averaged linear magnitude",
+            "folding_score": (
+                "not used"
+                if self.config.operation_mode == "fixed-beam"
+                else "maximum column-averaged linear magnitude"
+            ),
+            "feature_contract": feature_values,
             "config": config_metadata,
             "operation_mode": self.config.operation_mode,
         }
@@ -1265,14 +1573,20 @@ class PmmTracker:
         self.angle_transition_history.clear()
         self.angle_elapsed_s = 0.0
         self.evidence_history.clear()
+        self.mode3_score_history.clear()
         self.range_filter.reset()
         self.azimuth_filter.reset()
         self.elevation_filter.reset()
         self.age_frames = 0
         self.hits = 0
         self.misses = 0
+        calibration_ready = (
+            self.mode3_background is not None
+            if self.config.operation_mode == "fixed-beam"
+            else self.background is not None
+        )
         self.state = "lost" if lost else (
-            "searching" if self.background is not None else "calibrating"
+            "searching" if calibration_ready else "calibrating"
         )
 
     def _prepare_range_axis(self, range_axis_m: np.ndarray) -> None:
@@ -1316,8 +1630,193 @@ class PmmTracker:
         self.angle_el_background = None
         self.angle_calibration_frames_seen = 0
         self.calibration_frames_seen = 0
+        self.mode3_calibration_samples.clear()
+        self.mode3_background = None
+        self.mode3_noise_scale = None
         self.reset_tracking()
         self.state = "calibrating"
+
+    def _update_mode3_beam_space(
+        self,
+        doppler_cube: np.ndarray,
+    ) -> PmmTrackResult:
+        """Run the independent beam-space TBD/STT pipeline used by Mode 3."""
+
+        assert self.range_indices is not None
+        assert self.range_axis is not None
+        frame = mode3_beam_space_frame(doppler_cube, self.radar_config)
+        gated_scores = frame.score_cube[..., self.range_indices]
+
+        if self.mode3_background is None:
+            self.mode3_calibration_samples.append(gated_scores.copy())
+            self.calibration_frames_seen += 1
+            if self.calibration_frames_seen >= self.calibration_frames_required:
+                samples = np.stack(self.mode3_calibration_samples, axis=0)
+                background = np.median(samples, axis=0).astype(np.float32)
+                mad = np.median(
+                    np.abs(samples - background[np.newaxis, ...]),
+                    axis=0,
+                ).astype(np.float32)
+                noise_scale = 1.4826 * mad
+                positive_background = background[background > 0.0]
+                amplitude_floor = (
+                    float(np.median(positive_background)) * 0.02
+                    if positive_background.size
+                    else 0.0
+                )
+                positive_noise = noise_scale[noise_scale > 0.0]
+                variation_floor = (
+                    float(np.percentile(positive_noise, 25.0)) * 0.25
+                    if positive_noise.size
+                    else 0.0
+                )
+                robust_floor = max(amplitude_floor, variation_floor, 1e-3)
+                self.mode3_background = background
+                self.mode3_noise_scale = np.maximum(
+                    noise_scale,
+                    robust_floor,
+                ).astype(np.float32)
+                self.mode3_calibration_samples.clear()
+                self.state = "searching"
+            self.latest_result = self._empty_result(self.state)
+            return self.latest_result
+
+        if self.mode3_noise_scale is None:
+            raise RuntimeError("Mode 3 beam-space noise calibration is unavailable")
+        normalized = (
+            (gated_scores - self.mode3_background) / self.mode3_noise_scale
+        ).astype(np.float32)
+        # Preserve relative angular strength for fine/STT selection.  A low
+        # upper clip makes every strong main lobe and sidelobe tie, which can
+        # force the path to the first (-60 degree) grid cell.
+        normalized = np.maximum(normalized, -12.0)
+        self.mode3_score_history.append(normalized)
+        if len(self.mode3_score_history) < MODE3_BEAMSPACE_MINIMUM_FRAMES:
+            self.state = "searching"
+            self.latest_result = self._empty_result("searching")
+            return self.latest_result
+
+        cell, integrated_score, detected = mode3_track_before_detect(
+            np.stack(tuple(self.mode3_score_history), axis=0),
+            self.dp_transition_bins,
+        )
+        elevation_index, azimuth_index, local_range_bin = cell
+        range_bin = int(self.range_indices[local_range_bin])
+        measured_range_m = float(self.range_axis[range_bin])
+        current_score = float(normalized[cell])
+        raw_score = float(gated_scores[cell])
+        coarse_azimuth = float(frame.azimuths_deg[azimuth_index])
+        coarse_elevation = float(frame.elevations_deg[elevation_index])
+
+        if detected and self.range_filter.initialized:
+            previous_range_m = self.range_filter.estimate[0]
+            ownership_gate_m = max(
+                2.0
+                * self.config.maximum_target_speed_m_s
+                * self.current_delta_time_s,
+                0.75,
+            )
+            if abs(measured_range_m - previous_range_m) > ownership_gate_m:
+                self.reset_tracking(lost=True)
+                self.latest_result = self._empty_result("lost")
+                return self.latest_result
+
+        self.evidence_history.append(detected)
+        self.age_frames += 1
+        self.range_filter.predict(self.current_delta_time_s)
+        self.azimuth_filter.predict(self.current_delta_time_s)
+        self.elevation_filter.predict(self.current_delta_time_s)
+
+        if detected:
+            refined_azimuth, refined_elevation, target_spectrum = mode3_refine_beam(
+                doppler_cube,
+                self.radar_config,
+                range_bin=range_bin,
+                coarse_azimuth_deg=coarse_azimuth,
+                coarse_elevation_deg=coarse_elevation,
+            )
+            refined_azimuth -= float(
+                getattr(self.radar_config, "azimuth_bias_deg", 0.0)
+            )
+            refined_elevation -= float(
+                getattr(self.radar_config, "elevation_bias_deg", 0.0)
+            )
+            self.range_filter.update(measured_range_m)
+            self.azimuth_filter.update(refined_azimuth)
+            self.elevation_filter.update(refined_elevation)
+            self.doppler_history.append(target_spectrum.astype(np.float32))
+            self.hits += 1
+            self.misses = 0
+            if self.state in {"searching", "lost"}:
+                self.state = "tentative"
+            elif self.state == "coasting":
+                self.state = "confirmed"
+            if (
+                len(self.evidence_history) == self.config.confirmation_window_frames
+                and sum(self.evidence_history) >= self.config.confirmation_hits
+            ):
+                self.state = "confirmed"
+        else:
+            self.misses += 1
+            if self.state == "confirmed":
+                self.state = "coasting"
+            if self.state == "coasting" and self.misses > self.config.coast_frames:
+                self.reset_tracking(lost=True)
+                self.latest_result = self._empty_result("lost")
+                return self.latest_result
+            if (
+                self.state == "tentative"
+                and len(self.evidence_history) == self.config.confirmation_window_frames
+                and sum(self.evidence_history) < self.config.confirmation_hits
+            ):
+                self.state = "searching"
+
+        if self.range_filter.initialized:
+            filtered_range_m, radial_velocity_m_s = self.range_filter.estimate
+        else:
+            filtered_range_m = measured_range_m
+            radial_velocity_m_s = None
+        azimuth_deg = (
+            self.azimuth_filter.estimate[0]
+            if self.azimuth_filter.initialized
+            else None
+        )
+        elevation_deg = (
+            self.elevation_filter.estimate[0]
+            if self.elevation_filter.initialized
+            else None
+        )
+
+        self.latest_result = PmmTrackResult(
+            state=self.state,
+            label="Beam-space target",
+            calibration_frames_seen=self.calibration_frames_seen,
+            calibration_frames_required=self.calibration_frames_required,
+            history_frames=len(self.mode3_score_history),
+            range_bin=range_bin,
+            range_m=filtered_range_m,
+            radial_velocity_m_s=radial_velocity_m_s,
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+            raw_pmm_score=raw_score,
+            pmm_score=current_score,
+            folding_size=None,
+            background_projection_gain=None,
+            azimuth_background_projection_gain=None,
+            elevation_background_projection_gain=None,
+            threshold=MODE3_BEAMSPACE_CURRENT_FRAME_MINIMUM,
+            age_frames=self.age_frames,
+            hits=self.hits,
+            misses=self.misses,
+            predicted=not detected,
+            dp_transition_bins=self.dp_transition_bins,
+            dp_path_score=integrated_score * len(self.mode3_score_history),
+            tbd_integrated_score=integrated_score,
+            tbd_threshold=MODE3_BEAMSPACE_INTEGRATED_THRESHOLD,
+            tbd_window_frames=len(self.mode3_score_history),
+            particle_count=self.config.particle_count,
+        )
+        return self.latest_result
 
     def update(
         self,
@@ -1379,18 +1878,14 @@ class PmmTracker:
             1,
         )
 
+        if self.config.operation_mode == "fixed-beam":
+            return self._update_mode3_beam_space(doppler_cube)
+
         assert self.range_indices is not None
         scan_beam_magnitude: Optional[np.ndarray] = None
         scan_azimuths: Optional[np.ndarray] = None
         scan_elevations: Optional[np.ndarray] = None
-        if self.config.operation_mode == "fixed-beam":
-            magnitude = sector_receive_beam_magnitude(
-                doppler_cube,
-                self.radar_config,
-                center_azimuth_deg=self.config.beam_azimuth_deg,
-                center_elevation_deg=self.config.beam_elevation_deg,
-            )
-        elif self.config.operation_mode == "single-tx-scan":
+        if self.config.operation_mode == "single-tx-scan":
             (
                 magnitude,
                 scan_beam_magnitude,
@@ -1801,12 +2296,15 @@ class PmmTracker:
         return self.latest_result
 
     def _empty_result(self, state: TrackState) -> PmmTrackResult:
+        mode3 = self.config.operation_mode == "fixed-beam"
         return PmmTrackResult(
             state=state,
-            label="PMM target",
+            label="Beam-space target" if mode3 else "PMM target",
             calibration_frames_seen=self.calibration_frames_seen,
             calibration_frames_required=self.calibration_frames_required,
-            history_frames=len(self.score_history),
+            history_frames=(
+                len(self.mode3_score_history) if mode3 else len(self.score_history)
+            ),
             range_bin=None,
             range_m=None,
             radial_velocity_m_s=None,
@@ -1831,9 +2329,13 @@ class PmmTracker:
             dp_path_score=None,
             tbd_integrated_score=None,
             tbd_threshold=(
-                LITERATURE_TBD_NORMALIZED_THRESHOLD
-                if self.config.operation_mode == LITERATURE_TBD_OPERATION_MODE
-                else None
+                MODE3_BEAMSPACE_INTEGRATED_THRESHOLD
+                if mode3
+                else (
+                    LITERATURE_TBD_NORMALIZED_THRESHOLD
+                    if self.config.operation_mode == LITERATURE_TBD_OPERATION_MODE
+                    else None
+                )
             ),
             tbd_window_frames=0,
             particle_count=self.config.particle_count,

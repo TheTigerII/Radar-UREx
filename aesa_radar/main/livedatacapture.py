@@ -1066,7 +1066,7 @@ class DisplayPayloadSink:
                 point = PointCloudDisplayPayload(
                     target_track=_target_track(result),
                     tracking_status=(
-                        f"PMM target — {result.state} | calibration "
+                        f"{result.label} — {result.state} | calibration "
                         f"{result.calibration_frames_seen}/"
                         f"{result.calibration_frames_required}"
                         + _classification_status_text(classification)

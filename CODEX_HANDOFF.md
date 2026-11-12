@@ -1,8 +1,8 @@
 # Radar UREx Codex Handoff
 
-Last updated: 2026-11-12 20:00 SGT (UTC+8)
+Last updated: 2026-11-13 02:14 SGT (UTC+8)
 
-This file is the continuation point for another Codex account working on the Radar-UREx project on the Jetson ARM computer. The immediate objective is a reliable, touchscreen-friendly GUI that can run the two inherited radar pipelines and the three experimental modes, show a military-style PPI with classification and angle information, recover cleanly from failed runs, and produce evidence for the final report. The implementations are present; the main unfinished work is controlled field testing, evidence-based tuning, and filling the blank result sections in the reports.
+This file is the continuation point for another Codex account working on the Radar-UREx project on the Jetson ARM computer. The immediate objective is a reliable, touchscreen-friendly GUI that can run the two inherited radar pipelines and two final experimental modes, show a tactical PPI with classification and angle information, recover cleanly from failed runs, and produce evidence for the final report. The implementations are present; the main unfinished work is controlled field testing, evidence-based tuning, and filling the blank result sections in the reports.
 
 ## Read this first
 
@@ -11,11 +11,12 @@ This file is the continuation point for another Codex account working on the Rad
 - Do not use destructive Git commands such as `git reset --hard` or overwrite the current branch from another branch.
 - Do not push, rewrite history, or make system-level network changes unless the user explicitly asks.
 - Before starting a radar process, inspect the current processes, interfaces, UARTs, and ports. Machine state can change after this handoff.
-- Do not claim increased range or reliable drone classification until field measurements support it. The former Mode 5 (literature TBD) and the new Mode 4 (enhanced conventional) have synthetic validation only; neither has an established field range.
+- Do not claim increased range or reliable drone classification until field measurements support it. Rebuilt Mode 3 and enhanced conventional Mode 4 have automated/synthetic validation only; neither has an established field range.
 
 ## Git state at handoff
 
 - Active branch: `aesa-recovery-2026-11-11`
+- Base before the 2026-11-13 Mode 3 rebuild: `b6212b233 Add enhanced conventional Mode 4, renumber and hide experimental modes`
 - Handoff commit: `448427ac4 Add Codex project handoff`
 - Receiver-recovery commit: `c81ff8649 Add emergency radar cleanup and receiver recovery`
 - Important earlier commits:
@@ -123,14 +124,14 @@ The touchscreen GUI exposes four choices, numbered 1 to 4. On 2026-11-12 the lit
 | --- | --- | --- | --- |
 | 1 Original conventional range-Doppler/CNN | `conventional_radar/` | Inherited range-Doppler, ordered-statistic CFAR, 3D/single-target tracking, and its own CNN/TensorRT classifier | Recovered and integrated; needs final comparative field run |
 | 2 Original PMM/mmHawkeye LSTM 20 m | Original PMM path through `aesa_radar/` in `baseline` mode | Inherited spectrum folding, background subtraction, constrained path tracking, particle filtering, Capon angles, and LSTM classifier | Available as the control/baseline |
-| 3 Enhanced MIMO PMM STT | `aesa_radar/`, enhanced MIMO operation | Three sequential transmitters, four receivers, 12 virtual channels, coherent beam bank over approximately +/-60 degrees azimuth/elevation, then Capon/MVDR refinement | Recovered; successful frame capture observed; final range/angle testing pending |
+| 3 Beam-space MIMO TBD/STT | `aesa_radar/`, `fixed-beam` operation | Existing sequential 3-TX/4-RX waveform and stored 12-channel correction; coherent +/-60-degree beam cube, robust beam/range background and eight-frame constrained path integration, then focused 2-degree digital-beam refinement | Rebuilt on 2026-11-13; automated and ARM timing validation completed; field range and classification measurements pending |
 | 4 Enhanced conventional | `conventional_radar/` with `--cfar-threshold calibrated --clutter-reference mean --detection-power coherent-beam --tbd-window-frames 8` | Mode 1 waveform, calibration, tracker and CNN; calibrated CFAR threshold, averaged clutter reference, TDM-compensated coherent 12-channel beam detection and 8-frame range-Doppler integration, each switchable in the GUI | Unit-tested and simulated only; Jetson timing and field range pending |
 | Former Mode 4: two-TX phased-array STT (hidden from GUI) | `aesa_radar/`, `phased-array-stt` | TX0 and TX1 transmit simultaneously with quantised relative phase; four receivers combine coherently in the selected look direction; azimuth control limited to +/-30 degrees | Recovered replacement for an earlier phased-transmit proposal; firmware/hardware-sensitive and field validation pending |
 | Former Mode 5: literature MIMO track-before-detect (hidden from GUI) | `aesa_radar/`, literature TBD operation | Long-range 3TX/4RX TDM-MIMO, normalised constrained weak-path integration over 8-12 frames, present-frame guard, then Capon angles | Synthetic weak-target acquisition works; actual drone range is unverified |
 
 Important terminology:
 
-- Mode 3 is TDM-MIMO receive processing, not a military active electronically scanned array.
+- Mode 3 is TDM-MIMO receive processing, not a military active electronically scanned array. It deliberately reuses the checked-in channel calibration and the existing 36 x 64 LSTM input, so it needs neither a new corner-reflector calibration nor a new training dataset. Its normal target-free run-start background phase is still required, and cross-profile classification accuracy remains a field-test result rather than an assumption.
 - The former Mode 4 (phased-array STT, hidden) is the closest available hardware-safe phased transmit experiment, but the standard board is restricted to two simultaneous transmitters. Do not describe it as equivalent to a military AESA.
 - The PPI altitude is an estimate derived from measured range and elevation. It is not independently instrumented altitude.
 
@@ -210,9 +211,11 @@ cd /home/rgmtc/Desktop/Radar-UREx/aesa_radar
 QT_QPA_PLATFORM=offscreen ../.venv/bin/python -m pytest -q tests
 ```
 
-Result: 30 tests passed after the receiver-recovery work.
+Current result: 36 tests pass after the Mode 3 beam-space rebuild.
 
-The conventional suite was also run earlier with 252 tests passing. Python compile checks passed. Re-run the relevant suite after any merge or code change rather than relying only on these historical results.
+The conventional suite now passes 270 tests. Python compile checks and an
+off-screen launch through the primary desktop script pass. Re-run the relevant
+suite after any merge or code change rather than relying only on these results.
 
 Useful targeted checks:
 
@@ -220,8 +223,16 @@ Useful targeted checks:
 cd /home/rgmtc/Desktop/Radar-UREx
 .venv/bin/python -m compileall -q aesa_radar/main conventional_radar/main
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q aesa_radar/tests
-.venv/bin/python -m pytest -q conventional_radar
+cd conventional_radar && QT_QPA_PLATFORM=offscreen ../.venv/bin/python -m pytest -q testcodes
 ```
+
+The rebuilt Mode 3 random-cube benchmark on this Jetson was about 75 ms median
+and 77 ms p95 for the complete tracker, within its 100 ms frame period. A
+200-trial Gaussian path-noise stress check produced zero declarations at the
+configured threshold. The installed TensorRT LSTM accepted a complete 36 x 64
+Mode 3 segment and returned a classification without rebuilding the engine or
+dataset; the logged fingerprint mismatches correctly keep that accuracy marked
+experimental.
 
 The literature TBD (former Mode 5) synthetic regression acquired a persistent weak target at about 20 m on frame 8 when individual-frame evidence was below the normal declaration threshold. Synthetic tracker timing was roughly 46 ms median and 52 ms p95, and TensorRT LSTM inference was roughly 2.9 ms median and 4.4 ms p95. These are engineering checks, not field range results.
 
@@ -234,7 +245,7 @@ Current editable drafts:
 - `reports/current_modes/REPORT_DRAFT.md`
 - `reports/current_modes/ONE_PAGE_SUMMARY_DRAFT.md`
 
-Both intentionally leave final field results and discussion entries open for the user to fill after testing. Do not invent values. Older HTML or historical READMEs may describe superseded mode sets; use the current report drafts and `TEST_DAY_GUIDE.md` as the current account of the five deployed choices.
+Both intentionally leave final field results and discussion entries open for the user to fill after testing. Do not invent values. Older HTML or historical READMEs may describe superseded mode sets; use the current Markdown report drafts and `TEST_DAY_GUIDE.md` as the current account of the four deployed choices.
 
 User-provided reference reports remain outside the repository at:
 

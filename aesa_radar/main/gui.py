@@ -170,7 +170,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         title = QtWidgets.QLabel("Radar-UREx Four-Mode Test Center")
         title.setObjectName("title")
         subtitle = QtWidgets.QLabel(
-            "Original conventional + PMM · enhanced MIMO Mode 3 · enhanced conventional Mode 4"
+            "Original conventional + PMM · beam-space Mode 3 · enhanced conventional Mode 4"
         )
         subtitle.setObjectName("subtitle")
         title_column = QtWidgets.QVBoxLayout()
@@ -332,7 +332,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             "baseline",
         )
         self.operation.addItem(
-            "3 — Enhanced MIMO PMM STT (recovered)",
+            "3 — Beam-space MIMO TBD/STT (3-TX)",
             "fixed-beam",
         )
         self.operation.addItem(
@@ -425,10 +425,11 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         self.classification.toggled.connect(self._classification_changed)
         class_form.addRow(self.classification)
         self.classification_note = QtWidgets.QLabel(
-            "Uses the available labelled UAV/other model and the required "
-            "36 x 64 Doppler-time input. PMM tracker revisions and Modes 3, "
-            "4 and 6 are logged as experimental cross-profile inference; "
-            "report accuracy only after labelled field validation."
+            "Uses the available labelled UAV/other models. Mode 3 preserves "
+            "the LSTM's required 36 x 64 Doppler-time input without a new "
+            "dataset, but is logged as experimental cross-profile inference. "
+            "Mode 4 retains Mode 1's CNN contract. Report accuracy only after "
+            "labelled field validation."
         )
         self.classification_note.setWordWrap(True)
         class_form.addRow("", self.classification_note)
@@ -755,12 +756,28 @@ class RadarControlCenter(QtWidgets.QMainWindow):
     def _operation_changed(self) -> None:
         operation = str(self.operation.currentData())
         is_phased_stt = operation == "phased-array-stt"
+        is_beam_space = operation == "fixed-beam"
         uses_beam_controls = is_phased_stt
         self.enhanced_stages.setEnabled(
             operation == CONVENTIONAL_ENHANCED_OPERATION_MODE
         )
         self.beam_azimuth.setEnabled(uses_beam_controls)
         self.beam_elevation.setEnabled(uses_beam_controls)
+        # Mode 3 has its own robust beam/range background and integrated path
+        # threshold.  Leave lifecycle, speed, history and range controls live,
+        # but do not present the unused PMM folding/threshold knobs as active.
+        for widget in (
+            self.folding_min,
+            self.folding_max,
+            self.fixed_threshold_enabled,
+            self.fixed_threshold,
+            self.threshold_sigma,
+            self.threshold_minimum,
+            self.provisional_frames,
+        ):
+            widget.setEnabled(not is_beam_space)
+        if not is_beam_space:
+            self.fixed_threshold.setEnabled(self.fixed_threshold_enabled.isChecked())
         self.beam_azimuth.setRange(
             -30.0 if is_phased_stt else -60.0,
             30.0 if is_phased_stt else 60.0,
@@ -801,7 +818,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             CONVENTIONAL_ENHANCED_OPERATION_MODE: "Mode 1's waveform, calibration, tracker and CNN with opt-in detection stages: a CFAR threshold calibrated to a measured noise false-alarm rate, an equally averaged clutter reference, coherent 12-channel receive-beam detection with TDM phase correction, and 8-frame range-Doppler integration. Untick stages to compare against Mode 1. Simulated gains are an upper bound; the range improvement must be measured against Mode 1 on the same course.",
             "baseline": "Original teammate PMM/mmHawkeye pipeline and 20 m waveform: spectrum folding, background subtraction, constrained path tracking, particle filtering, Capon angles, and the original LSTM classifier.",
             "long-range-mimo": "Lower-slope Tsinghua-inspired waveform; wider unambiguous range but coarser range bins.",
-            "fixed-beam": "Enhanced Mode 3: calibrated 12-channel coherent MIMO detection scans the original baseline field of view (+/-60 degrees azimuth and elevation), using 10-degree azimuth and 30-degree elevation detection beams for real-time ARM operation. It then refines direction at 2 degrees with Capon/MVDR.",
+            "fixed-beam": "Rebuilt Mode 3: all three transmitters fire in the existing calibrated TDM sequence and all four receivers form 12 coherent virtual channels. A joint beam-range-Doppler path is integrated across frames over +/-60 degrees, without PMM folding or per-frame CFAR, then the selected look is refined at 2 degrees. It reuses the stored channel correction and the existing 36 x 64 classifier input; no new corner-reflector calibration or training dataset is needed. This is host-side virtual-array beamforming, not simultaneous-TX military AESA.",
             "single-tx-scan": "Non-MIMO range mode: one transmitter and four receivers scan a wide receive-beam grid and report top-down position and estimated altitude. This is electronic receive steering, not simultaneous phased-array transmission.",
             "phased-array-stt": "Non-MIMO phased STT: TX0 and TX1 transmit coherently with calibrated 6-bit phase steering, while all four receivers combine coherently in the selected look direction. The standard-board safety limit of two simultaneous transmitters is enforced; this mode must still be range-tested against Mode 1.",
             run.LITERATURE_TBD_OPERATION_MODE: "Mode 5: long-range three-TX/four-RX TDM-MIMO PMM. It integrates a physically reachable weak-target path over 0.8-1.2 seconds before declaring detection, then measures azimuth/elevation with Capon/MVDR. The present-frame guard limits stale and phantom tracks. Classifier input remains 64 Doppler bins over 3.6 seconds, but drone accuracy still requires field validation.",

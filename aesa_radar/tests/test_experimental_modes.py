@@ -12,11 +12,15 @@ from main.pmm import (
     LITERATURE_TBD_NORMALIZED_THRESHOLD,
     LITERATURE_TBD_OPERATION_MODE,
     LONG_RANGE_MAX_RANGE_M,
+    MODE3_BEAMSPACE_INTEGRATED_THRESHOLD,
+    MODE3_BEAMSPACE_MINIMUM_FRAMES,
     PmmConfig,
     PmmTracker,
     _ods_virtual_coordinates,
     _ods_rx_coordinates,
     fixed_receive_beam_magnitude,
+    mode3_beam_space_frame,
+    mode3_track_before_detect,
     normalized_track_before_detect,
     phased_stt_receive_magnitude,
     sector_receive_beam_magnitude,
@@ -93,6 +97,62 @@ def synthetic_mimo_frame(
     for loop_index in range(32):
         frame[loop_index * 3 : loop_index * 3 + 3, :, range_bin] = channels
     return frame
+
+
+def synthetic_mode3_doppler_cube(
+    config: RadarCaptureConfig,
+    *,
+    range_bin: int,
+    doppler_index: int,
+    azimuth_deg: float,
+    elevation_deg: float,
+    amplitude: float,
+) -> np.ndarray:
+    """Return a calibrated target after Mode 3 TDM Doppler compensation."""
+
+    coordinates, phase_corrections = _ods_virtual_coordinates(config)
+    azimuth_rad = np.deg2rad(azimuth_deg)
+    elevation_rad = np.deg2rad(elevation_deg)
+    steering = np.exp(
+        1j
+        * np.pi
+        * (
+            coordinates[:, 0] * np.sin(azimuth_rad) * np.cos(elevation_rad)
+            + coordinates[:, 1] * -np.sin(elevation_rad)
+        )
+    )
+    centered_doppler_bin = doppler_index - 32
+    tx_offsets = np.arange(3, dtype=np.float32) / 3.0
+    compensation = np.exp(
+        -1j * 2.0 * np.pi * centered_doppler_bin / 64.0 * tx_offsets
+    )
+    physical = (
+        steering.reshape(3, 4)
+        / phase_corrections.reshape(3, 4)
+        / compensation[:, np.newaxis]
+    )
+    cube = np.zeros((64, 3, 4, 256), dtype=np.complex64)
+    cube[doppler_index, :, :, range_bin] = physical * amplitude
+    return cube
+
+
+def test_mode3_beam_space_tbd_accepts_persistent_angle_range_path() -> None:
+    evidence = np.zeros((MODE3_BEAMSPACE_MINIMUM_FRAMES, 3, 5, 12), dtype=np.float32)
+    for frame_index in range(evidence.shape[0]):
+        evidence[frame_index, 1, 2, 4 + frame_index // 3] = (
+            MODE3_BEAMSPACE_INTEGRATED_THRESHOLD + 0.5
+        )
+    cell, integrated, detected = mode3_track_before_detect(evidence, 1)
+    assert detected
+    assert cell == (1, 2, 5)
+    assert integrated >= MODE3_BEAMSPACE_INTEGRATED_THRESHOLD
+
+
+def test_mode3_beam_space_tbd_rejects_stale_spike() -> None:
+    evidence = np.zeros((MODE3_BEAMSPACE_MINIMUM_FRAMES, 3, 5, 12), dtype=np.float32)
+    evidence[0, 1, 2, 4] = 30.0
+    _cell, _integrated, detected = mode3_track_before_detect(evidence, 1)
+    assert not detected
 
 
 def test_all_three_profile_mode_combinations_validate() -> None:
@@ -482,7 +542,7 @@ def test_mode3_beam_bank_covers_full_baseline_field_of_view() -> None:
     assert sector >= 0.99 * on_target
 
 
-def test_fixed_beam_tracker_reports_measured_capon_direction() -> None:
+def test_mode3_tracker_reports_beam_space_direction_and_classifier_shape() -> None:
     config = load_profile("profile-mini4-fixed-beam.cfg")
     tracker = PmmTracker(
         config,
@@ -502,23 +562,21 @@ def test_fixed_beam_tracker_reports_measured_capon_direction() -> None:
     empty_cube = np.zeros((64, 3, 4, 256), dtype=np.complex64)
     calibration = tracker.update(empty_cube, range_fft, range_axis)
     assert calibration.state == "searching"
-    assert tracker.angle_az_background is not None
-    assert tracker.angle_el_background is not None
+    assert tracker.mode3_background is not None
+    assert tracker.mode3_noise_scale is not None
+    assert tracker.angle_az_background is None
+    assert tracker.angle_el_background is None
 
-    coordinates, phase_corrections = _ods_virtual_coordinates(config)
     target_azimuth_deg = 12.0
     target_elevation_deg = -4.0
-    azimuth_rad = np.deg2rad(target_azimuth_deg)
-    elevation_rad = np.deg2rad(target_elevation_deg)
-    direction_x = np.sin(azimuth_rad) * np.cos(elevation_rad)
-    direction_z = -np.sin(elevation_rad)
-    steering = np.exp(
-        1j
-        * np.pi
-        * (coordinates[:, 0] * direction_x + coordinates[:, 1] * direction_z)
+    signal_cube = synthetic_mode3_doppler_cube(
+        config,
+        range_bin=40,
+        doppler_index=36,
+        azimuth_deg=target_azimuth_deg,
+        elevation_deg=target_elevation_deg,
+        amplitude=1e4,
     )
-    signal_cube = empty_cube.copy()
-    signal_cube[32, :, :, 40] = (steering / phase_corrections).reshape(3, 4) * 1e4
     target_range_fft = synthetic_mimo_frame(
         config,
         range_bin=40,
@@ -527,8 +585,11 @@ def test_fixed_beam_tracker_reports_measured_capon_direction() -> None:
         amplitude=1e4,
     )
     original_range_fft = target_range_fft.copy()
+    original_signal_cube = signal_cube.copy()
     result = None
-    for _ in range(20):
+    # Six frames establish the path; continue until the classifier's rolling
+    # 36-frame segment is full.
+    for _ in range(42):
         result = tracker.update(signal_cube, target_range_fft, range_axis)
     assert result is not None
     assert result.has_track
@@ -538,7 +599,32 @@ def test_fixed_beam_tracker_reports_measured_capon_direction() -> None:
     assert abs(result.elevation_deg - target_elevation_deg) <= 3.0
     assert result.azimuth_deg != tracker.config.beam_azimuth_deg
     assert result.elevation_deg != tracker.config.beam_elevation_deg
+    assert result.label == "Beam-space target"
+    assert result.tbd_integrated_score is not None
+    assert tracker.spectrogram_db.shape == (64, 36)
     assert np.array_equal(target_range_fft, original_range_fft)
+    assert np.array_equal(signal_cube, original_signal_cube)
+
+
+def test_mode3_metadata_preserves_existing_calibration_and_classifier_contract() -> None:
+    config = load_profile("profile-mini4-fixed-beam.cfg")
+    tracker = PmmTracker(config, PmmConfig(operation_mode="fixed-beam"))
+    metadata = tracker.metadata
+    receive = metadata["config"]["operation_mode"]
+    assert receive == "fixed-beam"
+
+    # The detailed contract contributes to the fingerprint and documents the
+    # deliberate compatibility boundary used by the cross-profile classifier.
+    feature_values = metadata["feature_contract"]
+    assert feature_values["receive_beamforming"]["transmit_schedule"] == (
+        "existing calibrated 3-TX TDM"
+    )
+    assert not feature_values["receive_beamforming"][
+        "new_hardware_calibration_required"
+    ]
+    assert not feature_values["track_before_detect"]["per_frame_cfar_or_pmm"]
+    assert feature_values["classification_feature"]["shape"] == [36, 64]
+    assert not feature_values["classification_feature"]["dataset_contract_changed"]
 
 
 def test_fixed_beam_has_expected_coherent_gain_when_calibrated() -> None:
