@@ -144,7 +144,7 @@ def test_mode3_beam_space_tbd_accepts_persistent_angle_range_path() -> None:
         )
     cell, integrated, detected = mode3_track_before_detect(evidence, 1)
     assert detected
-    assert cell == (1, 2, 5)
+    assert cell == (1, 2, 6)
     assert integrated >= MODE3_BEAMSPACE_INTEGRATED_THRESHOLD
 
 
@@ -153,6 +153,70 @@ def test_mode3_beam_space_tbd_rejects_stale_spike() -> None:
     evidence[0, 1, 2, 4] = 30.0
     _cell, _integrated, detected = mode3_track_before_detect(evidence, 1)
     assert not detected
+
+
+def test_mode3_beam_space_rejects_measured_adjacent_dc_leakage() -> None:
+    config = load_profile("profile-mini4-fixed-beam.cfg")
+    leakage = synthetic_mode3_doppler_cube(
+        config,
+        range_bin=40,
+        doppler_index=33,
+        azimuth_deg=12.0,
+        elevation_deg=-4.0,
+        amplitude=1e4,
+    )
+    moving = synthetic_mode3_doppler_cube(
+        config,
+        range_bin=40,
+        doppler_index=36,
+        azimuth_deg=12.0,
+        elevation_deg=-4.0,
+        amplitude=1e4,
+    )
+
+    leakage_frame = mode3_beam_space_frame(leakage, config)
+    moving_frame = mode3_beam_space_frame(moving, config)
+    assert float(np.max(leakage_frame.score_cube)) == 0.0
+    assert float(np.max(moving_frame.score_cube)) > 0.0
+
+
+def test_mode3_background_fraction_rejects_small_clutter_drift() -> None:
+    config = load_profile("profile-mini4-fixed-beam.cfg")
+    tracker = PmmTracker(
+        config,
+        PmmConfig(
+            operation_mode="fixed-beam",
+            background_calibration_seconds=0.1,
+            provisional_frames=1,
+            confirmation_window_frames=1,
+            confirmation_hits=1,
+        ),
+    )
+    range_axis = config.range_axis_m()
+    range_fft = np.zeros((96, 4, 256), dtype=np.complex64)
+
+    def target(amplitude: float) -> np.ndarray:
+        return synthetic_mode3_doppler_cube(
+            config,
+            range_bin=40,
+            doppler_index=36,
+            azimuth_deg=12.0,
+            elevation_deg=-4.0,
+            amplitude=amplitude,
+        )
+
+    assert tracker.update(target(1e4), range_fft, range_axis).state == "searching"
+    drift_result = None
+    for _ in range(MODE3_BEAMSPACE_MINIMUM_FRAMES):
+        drift_result = tracker.update(target(1.1e4), range_fft, range_axis)
+    assert drift_result is not None
+    assert not drift_result.has_track
+
+    strong_result = None
+    for _ in range(MODE3_BEAMSPACE_MINIMUM_FRAMES):
+        strong_result = tracker.update(target(2e4), range_fft, range_axis)
+    assert strong_result is not None
+    assert strong_result.has_track
 
 
 def test_all_three_profile_mode_combinations_validate() -> None:
@@ -587,9 +651,9 @@ def test_mode3_tracker_reports_beam_space_direction_and_classifier_shape() -> No
     original_range_fft = target_range_fft.copy()
     original_signal_cube = signal_cube.copy()
     result = None
-    # Six frames establish the path; continue until the classifier's rolling
+    # Eight frames establish the path; continue until the classifier's rolling
     # 36-frame segment is full.
-    for _ in range(42):
+    for _ in range(43):
         result = tracker.update(signal_cube, target_range_fft, range_axis)
     assert result is not None
     assert result.has_track
@@ -623,6 +687,8 @@ def test_mode3_metadata_preserves_existing_calibration_and_classifier_contract()
         "new_hardware_calibration_required"
     ]
     assert not feature_values["track_before_detect"]["per_frame_cfar_or_pmm"]
+    assert feature_values["track_before_detect"]["dc_guard_half_width_bins"] == 3
+    assert feature_values["track_before_detect"]["background_fraction"] == 0.10
     assert feature_values["classification_feature"]["shape"] == [36, 64]
     assert not feature_values["classification_feature"]["dataset_contract_changed"]
 

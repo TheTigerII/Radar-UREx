@@ -50,7 +50,7 @@ field evidence is essential.
 ## Verification and classification boundary
 
 The recovered conventional suite passes 270 tests and the enhanced PMM/GUI
-suite passes 36 tests. Synthetic Mode 3 tests cover TDM phase compensation,
+suite passes 38 tests. Synthetic Mode 3 tests cover TDM phase compensation,
 wide-angle acquisition, stale-echo rejection, angle recovery and the complete
 36 x 64 classifier segment. On the Jetson, random-cube Mode 3 tracking measured
 about 75 ms median / 77 ms p95 within the 100 ms frame period. The existing
@@ -74,4 +74,3 @@ point and a 60-second empty-scene false-track interval.
 | 4 Enhanced conventional |  |  |  |  |  |  |
 
 **Conclusion after final test:**  
-

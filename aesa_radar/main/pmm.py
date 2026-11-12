@@ -48,10 +48,12 @@ FIXED_BEAM_ELEVATION_HALF_WIDTH_DEG = 60.0
 FIXED_BEAM_SCAN_STEP_DEG = 12.0
 FIXED_BEAM_ELEVATION_SCAN_STEP_DEG = 30.0
 MODE3_BEAMSPACE_WINDOW_FRAMES = 8
-MODE3_BEAMSPACE_MINIMUM_FRAMES = 6
-MODE3_BEAMSPACE_INTEGRATED_THRESHOLD = 4.5
-MODE3_BEAMSPACE_CURRENT_FRAME_MINIMUM = 2.0
+MODE3_BEAMSPACE_MINIMUM_FRAMES = 8
+MODE3_BEAMSPACE_INTEGRATED_THRESHOLD = 5.5
+MODE3_BEAMSPACE_CURRENT_FRAME_MINIMUM = 3.0
 MODE3_BEAMSPACE_TOP_DOPPLER_BINS = 4
+MODE3_BEAMSPACE_DC_GUARD_HALF_WIDTH_BINS = 3
+MODE3_BEAMSPACE_BACKGROUND_FRACTION = 0.10
 MODE3_BEAMSPACE_REFINEMENT_HALF_WIDTH_DEG = 16.0
 MODE3_BEAMSPACE_REFINEMENT_STEP_DEG = 2.0
 EXPERIMENT_OPERATION_MODES = (
@@ -946,11 +948,13 @@ def _mode3_top_doppler_score(beam_values: np.ndarray) -> np.ndarray:
         )
     else:
         power = np.square(values, dtype=np.float32)
-    # Static clutter is represented by the centred zero-Doppler bin.  A
-    # hovering rotor still contributes sidebands, while walking/drifting
-    # targets occupy adjacent bins.  Suppressing only the exact centre avoids
-    # throwing away slow targets.
-    power[MINI4_DOPPLER_FFT_SIZE // 2] = 0.0
+    # The 2026-11-13 empty-scene run showed that strong stationary reflectors
+    # leak into the bins immediately beside DC: the false track's central
+    # cluster was 26.5 dB above all bins outside +/-3.  Exclude that measured
+    # leakage band while retaining rotor sidebands and translating targets.
+    centre = MINI4_DOPPLER_FFT_SIZE // 2
+    guard = MODE3_BEAMSPACE_DC_GUARD_HALF_WIDTH_BINS
+    power[centre - guard : centre + guard + 1] = 0.0
     top_count = min(MODE3_BEAMSPACE_TOP_DOPPLER_BINS, power.shape[0] - 1)
     partitioned = np.partition(power, power.shape[0] - top_count, axis=0)
     return np.sqrt(
@@ -1489,6 +1493,10 @@ class PmmTracker:
                 "minimum_frames": MODE3_BEAMSPACE_MINIMUM_FRAMES,
                 "integrated_threshold": MODE3_BEAMSPACE_INTEGRATED_THRESHOLD,
                 "current_frame_minimum": MODE3_BEAMSPACE_CURRENT_FRAME_MINIMUM,
+                "dc_guard_half_width_bins": (
+                    MODE3_BEAMSPACE_DC_GUARD_HALF_WIDTH_BINS
+                ),
+                "background_fraction": MODE3_BEAMSPACE_BACKGROUND_FRACTION,
                 "per_frame_cfar_or_pmm": False,
             }
             feature_values["classification_feature"] = {
@@ -1673,7 +1681,10 @@ class PmmTracker:
                 robust_floor = max(amplitude_floor, variation_floor, 1e-3)
                 self.mode3_background = background
                 self.mode3_noise_scale = np.maximum(
-                    noise_scale,
+                    np.maximum(
+                        noise_scale,
+                        MODE3_BEAMSPACE_BACKGROUND_FRACTION * background,
+                    ),
                     robust_floor,
                 ).astype(np.float32)
                 self.mode3_calibration_samples.clear()

@@ -97,7 +97,10 @@ Mode-specific controls:
 
 - Mode 3 scans +/-60 degrees automatically; no manual beam centre or reflector
   capture is needed. Keep the scene empty during its amber background phase,
-  then introduce the target only after **RADAR READY**.
+  then introduce the target only after **RADAR READY**. Its detector rejects
+  the centre +/-3 Doppler bins based on the 2026-11-13 empty-scene false-lock
+  run; stationary reflectors should no longer create a track solely through
+  adjacent-bin leakage.
 - Mode 4 has four "Mode 4 stages" checkboxes, all on by default. Before the
   range test, run it for a few minutes on an empty scene and check the
   runtime-performance log for period overruns and the PPI for false tracks.

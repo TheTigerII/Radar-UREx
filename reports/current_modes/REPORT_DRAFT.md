@@ -88,6 +88,13 @@ deliberately different from Mode 2's PMM folding and from per-frame CFAR. Once
 a current persistent path is acquired, a local coherent beam grid refines the
 direction at 2-degree spacing.
 
+An initial empty-scene field run revealed a persistent static-clutter lock at
+6.1 m whose centre-adjacent Doppler energy exceeded the off-centre spectrum by
+26.5 dB. The detector consequently excludes the centre +/-3 bins, applies a
+10% per-cell clutter-drift normalization floor, and requires a full eight-frame
+path. These measured guards target false tracks without changing the waveform
+or classifier tensor.
+
 Ideal coherent combination of 12 equally illuminated channels has an upper
 bound of `10 log10(12) = 10.8 dB` relative to one channel. Actual improvement
 over the inherited non-coherent average will be smaller because of calibration
@@ -163,7 +170,7 @@ complex channel samples.
 
 - 270 recovered conventional-pipeline unit/regression tests pass on the
   Jetson.
-- 36 enhanced radar/GUI tests pass, including RF profile/mode validation,
+- 38 enhanced radar/GUI tests pass, including RF profile/mode validation,
   TDM phase compensation, beam-space persistent-path acquisition, stale-spike
   rejection, angle recovery, PPI/GUI selection and classifier tensor shape.
 - Both classifier engines were rebuilt locally for the Jetson. Conventional

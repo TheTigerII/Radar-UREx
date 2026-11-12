@@ -202,6 +202,16 @@ Use the detailed checklist and blank table in `aesa_radar/TEST_DAY_GUIDE.md`.
 
 Earlier problematic observations included tracks snapping to phantom ranges after a target left, limited off-boresight tracking, and drone loss beyond a few metres. These symptoms can arise from background contamination, sidelobes/clutter, stale path integration, incorrect angle gating, low target radar cross-section, or hardware/stream faults. Do not infer the cause from the displayed range alone; correlate processed detections with raw/processed logs, calibration state, angle, score, and ground truth.
 
+The first rebuilt Mode 3 empty-scene run on 2026-11-13
+(`pmm_capture_2026_11_13T02_18_17.jsonl`) exposed a specific false-lock cause:
+after a transient 15 m path, the tracker held a 6.1 m / -46 degree return for
+2,293 consecutive hits. Its selected spectrum was 26.5 dB stronger in the
+centre +/-3 Doppler bins than anywhere outside them, while capture transport
+had zero packet/queue loss. Mode 3 was therefore tuned to exclude that measured
+DC-leakage band, require the full eight-frame path with 5.5 integrated and 3.0
+current-frame gates, and floor each cell's noise scale at 10% of its background.
+Do not remove those guards merely to make a weak plotted point appear.
+
 ## Validation already completed
 
 The latest code validation before handoff included:
@@ -211,7 +221,8 @@ cd /home/rgmtc/Desktop/Radar-UREx/aesa_radar
 QT_QPA_PLATFORM=offscreen ../.venv/bin/python -m pytest -q tests
 ```
 
-Current result: 36 tests pass after the Mode 3 beam-space rebuild.
+Current result: 38 tests pass after the Mode 3 beam-space rebuild and
+field-log-driven false-lock tuning.
 
 The conventional suite now passes 270 tests. Python compile checks and an
 off-screen launch through the primary desktop script pass. Re-run the relevant

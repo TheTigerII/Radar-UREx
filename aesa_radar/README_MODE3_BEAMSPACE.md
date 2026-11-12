@@ -13,13 +13,19 @@ this repository.
 3. All three transmitters and four receivers form a 12-channel virtual array.
    Coherent receive beams cover +/-60 degrees azimuth and elevation. The ARM
    coarse grid uses 12-degree azimuth and 30-degree elevation spacing.
-4. The detector scores the strongest non-zero-Doppler energy in every
+4. The detector rejects the measured static-leakage band (the centre +/-3
+   Doppler bins) and scores the strongest remaining Doppler energy in every
    beam/range cell. It does not use PMM folding and does not first create a
-   per-frame CFAR point detection.
-5. An eight-frame dynamic-programming path integrates evidence jointly through
+   per-frame CFAR point detection. For this profile the rejected band is only
+   about +/-0.043 m/s equivalent radial Doppler; rotor sidebands and normally
+   translating targets remain outside it.
+5. A per-cell robust background includes a 10% multiplicative clutter-drift
+   floor, preventing tiny calibration variance at a strong reflector from
+   producing a very large normalized score.
+6. An eight-frame dynamic-programming path integrates evidence jointly through
    beam, range and time. Angular movement is limited to neighbouring beams and
    range movement is limited by the configured target speed.
-6. Once a current, persistent path passes the threshold, a local 2-degree beam
+7. Once a current, persistent path passes the threshold, a local 2-degree beam
    grid within the coarse cell refines azimuth and elevation. The normal
    range/angle particle filters
    then provide the PPI track.
