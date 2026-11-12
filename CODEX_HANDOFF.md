@@ -1,6 +1,6 @@
 # Radar UREx Codex Handoff
 
-Last updated: 2026-11-12 19:56 SGT (UTC+8)
+Last updated: 2026-11-12 20:00 SGT (UTC+8)
 
 This file is the continuation point for another Codex account working on the Radar-UREx project on the Jetson ARM computer. The immediate objective is a reliable, touchscreen-friendly GUI that can run the two inherited radar pipelines and the three experimental modes, show a military-style PPI with classification and angle information, recover cleanly from failed runs, and produce evidence for the final report. The implementations are present; the main unfinished work is controlled field testing, evidence-based tuning, and filling the blank result sections in the reports.
 
@@ -16,15 +16,16 @@ This file is the continuation point for another Codex account working on the Rad
 ## Git state at handoff
 
 - Active branch: `aesa-recovery-2026-11-11`
-- Local HEAD before this handoff file: `c81ff8649 Add emergency radar cleanup and receiver recovery`
+- Handoff commit: `448427ac4 Add Codex project handoff`
+- Receiver-recovery commit: `c81ff8649 Add emergency radar cleanup and receiver recovery`
 - Important earlier commits:
   - `41aa5a42b Restore original modes and complete five-mode test center`
   - `34ca65238 tue night changes post recovery`
   - `89be01f40 Add literature-guided Mode 6 track-before-detect`
   - `1760a8a77 Recover AESA radar modes and touchscreen GUI`
-- At 2026-11-12 19:56 SGT, the branch had diverged from `origin/aesa-recovery-2026-11-11`: local was ahead by `c81ff8649`, while the remote had `dff49c975 report draft update`.
-- Remote-only `dff49c975` adds report drafts and `rawdatacapture/profile-mini4-20m.cfg`. Inspect and reconcile it deliberately; do not blindly pull over local recovery work.
-- The worktree was clean before adding this handoff file.
+- The earlier divergence was resolved without conflicts in merge commit `18a3b5b89`. It combines the local handoff and receiver-recovery commits with `dff49c975 report draft update` from the remote.
+- `dff49c975` adds report drafts and `rawdatacapture/profile-mini4-20m.cfg`; these files are now preserved in the combined history.
+- At 20:00 SGT, the combined branch was committed locally but its push was waiting for GitHub authentication on this computer.
 
 Recommended first Git checks:
 
@@ -246,7 +247,7 @@ Additional papers collected during development are under `tmp/pdfs/`. Preserve a
 
 ## Recommended continuation sequence
 
-1. Inspect Git divergence and preserve both the local receiver-recovery commit and the remote report commit when reconciling the branch.
+1. Confirm that the remote branch contains merge commit `18a3b5b89` and the later handoff-state update. If not, authenticate this computer and push the existing local branch without rewriting it.
 2. Re-run automated tests after reconciliation.
 3. Verify hardware readiness with the read-only checks above, then launch the GUI.
 4. Press **Stop all radar processes** before the first run if the previous shutdown state is uncertain.
