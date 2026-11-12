@@ -1,9 +1,12 @@
 # Radar-UREx final test-day guide
 
-This guide is the short, repeatable procedure for comparing the five choices
-in the deployed GUI. The numbered choices deliberately retain **Mode 6** as the
-research label; there is no visible Mode 5 because the earlier proposal was
-replaced by the recovered two-transmitter Mode 4.
+This guide is the short, repeatable procedure for comparing the four choices
+in the deployed GUI, numbered 1 to 4.
+The earlier two-TX phased-array STT and literature MIMO TBD modes were removed
+from the GUI on 2026-11-12. Their code and profiles remain and can still be run
+through `aesa_radar/main/run.py --operation-mode phased-array-stt` or
+`literature-tbd-mimo`. The current Mode 4 is a different mode: Mode 1 with
+enhanced detection (`conventional_radar/README_MODE4.md`).
 
 ## Modes available
 
@@ -12,12 +15,11 @@ replaced by the recovered two-transmitter Mode 4.
 | 1 — Original conventional | Range-Doppler, OS-CFAR, XYZ/DBSCAN, single-target tracking and CNN/TensorRT | Inherited teammate pipeline; 10 m GUI range initially |
 | 2 — Original PMM | Original 20 m waveform, PMM folding/tracking, Capon angles and LSTM/TensorRT | Inherited teammate pipeline and control |
 | 3 — Enhanced MIMO PMM STT | Long-range three-TX TDM-MIMO, coherent 12-channel beam bank over +/-60 degrees and Capon refinement | Recovered Mode 3; strongest receive-processing experiment |
-| 4 — Two-TX phased-array STT | Two simultaneous transmitters with quantised relative phase and coherent four-RX fixed-look processing | Recovered Mode 4; azimuth setting limited to +/-30 degrees |
-| 6 — Literature MIMO TBD | Long-range three-TX TDM-MIMO PMM plus 8–12-frame weak-path integration and Capon angles | New experimental Mode 6; field range not yet established |
+| 4 — Enhanced conventional | Mode 1's waveform, calibration, tracker and CNN with four switchable detection stages: calibrated CFAR threshold, averaged clutter reference, coherent 12-channel beam detection, 8-frame integration | New on 2026-11-13; simulated only, not yet run on the radar; 12 m GUI range |
 
 Every choice supports the tactical PPI, structured performance logging and a
-target-attached classification label. Mode 1 uses its recovered CNN. Modes 2,
-3, 4 and 6 use the available LSTM. PMM inference keeps the correct 36 x 64
+target-attached classification label. Modes 1 and 4 use the recovered CNN. Modes 2
+and 3 use the available LSTM. PMM inference keeps the correct 36 x 64
 input contract, but revised/cross-waveform predictions are marked experimental
 and must be evaluated from labelled runs before reporting accuracy.
 
@@ -87,11 +89,12 @@ Mode-specific controls:
 
 - Mode 3 scans the recovered +/-60 degree field automatically. Leave its beam
   centre at zero for the initial matched comparison.
-- Mode 4 is a fixed electronically steered look. Enter the measured target
-  bearing before starting and keep it within +/-30 degrees. A target outside
-  this beam can legitimately disappear.
-- Mode 6 needs 0.8 seconds of persistent evidence before initial acquisition;
-  a slight acquisition delay is expected.
+- Mode 4 has four "Mode 4 stages" checkboxes, all on by default. Before the
+  range test, run it for a few minutes on an empty scene and check the
+  runtime-performance log for period overruns and the PPI for false tracks.
+  If overruns rise, untick the coherent beam stage first. To attribute any
+  range gain, run Mode 1, then Mode 4 with only the two "no extra processing"
+  stages, then with coherent beams added, then with all four.
 
 ## What counts as improvement
 
@@ -115,8 +118,9 @@ distance that meets the same confirmation rule in repeated trials. Compare:
 | 1 Original conventional |  |  |  |  |  |  |  |  |  |  |  |
 | 2 Original PMM |  |  |  |  |  |  |  |  |  |  |  |
 | 3 Enhanced MIMO STT |  |  |  |  |  |  |  |  |  |  |  |
-| 4 Two-TX phased STT |  |  |  |  |  |  |  |  |  |  |  |
-| 6 Literature MIMO TBD |  |  |  |  |  |  |  |  |  |  |  |
+| 4 Enhanced conventional: threshold + reference only |  |  |  |  |  |  |  |  |  |  |  |
+| 4 Enhanced conventional: + coherent beams |  |  |  |  |  |  |  |  |  |  |  |
+| 4 Enhanced conventional: all four stages |  |  |  |  |  |  |  |  |  |  |  |
 
 Record the processed, inference-evaluation, runtime-performance and raw file
 names beside the paper result sheet before changing mode.

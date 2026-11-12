@@ -219,6 +219,36 @@ def parse_args() -> argparse.Namespace:
         help="Minimum points required for a DBSCAN cluster. Defaults to 2.",
     )
     parser.add_argument(
+        "--detection-power",
+        choices=("noncoherent", "coherent-beam"),
+        default="noncoherent",
+        help=(
+            "Mode 4 option: 'coherent-beam' forms calibrated 12-channel "
+            "receive beams before CFAR. The default keeps Mode 1 unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--clutter-reference",
+        choices=("ema", "mean"),
+        default="ema",
+        help="Mode 4 option: 'mean' averages all clutter warm-up frames equally.",
+    )
+    parser.add_argument(
+        "--cfar-threshold",
+        choices=("nominal", "calibrated"),
+        default="nominal",
+        help=(
+            "Mode 4 option: 'calibrated' sets the CFAR threshold for a measured "
+            "noise-only per-cell false-alarm rate of 1e-6."
+        ),
+    )
+    parser.add_argument(
+        "--tbd-window-frames",
+        type=int,
+        default=0,
+        help="Mode 4 option: track-before-detect window in frames (0 = off).",
+    )
+    parser.add_argument(
         "--clutter-map-update-rate",
         type=float,
         default=DEFAULT_CLUTTER_MAP_UPDATE_RATE,
@@ -928,6 +958,24 @@ def kill_process(process: subprocess.Popen) -> None:
         os.killpg(process.pid, signal.SIGKILL)
 
 
+ENHANCED_DETECTION_DEFAULTS = (
+    ("--detection-power", "detection_power", "noncoherent"),
+    ("--clutter-reference", "clutter_reference", "ema"),
+    ("--cfar-threshold", "cfar_threshold", "nominal"),
+    ("--tbd-window-frames", "tbd_window_frames", 0),
+)
+
+
+def enhanced_detection_arguments(args: argparse.Namespace) -> list[str]:
+    """Return Mode 4 capture flags that differ from the Mode 1 defaults."""
+    arguments: list[str] = []
+    for flag, attribute, default in ENHANCED_DETECTION_DEFAULTS:
+        value = getattr(args, attribute, default)
+        if value != default:
+            arguments.extend((flag, str(value)))
+    return arguments
+
+
 def build_capture_command(
     args: argparse.Namespace,
     display: str,
@@ -1043,6 +1091,7 @@ def build_capture_command(
             str(getattr(args, "performance_sample_interval", 1.0)),
         )
     )
+    command.extend(enhanced_detection_arguments(args))
     if display in radar_calibration.CALIBRATION_DISPLAY_MODES:
         calibration_distance_m = getattr(args, "calibration_distance_m", None)
         if calibration_distance_m is None:

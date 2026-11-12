@@ -6,7 +6,7 @@ two visible operating modes:
 | GUI selection | RF and host processing | Purpose |
 |---|---|---|
 | **1 — Enhanced MIMO PMM STT** (fixed Mode 3) | Three sequential TDM transmitters, four receivers and 12 calibrated virtual channels; coherent sector detection followed by Capon/MVDR azimuth and elevation | Long-range MIMO tracking with measured 3-D direction |
-| **2 — Phased-array STT** (proposed Mode 5) | TX0 and TX1 transmit simultaneously with calibrated 6-bit relative phase; four receivers combine coherently at the selected look direction | Non-MIMO transmit/receive beamforming comparison |
+| **2 — Phased-array STT** (now GUI Mode 4) | TX0 and TX1 transmit simultaneously with calibrated 6-bit relative phase; four receivers combine coherently at the selected look direction | Non-MIMO transmit/receive beamforming comparison |
 
 Mode 2 uses transmitter mask `3`; mask `7` is explicitly prohibited. The
 standard IWR6843 supply supports two simultaneous transmitters, while three

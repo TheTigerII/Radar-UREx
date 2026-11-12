@@ -73,6 +73,7 @@ if __package__ in {None, ""}:
         default_performance_log_path,
     )
     from main.log_paths import default_terminal_log_path, new_run_log_id
+    from main import enhanced_detection
 else:
     from .dsp import (
         AdaptiveClutterMap,
@@ -125,6 +126,7 @@ else:
         default_performance_log_path,
     )
     from .log_paths import default_terminal_log_path, new_run_log_id
+    from . import enhanced_detection
 
 
 # Default DCA1000 network parameters.
@@ -1634,9 +1636,28 @@ class DisplayPayloadSink:
         calibration_settings: Optional[radar_calibration.CalibrationSettings] = None,
         calibration_complete_event: Optional[Any] = None,
         calibration_emit_func: Optional[EmitFunc] = None,
+        enhanced_detection_options: Optional[
+            "enhanced_detection.EnhancedDetectionOptions"
+        ] = None,
     ) -> None:
         self.mode = mode
         self.update_every = max(update_every, 1)
+        # GUI Mode 4. None or all-default options keep the Mode 1 path.
+        self.enhanced_options = (
+            enhanced_detection_options
+            if enhanced_detection_options is not None
+            and enhanced_detection_options.enabled
+            else None
+        )
+        self.track_before_detect = (
+            enhanced_detection.TrackBeforeDetect(
+                self.enhanced_options.tbd_window_frames
+            )
+            if self.enhanced_options is not None
+            and self.enhanced_options.tbd_window_frames > 0
+            else None
+        )
+        self.enhanced_tbd_injections = 0
         self.payload_queue = payload_queue
         self.config = config
         self.max_range_m = max(float(max_range_m), 0.0)
@@ -1658,16 +1679,22 @@ class DisplayPayloadSink:
         self.calibration_complete_event = calibration_complete_event
         self.calibration_emit = calibration_emit_func
         self._calibration_result_emitted = False
-        self.clutter_map = (
-            AdaptiveClutterMap(
+        if clutter_map_update_rate <= 0.0:
+            self.clutter_map = None
+        elif self.enhanced_options is not None:
+            self.clutter_map = enhanced_detection.create_clutter_map(
+                self.enhanced_options.clutter_reference,
+                update_rate=clutter_map_update_rate,
+                warmup_frames=clutter_map_warmup_frames,
+                minimum_snr_db=clutter_map_min_snr_db,
+            )
+        else:
+            self.clutter_map = AdaptiveClutterMap(
                 update_rate=clutter_map_update_rate,
                 warmup_frames=clutter_map_warmup_frames,
                 minimum_snr_db=clutter_map_min_snr_db,
                 adapt_after_warmup=False,
             )
-            if clutter_map_update_rate > 0.0
-            else None
-        )
         self.static_scene_map = (
             StaticSceneMap(
                 warmup_frames=static_warmup_frames,
@@ -2619,16 +2646,31 @@ class DisplayPayloadSink:
         doppler_cube = compute_range_doppler_fft(range_fft, self.config)
         self.timings.add("doppler", time.perf_counter() - doppler_started)
         dynamic_started = time.perf_counter()
-        points = compute_point_cloud(
-            range_fft,
-            range_axis_m,
-            self.config,
-            doppler_cube=doppler_cube,
-            clutter_map=self.clutter_map,
-            max_range_m=self.max_range_m,
-            azimuth_fov_deg=self.point_cloud_fov_deg,
-            elevation_fov_deg=self.point_cloud_fov_deg,
-        )
+        if self.enhanced_options is None:
+            points = compute_point_cloud(
+                range_fft,
+                range_axis_m,
+                self.config,
+                doppler_cube=doppler_cube,
+                clutter_map=self.clutter_map,
+                max_range_m=self.max_range_m,
+                azimuth_fov_deg=self.point_cloud_fov_deg,
+                elevation_fov_deg=self.point_cloud_fov_deg,
+            )
+        else:
+            points, diagnostics = enhanced_detection.compute_enhanced_point_cloud(
+                range_fft,
+                range_axis_m,
+                self.config,
+                self.enhanced_options,
+                doppler_cube=doppler_cube,
+                clutter_map=self.clutter_map,
+                track_before_detect=self.track_before_detect,
+                max_range_m=self.max_range_m,
+                azimuth_fov_deg=self.point_cloud_fov_deg,
+                elevation_fov_deg=self.point_cloud_fov_deg,
+            )
+            self.enhanced_tbd_injections += int(diagnostics.tbd_injected)
         self.timings.add(
             "dynamic_detection",
             time.perf_counter() - dynamic_started,
@@ -5184,6 +5226,9 @@ def _run_frame_processor_impl(
     evaluation_label: str = "unlabeled",
     performance_log: Optional[Path] = None,
     performance_sample_interval_s: float = DEFAULT_RESOURCE_SAMPLE_INTERVAL_S,
+    enhanced_detection_options: Optional[
+        "enhanced_detection.EnhancedDetectionOptions"
+    ] = None,
 ) -> None:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
@@ -5308,12 +5353,31 @@ def _run_frame_processor_impl(
         calibration_settings=calibration_settings,
         calibration_complete_event=calibration_complete_event,
         calibration_emit_func=worker_emit,
+        enhanced_detection_options=enhanced_detection_options,
     )
+    if display.enhanced_options is not None:
+        worker_emit(
+            "Enhanced conventional detection (Mode 4): "
+            + display.enhanced_options.describe()
+        )
     performance_logger = (
         PerformanceMetricsLogger(
             performance_log,
             run_metadata={
                 "display_mode": display_mode,
+                "enhanced_detection": (
+                    {
+                        "detection_power": display.enhanced_options.detection_power,
+                        "clutter_reference": display.enhanced_options.clutter_reference,
+                        "cfar_threshold": display.enhanced_options.cfar_threshold,
+                        "cfar_threshold_multiplier": (
+                            display.enhanced_options.threshold_multiplier
+                        ),
+                        "tbd_window_frames": display.enhanced_options.tbd_window_frames,
+                    }
+                    if display.enhanced_options is not None
+                    else None
+                ),
                 "display_update_every": max(int(display_update_every), 1),
                 "frame_periodicity_ms": config.frame_periodicity_ms,
                 "classification_enabled": bool(classification_enabled),
@@ -6016,6 +6080,39 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Minimum target-to-background power ratio in dB after clutter "
             "normalization. Defaults to 3 dB."
+        ),
+    )
+    parser.add_argument(
+        "--detection-power",
+        choices=enhanced_detection.DETECTION_POWER_MODES,
+        default=enhanced_detection.DETECTION_POWER_NONCOHERENT,
+        help=(
+            "Mode 4 option. 'coherent-beam' forms calibrated, TDM-compensated "
+            "12-channel receive beams before CFAR. Default keeps Mode 1."
+        ),
+    )
+    parser.add_argument(
+        "--clutter-reference",
+        choices=enhanced_detection.CLUTTER_REFERENCE_MODES,
+        default=enhanced_detection.CLUTTER_REFERENCE_EMA,
+        help="Mode 4 option. 'mean' averages all clutter warm-up frames equally.",
+    )
+    parser.add_argument(
+        "--cfar-threshold",
+        choices=enhanced_detection.CFAR_THRESHOLD_MODES,
+        default=enhanced_detection.CFAR_THRESHOLD_NOMINAL,
+        help=(
+            "Mode 4 option. 'calibrated' scales the CFAR threshold to a "
+            "measured noise-only per-cell false-alarm rate of 1e-6."
+        ),
+    )
+    parser.add_argument(
+        "--tbd-window-frames",
+        type=int,
+        default=0,
+        help=(
+            "Mode 4 option. Integrate CFAR margins over this many frames "
+            "(track-before-detect). 0 disables."
         ),
     )
     parser.add_argument(
@@ -7044,6 +7141,16 @@ def main() -> None:
                 resolved_performance_log,
                 args.performance_sample_interval,
             ),
+            kwargs={
+                "enhanced_detection_options": (
+                    enhanced_detection.EnhancedDetectionOptions(
+                        detection_power=args.detection_power,
+                        tbd_window_frames=max(args.tbd_window_frames, 0),
+                        clutter_reference=args.clutter_reference,
+                        cfar_threshold=args.cfar_threshold,
+                    )
+                ),
+            },
             name="RadarFrameProcessor",
         )
         processor.start()

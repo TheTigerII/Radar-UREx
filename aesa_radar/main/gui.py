@@ -25,8 +25,10 @@ from main.gui_config import (
     CONVENTIONAL_CALIBRATION_PROFILE_PATH,
     CONVENTIONAL_CAPTURE_DIR,
     CONVENTIONAL_CONFIG_PATH,
+    CONVENTIONAL_ENHANCED_OPERATION_MODE,
     CONVENTIONAL_MODEL_WEIGHTS_DIR,
     CONVENTIONAL_OPERATION_MODE,
+    CONVENTIONAL_OPERATION_MODES,
     CONVENTIONAL_SETUP_PATH,
     GuiSettings,
 )
@@ -130,7 +132,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Radar-UREx Five-Mode Test Center")
+        self.setWindowTitle("Radar-UREx Four-Mode Test Center")
         self.setMinimumSize(720, 480)
         self.resize(1100, 760)
         self.process: QtCore.QProcess | None = None
@@ -165,10 +167,10 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         outer = QtWidgets.QVBoxLayout(central)
 
         title_row = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel("Radar-UREx Five-Mode Test Center")
+        title = QtWidgets.QLabel("Radar-UREx Four-Mode Test Center")
         title.setObjectName("title")
         subtitle = QtWidgets.QLabel(
-            "Original conventional + PMM · recovered Modes 3/4 · literature Mode 6"
+            "Original conventional + PMM · enhanced MIMO Mode 3 · enhanced conventional Mode 4"
         )
         subtitle.setObjectName("subtitle")
         title_column = QtWidgets.QVBoxLayout()
@@ -334,13 +336,11 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             "fixed-beam",
         )
         self.operation.addItem(
-            "4 — Two-TX phased-array STT (recovered)",
-            "phased-array-stt",
+            "4 — Enhanced conventional (extended-range detection)",
+            CONVENTIONAL_ENHANCED_OPERATION_MODE,
         )
-        self.operation.addItem(
-            "6 — Literature MIMO track-before-detect",
-            run.LITERATURE_TBD_OPERATION_MODE,
-        )
+        # The phased-array STT and literature TBD modes are hidden from the GUI
+        # but remain available through run.py --operation-mode.
         self.operation.currentIndexChanged.connect(self._operation_changed)
         form.addRow("Radar operation", self.operation)
         self.operation_note = QtWidgets.QLabel()
@@ -350,6 +350,32 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         self.beam_elevation = _double_spin(0.0, -60.0, 60.0, suffix="°")
         form.addRow("Beam / sector centre azimuth", self.beam_azimuth)
         form.addRow("Receive beam elevation", self.beam_elevation)
+        # Mode 4 stages. Each can be switched off to compare against Mode 1 or
+        # to recover processing time on the Jetson.
+        self.enhanced_stages = QtWidgets.QWidget()
+        stages_layout = QtWidgets.QVBoxLayout(self.enhanced_stages)
+        stages_layout.setContentsMargins(0, 0, 0, 0)
+        self.enhanced_calibrated_threshold = QtWidgets.QCheckBox(
+            "Calibrated CFAR threshold (no extra processing)"
+        )
+        self.enhanced_mean_clutter_reference = QtWidgets.QCheckBox(
+            "Averaged clutter reference (no extra processing)"
+        )
+        self.enhanced_coherent_beams = QtWidgets.QCheckBox(
+            "Coherent 12-channel beam detection (adds processing time)"
+        )
+        self.enhanced_track_before_detect = QtWidgets.QCheckBox(
+            "Multi-frame integration, 8 frames (small processing cost)"
+        )
+        for checkbox in (
+            self.enhanced_calibrated_threshold,
+            self.enhanced_mean_clutter_reference,
+            self.enhanced_coherent_beams,
+            self.enhanced_track_before_detect,
+        ):
+            checkbox.setChecked(True)
+            stages_layout.addWidget(checkbox)
+        form.addRow("Mode 4 stages", self.enhanced_stages)
         self.mode = QtWidgets.QComboBox()
         mode_labels = {
             "none": "Headless (no plot)",
@@ -730,6 +756,9 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         operation = str(self.operation.currentData())
         is_phased_stt = operation == "phased-array-stt"
         uses_beam_controls = is_phased_stt
+        self.enhanced_stages.setEnabled(
+            operation == CONVENTIONAL_ENHANCED_OPERATION_MODE
+        )
         self.beam_azimuth.setEnabled(uses_beam_controls)
         self.beam_elevation.setEnabled(uses_beam_controls)
         self.beam_azimuth.setRange(
@@ -738,6 +767,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         )
         profile_paths = {
             CONVENTIONAL_OPERATION_MODE: CONVENTIONAL_CONFIG_PATH,
+            CONVENTIONAL_ENHANCED_OPERATION_MODE: CONVENTIONAL_CONFIG_PATH,
             "baseline": run.DEFAULT_CONFIG_PATH,
             "long-range-mimo": run.LONG_RANGE_CONFIG_PATH,
             "fixed-beam": run.FIXED_BEAM_CONFIG_PATH,
@@ -747,6 +777,8 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         }
         max_ranges = {
             CONVENTIONAL_OPERATION_MODE: 10.0,
+            # Mode 1's profile is unambiguous to 12.5 m; allow Mode 4 to use it.
+            CONVENTIONAL_ENHANCED_OPERATION_MODE: 12.0,
             "baseline": 20.0,
             "long-range-mimo": run.LONG_RANGE_MAX_RANGE_M,
             "fixed-beam": run.LONG_RANGE_MAX_RANGE_M,
@@ -756,6 +788,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         }
         threshold_minimums = {
             CONVENTIONAL_OPERATION_MODE: run.MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
+            CONVENTIONAL_ENHANCED_OPERATION_MODE: run.MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
             "baseline": run.MINI4_DEFAULT_ADAPTIVE_THRESHOLD_MINIMUM,
             "long-range-mimo": run.LONG_RANGE_MIMO_ADAPTIVE_THRESHOLD_MINIMUM,
             "fixed-beam": run.FIXED_BEAM_ADAPTIVE_THRESHOLD_MINIMUM,
@@ -765,12 +798,13 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         }
         notes = {
             CONVENTIONAL_OPERATION_MODE: "Original teammate pipeline restored from the Eli/3TX history: range-Doppler processing, ordered-statistic CFAR, single-target 3D tracking, static handoff, and its own two-channel CNN/TensorRT classifier. The tactical PPI is an operator-view addition; the detection and classification feature contract is unchanged.",
+            CONVENTIONAL_ENHANCED_OPERATION_MODE: "Mode 1's waveform, calibration, tracker and CNN with opt-in detection stages: a CFAR threshold calibrated to a measured noise false-alarm rate, an equally averaged clutter reference, coherent 12-channel receive-beam detection with TDM phase correction, and 8-frame range-Doppler integration. Untick stages to compare against Mode 1. Simulated gains are an upper bound; the range improvement must be measured against Mode 1 on the same course.",
             "baseline": "Original teammate PMM/mmHawkeye pipeline and 20 m waveform: spectrum folding, background subtraction, constrained path tracking, particle filtering, Capon angles, and the original LSTM classifier.",
             "long-range-mimo": "Lower-slope Tsinghua-inspired waveform; wider unambiguous range but coarser range bins.",
             "fixed-beam": "Enhanced Mode 3: calibrated 12-channel coherent MIMO detection scans the original baseline field of view (+/-60 degrees azimuth and elevation), using 10-degree azimuth and 30-degree elevation detection beams for real-time ARM operation. It then refines direction at 2 degrees with Capon/MVDR.",
             "single-tx-scan": "Non-MIMO range mode: one transmitter and four receivers scan a wide receive-beam grid and report top-down position and estimated altitude. This is electronic receive steering, not simultaneous phased-array transmission.",
             "phased-array-stt": "Non-MIMO phased STT: TX0 and TX1 transmit coherently with calibrated 6-bit phase steering, while all four receivers combine coherently in the selected look direction. The standard-board safety limit of two simultaneous transmitters is enforced; this mode must still be range-tested against Mode 1.",
-            run.LITERATURE_TBD_OPERATION_MODE: "Mode 6: long-range three-TX/four-RX TDM-MIMO PMM. It integrates a physically reachable weak-target path over 0.8-1.2 seconds before declaring detection, then measures azimuth/elevation with Capon/MVDR. The present-frame guard limits stale and phantom tracks. Classifier input remains 64 Doppler bins over 3.6 seconds, but drone accuracy still requires field validation.",
+            run.LITERATURE_TBD_OPERATION_MODE: "Mode 5: long-range three-TX/four-RX TDM-MIMO PMM. It integrates a physically reachable weak-target path over 0.8-1.2 seconds before declaring detection, then measures azimuth/elevation with Capon/MVDR. The present-frame guard limits stale and phantom tracks. Classifier input remains 64 Doppler bins over 3.6 seconds, but drone accuracy still requires field validation.",
         }
         self.config.edit.setText(str(profile_paths[operation]))
         # Both coherent modes use the long-range waveform. Measure channel
@@ -778,7 +812,7 @@ class RadarControlCenter(QtWidgets.QMainWindow):
         # first four coefficients for RX combining and the first two TX groups
         # for its inter-TX phase correction. The +/-0.75 m interval safely
         # contains multiple 0.366 m range bins.
-        if operation == CONVENTIONAL_OPERATION_MODE:
+        if operation in CONVENTIONAL_OPERATION_MODES:
             self.setup.edit.setText(str(CONVENTIONAL_SETUP_PATH))
             self.model_weights.edit.setText(
                 str(CONVENTIONAL_MODEL_WEIGHTS_DIR)
@@ -840,6 +874,16 @@ class RadarControlCenter(QtWidgets.QMainWindow):
             operation_mode=str(self.operation.currentData()),
             beam_azimuth_deg=self.beam_azimuth.value(),
             beam_elevation_deg=self.beam_elevation.value(),
+            enhanced_calibrated_threshold=(
+                self.enhanced_calibrated_threshold.isChecked()
+            ),
+            enhanced_mean_clutter_reference=(
+                self.enhanced_mean_clutter_reference.isChecked()
+            ),
+            enhanced_coherent_beams=self.enhanced_coherent_beams.isChecked(),
+            enhanced_track_before_detect=(
+                self.enhanced_track_before_detect.isChecked()
+            ),
             radar_port=self._selected_port(),
             duration_minutes=self.duration.value(),
             dataset_destination=str(self.dataset_destination.currentData()),
@@ -1195,8 +1239,8 @@ class RadarControlCenter(QtWidgets.QMainWindow):
 
 def main() -> int:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("Radar-UREx Five-Mode Test Center")
-    app.setApplicationDisplayName("Radar-UREx Five-Mode Test Center")
+    app.setApplicationName("Radar-UREx Four-Mode Test Center")
+    app.setApplicationDisplayName("Radar-UREx Four-Mode Test Center")
     app.setDesktopFileName("radar-urex-simo-scan")
     app.setOrganizationName("Radar-UREx")
     window = RadarControlCenter()

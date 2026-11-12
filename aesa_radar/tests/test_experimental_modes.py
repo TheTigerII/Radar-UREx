@@ -142,7 +142,7 @@ def test_track_before_detect_rejects_old_spike_without_current_evidence() -> Non
 
 
 def test_literature_tbd_tracker_integrates_persistent_subthreshold_target() -> None:
-    """Mode 6 must acquire weak persistent evidence without a one-frame hit."""
+    """Mode 5 must acquire weak persistent evidence without a one-frame hit."""
 
     config = load_profile("profile-mini4-literature-tbd.cfg")
     tracker = PmmTracker(

@@ -82,7 +82,7 @@ def test_ppi_renders_target_and_altitude_status() -> None:
         display.app.processEvents()
 
 
-def test_gui_exposes_range_test_modes_including_literature_tbd() -> None:
+def test_gui_exposes_four_range_test_modes() -> None:
     QtWidgets = pytest.importorskip("PySide6.QtWidgets")
     from main import run
     from main.gui import RadarControlCenter
@@ -90,7 +90,7 @@ def test_gui_exposes_range_test_modes_including_literature_tbd() -> None:
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     window = RadarControlCenter()
     try:
-        assert window.operation.count() == 5
+        assert window.operation.count() == 4
         assert [
             window.operation.itemData(index)
             for index in range(window.operation.count())
@@ -98,32 +98,42 @@ def test_gui_exposes_range_test_modes_including_literature_tbd() -> None:
             "conventional",
             "baseline",
             "fixed-beam",
-            "phased-array-stt",
-            "literature-tbd-mimo",
+            "conventional-enhanced",
         ]
+        # Hidden modes must remain runnable from the command line.
+        assert "phased-array-stt" in run.EXPERIMENT_OPERATION_MODES
+        assert run.LITERATURE_TBD_OPERATION_MODE in run.EXPERIMENT_OPERATION_MODES
         assert window.operation.currentData() == "fixed-beam"
         assert window.config.required_path() == run.FIXED_BEAM_CONFIG_PATH
         assert window.mode.currentData() == "ppi"
         assert window.stop_all_button.text() == "Stop all radar processes"
         assert window.stop_all_button.isEnabled()
+        assert not window.enhanced_stages.isEnabled()
+
+        from main.gui_config import CONVENTIONAL_CONFIG_PATH, CONVENTIONAL_SETUP_PATH
 
         window.operation.setCurrentIndex(3)
-        assert window.operation.currentData() == "phased-array-stt"
-        assert window.config.required_path() == run.PHASED_STT_CONFIG_PATH
-        assert window.calibration_profile.required_path() == (
-            run.FIXED_BEAM_CONFIG_PATH
+        assert window.operation.currentData() == "conventional-enhanced"
+        assert window.enhanced_stages.isEnabled()
+        assert window.config.required_path() == CONVENTIONAL_CONFIG_PATH
+        assert window.setup.required_path() == CONVENTIONAL_SETUP_PATH
+        assert window.max_range.value() == 12.0
+        settings = window._settings()
+        assert settings.operation_mode == "conventional-enhanced"
+        assert settings.enhanced_detection_arguments() == [
+            "--detection-power", "coherent-beam",
+            "--clutter-reference", "mean",
+            "--cfar-threshold", "calibrated",
+            "--tbd-window-frames", "8",
+        ]
+        window.enhanced_coherent_beams.setChecked(False)
+        assert "--detection-power" not in (
+            window._settings().enhanced_detection_arguments()
         )
-        assert window.calibration_distance.value() == 1.5
-        assert window.calibration_window.value() == 0.75
-        assert window.beam_azimuth.minimum() == -30.0
-        assert window.beam_azimuth.maximum() == 30.0
-        assert window.mode.currentData() == "ppi"
 
-        window.operation.setCurrentIndex(4)
-        assert window.operation.currentData() == "literature-tbd-mimo"
-        assert window.config.required_path() == run.LITERATURE_TBD_CONFIG_PATH
-        assert window.max_range.value() == run.LONG_RANGE_MAX_RANGE_M
-        assert window.mode.currentData() == "ppi"
+        window.operation.setCurrentIndex(0)
+        assert not window.enhanced_stages.isEnabled()
+        assert window._settings().enhanced_detection_arguments() == []
     finally:
         window.close()
         window.deleteLater()

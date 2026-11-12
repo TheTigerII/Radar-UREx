@@ -25,7 +25,7 @@ Three experimental choices are also available:
 - **Mode 4 — Two-TX phased STT:** two transmitters emit simultaneously with a
   quantised relative phase and four receivers combine coherently in one
   selected look direction (azimuth limited to +/-30 degrees).
-- **Mode 6 — Literature MIMO TBD:** three-TX/four-RX long-range TDM-MIMO with
+- **Mode 5 — Literature MIMO TBD:** three-TX/four-RX long-range TDM-MIMO with
   constrained 8–12-frame PMM path integration for persistent weak evidence.
 
 The application includes a portable PPI, live calibration/readiness banner,
@@ -40,14 +40,14 @@ does not improve transmitted power or guarantee detection. Mode 3 changes
 effective receive processing gain through coherent combination (ideal upper
 bound 10.8 dB over one channel). Mode 4 changes the directional transmit
 pattern and coherently combines four receivers, within the sensor's hardware
-limits. Mode 6 adds temporal processing gain by integrating a reachable weak
+limits. Mode 5 adds temporal processing gain by integrating a reachable weak
 path. Since received power varies as `R^-4`, even array gain produces a much
 smaller range factor, and field evidence is essential.
 
 ## Verification and classification boundary
 
 The recovered conventional suite passes 252 tests and the enhanced PMM/GUI
-suite passes 28 tests. A synthetic Mode 6 target with individual frames below
+suite passes 28 tests. A synthetic Mode 5 target with individual frames below
 the ordinary threshold is acquired after eight frames at approximately 20 m,
 with range and angles recovered. Jetson synthetic tracker timing is about
 46 ms median / 52 ms p95 within a 100 ms frame period; LSTM TensorRT inference

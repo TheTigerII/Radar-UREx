@@ -17,6 +17,15 @@ from main import run
 
 
 CONVENTIONAL_OPERATION_MODE = "conventional"
+# GUI Mode 4: the conventional pipeline with opt-in detection enhancements
+# (conventional_radar/main/enhanced_detection.py). Same waveform, calibration,
+# tracker and CNN as Mode 1.
+CONVENTIONAL_ENHANCED_OPERATION_MODE = "conventional-enhanced"
+CONVENTIONAL_OPERATION_MODES = (
+    CONVENTIONAL_OPERATION_MODE,
+    CONVENTIONAL_ENHANCED_OPERATION_MODE,
+)
+ENHANCED_TBD_WINDOW_FRAMES = 8
 CONVENTIONAL_ROOT = run.ROOT.parent / "conventional_radar"
 CONVENTIONAL_MAIN = CONVENTIONAL_ROOT / "main" / "run.py"
 CONVENTIONAL_CONFIG_PATH = CONVENTIONAL_ROOT / "profiles" / "profile.cfg"
@@ -36,6 +45,11 @@ class GuiSettings:
     operation_mode: str = "baseline"
     beam_azimuth_deg: float = 0.0
     beam_elevation_deg: float = 0.0
+    # Mode 4 stages; ignored by every other operation mode.
+    enhanced_calibrated_threshold: bool = True
+    enhanced_mean_clutter_reference: bool = True
+    enhanced_coherent_beams: bool = True
+    enhanced_track_before_detect: bool = True
     radar_port: str = ""
     duration_minutes: float = run.DEFAULT_DURATION_MINUTES
     dataset_destination: str = "dataset"
@@ -96,7 +110,7 @@ class GuiSettings:
             errors.append("Choose a valid display or calibration mode.")
         if (
             self.operation_mode not in run.EXPERIMENT_OPERATION_MODES
-            and self.operation_mode != CONVENTIONAL_OPERATION_MODE
+            and self.operation_mode not in CONVENTIONAL_OPERATION_MODES
         ):
             errors.append("Choose a valid radar operation mode.")
         if not -60.0 <= self.beam_azimuth_deg <= 60.0:
@@ -127,7 +141,7 @@ class GuiSettings:
                 self.model_weights_dir / "model.onnx",
                 self.model_weights_dir / "manifest.json",
             ]
-            if self.operation_mode == CONVENTIONAL_OPERATION_MODE:
+            if self.operation_mode in CONVENTIONAL_OPERATION_MODES:
                 required.extend(
                     (
                         self.model_weights_dir / "calibration.joblib",
@@ -157,7 +171,7 @@ class GuiSettings:
 
     def command(self, python_executable: str | None = None) -> list[str]:
         """Return a prompt-free ``main/run.py`` command for these settings."""
-        if self.operation_mode == CONVENTIONAL_OPERATION_MODE:
+        if self.operation_mode in CONVENTIONAL_OPERATION_MODES:
             return self._conventional_command(python_executable)
         command = [
             python_executable or sys.executable,
@@ -288,6 +302,23 @@ class GuiSettings:
                     command.extend(("--inference-log", str(self.inference_log)))
         return command
 
+    def enhanced_detection_arguments(self) -> list[str]:
+        """Return the Mode 4 flags; empty for Mode 1 so its command is unchanged."""
+        if self.operation_mode != CONVENTIONAL_ENHANCED_OPERATION_MODE:
+            return []
+        arguments: list[str] = []
+        if self.enhanced_coherent_beams:
+            arguments.extend(("--detection-power", "coherent-beam"))
+        if self.enhanced_mean_clutter_reference:
+            arguments.extend(("--clutter-reference", "mean"))
+        if self.enhanced_calibrated_threshold:
+            arguments.extend(("--cfar-threshold", "calibrated"))
+        if self.enhanced_track_before_detect:
+            arguments.extend(
+                ("--tbd-window-frames", str(ENHANCED_TBD_WINDOW_FRAMES))
+            )
+        return arguments
+
     def _conventional_command(
         self,
         python_executable: str | None,
@@ -398,4 +429,5 @@ class GuiSettings:
                 command.extend(("--evaluation-label", self.evaluation_label))
                 if self.inference_log is not None:
                     command.extend(("--inference-log", str(self.inference_log)))
+        command.extend(self.enhanced_detection_arguments())
         return command

@@ -27,7 +27,7 @@ discussion fields are intentionally left blank.
 The inherited team work comprises the original conventional and PMM
 processing pipelines, their data acquisition paths and their trained models.
 The present work recovered both paths into a common operator application,
-preserved the earlier experimental Modes 3 and 4, implemented Mode 6,
+preserved the earlier experimental Modes 3 and 4, implemented Mode 5,
 recompiled the TensorRT artifacts for the Jetson, added a touch-oriented PPI
 workflow, and prepared a matched validation protocol. Exact authorship should
 be confirmed with the team before submission.
@@ -69,11 +69,9 @@ uses the original approximately 20 m waveform and is the PMM control.
 |---|---|---|---|
 | 3 — Enhanced MIMO PMM STT | 3 sequential TX, 4 RX, 96 chirps/frame, 9.994 MHz/us slope | Coherent 12-channel detection beam bank across +/-60 degrees, then 2-degree Capon refinement | Test receive-array processing gain with wide recovered field of view |
 | 4 — Two-TX phased-array STT | TX0 and TX1 simultaneous, 4 RX, 32 chirps/frame, quantised relative TX phase | Steered transmit pair plus coherent four-RX fixed-look combination | Test a directional non-MIMO phased look within +/-30 degrees azimuth |
-| 6 — Literature MIMO TBD | 3 sequential TX, 4 RX, 96 chirps/frame, 9.994 MHz/us slope | Normalised constrained PMM path integration over 8–12 frames, then Capon angles | Accumulate persistent weak evidence without reducing every one-frame threshold |
+| 5 — Literature MIMO TBD | 3 sequential TX, 4 RX, 96 chirps/frame, 9.994 MHz/us slope | Normalised constrained PMM path integration over 8–12 frames, then Capon angles | Accumulate persistent weak evidence without reducing every one-frame threshold |
 
-The numbering intentionally retains Mode 6 as its research identifier. The
-earlier proposed Mode 5 was replaced by the recovered two-transmitter Mode 4,
-so no Mode 5 is exposed in the final GUI.
+The five GUI modes are numbered consecutively from 1 to 5.
 
 ### 3.1 Mode 3: coherent TDM-MIMO receive processing
 
@@ -106,9 +104,9 @@ virtual channels. Mode 4 therefore tests directional transmit/receive
 coherence, not MIMO angular diversity. It remains a fixed-panel STT
 experiment, not a scanning military AESA.
 
-### 3.3 Mode 6: literature-guided track-before-detect
+### 3.3 Mode 5: literature-guided track-before-detect
 
-Mode 6 retains the long-range three-TX TDM-MIMO waveform. Each PMM range-bin
+Mode 5 retains the long-range three-TX TDM-MIMO waveform. Each PMM range-bin
 residual is divided by its calibrated adaptive threshold. A dynamic-programming
 path is constrained by the maximum target speed and integrated across up to 12
 frames. Detection begins only after at least eight frames, when the mean
@@ -133,10 +131,10 @@ The monostatic radar equation may be written as
 
 | Change | Radar-equation interpretation | Limitation |
 |---|---|---|
-| Lower chirp slope in Modes 3, 4 and 6 | Does not directly change `Pt`, `Gt`, `Gr` or `sigma`; it changes beat-frequency-to-range mapping and extends the sampled unambiguous range to about 93.8 m | Coarser approximately 0.366 m bins and no guarantee that SNR is usable at 93.8 m |
+| Lower chirp slope in Modes 3, 4 and 5 | Does not directly change `Pt`, `Gt`, `Gr` or `sigma`; it changes beat-frequency-to-range mapping and extends the sampled unambiguous range to about 93.8 m | Coarser approximately 0.366 m bins and no guarantee that SNR is usable at 93.8 m |
 | Mode 3 coherent receive combination | Increases effective receive processing gain `Gr` in a matched direction | Gain is below the 10.8 dB ideal and depends on calibration/beam match |
 | Mode 4 coherent two-TX look | Changes the transmit pattern/effective `Gt` in the selected direction and coherently combines four receivers | Total hardware limits remain; one fixed look, +/-30 degree azimuth, unverified field gain |
-| Mode 6 multi-frame integration | Reduces the evidence/SNR required by the detector through temporal processing gain | Slower acquisition; persistent clutter can also integrate if calibration or guards are inadequate |
+| Mode 5 multi-frame integration | Reduces the evidence/SNR required by the detector through temporal processing gain | Slower acquisition; persistent clutter can also integrate if calibration or guards are inadequate |
 
 Because received power falls as `R^-4`, an array-processing gain produces only
 the fourth-root range increase in the ideal radar equation. For example, even
@@ -171,7 +169,7 @@ are required for the final accuracy figure.
 Each run can write processed JSONL, inference-evaluation JSONL and
 runtime-performance JSONL. These contain track state, range/angle, detection
 scores and thresholds, classification, timing, deadline misses, packet loss,
-queue drops and resource use. Mode 6 additionally records its integrated TBD
+queue drops and resource use. Mode 5 additionally records its integrated TBD
 score, threshold and window length. Short raw-ADC captures are required for
 future offline re-beamforming because processed JSONL does not retain all
 complex channel samples.
@@ -181,7 +179,7 @@ complex channel samples.
 - 252 recovered conventional-pipeline unit/regression tests pass on the
   Jetson.
 - 28 enhanced PMM/GUI tests pass, including all RF profile/mode validation,
-  coherent-angle tests, PPI/GUI selection and persistent sub-threshold Mode 6
+  coherent-angle tests, PPI/GUI selection and persistent sub-threshold Mode 5
   acquisition.
 - Both classifier engines were rebuilt locally for the Jetson. Conventional
   TensorRT parity passed on 128 stored windows with maximum probability error
@@ -233,7 +231,7 @@ and blank result sheet are in `aesa_radar/TEST_DAY_GUIDE.md`.
   association is not established.
 - Mode 3 processing gain and Mode 4 transmit/receive coherence require valid
   channel calibration and correct target bearing.
-- Mode 6 may integrate persistent environmental micro-motion. Its present-frame
+- Mode 5 may integrate persistent environmental micro-motion. Its present-frame
   guard and empty-scene test reduce, but do not eliminate, this risk.
 - Relative altitude is derived from slant range and elevation and is not an
   independently measured absolute altitude.
@@ -246,7 +244,7 @@ and blank result sheet are in `aesa_radar/TEST_DAY_GUIDE.md`.
 
 Both original teammate-developed processing methods have been recovered and
 are selectable in one GUI. Modes 3 and 4 retain the recovered experimental
-coherent processing, while Mode 6 adds literature-guided persistent weak-target
+coherent processing, while Mode 5 adds literature-guided persistent weak-target
 integration. The application now provides a complete touch/PPI,
 classification, calibration and evidence-logging workflow on the ARM Jetson.
 Software verification shows that all lanes launch consistently and remain

@@ -11,7 +11,7 @@ This file is the continuation point for another Codex account working on the Rad
 - Do not use destructive Git commands such as `git reset --hard` or overwrite the current branch from another branch.
 - Do not push, rewrite history, or make system-level network changes unless the user explicitly asks.
 - Before starting a radar process, inspect the current processes, interfaces, UARTs, and ports. Machine state can change after this handoff.
-- Do not claim increased range or reliable drone classification until field measurements support it. Mode 6 has synthetic validation but has not yet established its field range.
+- Do not claim increased range or reliable drone classification until field measurements support it. The former Mode 5 (literature TBD) and the new Mode 4 (enhanced conventional) have synthetic validation only; neither has an established field range.
 
 ## Git state at handoff
 
@@ -21,7 +21,7 @@ This file is the continuation point for another Codex account working on the Rad
 - Important earlier commits:
   - `41aa5a42b Restore original modes and complete five-mode test center`
   - `34ca65238 tue night changes post recovery`
-  - `89be01f40 Add literature-guided Mode 6 track-before-detect`
+  - `89be01f40 Add literature-guided Mode 6 track-before-detect` (now Mode 5)
   - `1760a8a77 Recover AESA radar modes and touchscreen GUI`
 - The earlier divergence was resolved without conflicts in merge commit `18a3b5b89`. It combines the local handoff and receiver-recovery commits with `dff49c975 report draft update` from the remote.
 - `dff49c975` adds report drafts and `rawdatacapture/profile-mini4-20m.cfg`; these files are now preserved in the combined history.
@@ -117,23 +117,24 @@ The Linux receive buffer has sometimes been granted as only 425984 bytes when th
 
 ## Deployed modes
 
-The touchscreen GUI exposes five choices. Number 5 is intentionally absent because the proposed Mode 5 replaced the old Mode 4 design while Mode 6 retained its research number.
+The touchscreen GUI exposes four choices, numbered 1 to 4. On 2026-11-12 the literature track-before-detect mode was first renumbered from Mode 6 to Mode 5, and then the phased-array STT and literature TBD modes (rows marked hidden below) were both removed from the GUI. On 2026-11-13 a new GUI Mode 4, "Enhanced conventional", was added: Mode 1 plus opt-in detection stages in `conventional_radar/main/enhanced_detection.py` (see `conventional_radar/README_MODE4.md`). It is validated on synthetic data only and has not yet run on the radar or been timed on the Jetson. Their code and profiles remain and are still runnable through `run.py --operation-mode phased-array-stt` / `literature-tbd-mimo`; the rows below are kept for reference. Commit messages and the frozen snapshot folders still say Mode 6.
 
 | GUI mode | Implementation | Signal processing and purpose | Status |
 | --- | --- | --- | --- |
 | 1 Original conventional range-Doppler/CNN | `conventional_radar/` | Inherited range-Doppler, ordered-statistic CFAR, 3D/single-target tracking, and its own CNN/TensorRT classifier | Recovered and integrated; needs final comparative field run |
 | 2 Original PMM/mmHawkeye LSTM 20 m | Original PMM path through `aesa_radar/` in `baseline` mode | Inherited spectrum folding, background subtraction, constrained path tracking, particle filtering, Capon angles, and LSTM classifier | Available as the control/baseline |
 | 3 Enhanced MIMO PMM STT | `aesa_radar/`, enhanced MIMO operation | Three sequential transmitters, four receivers, 12 virtual channels, coherent beam bank over approximately +/-60 degrees azimuth/elevation, then Capon/MVDR refinement | Recovered; successful frame capture observed; final range/angle testing pending |
-| 4 Two-TX phased-array STT | `aesa_radar/`, `phased-array-stt` | TX0 and TX1 transmit simultaneously with quantised relative phase; four receivers combine coherently in the selected look direction; azimuth control limited to +/-30 degrees | Recovered replacement for the proposed Mode 5; firmware/hardware-sensitive and field validation pending |
-| 6 Literature MIMO track-before-detect | `aesa_radar/`, literature TBD operation | Long-range 3TX/4RX TDM-MIMO, normalised constrained weak-path integration over 8-12 frames, present-frame guard, then Capon angles | Synthetic weak-target acquisition works; actual drone range is unverified |
+| 4 Enhanced conventional | `conventional_radar/` with `--cfar-threshold calibrated --clutter-reference mean --detection-power coherent-beam --tbd-window-frames 8` | Mode 1 waveform, calibration, tracker and CNN; calibrated CFAR threshold, averaged clutter reference, TDM-compensated coherent 12-channel beam detection and 8-frame range-Doppler integration, each switchable in the GUI | Unit-tested and simulated only; Jetson timing and field range pending |
+| Former Mode 4: two-TX phased-array STT (hidden from GUI) | `aesa_radar/`, `phased-array-stt` | TX0 and TX1 transmit simultaneously with quantised relative phase; four receivers combine coherently in the selected look direction; azimuth control limited to +/-30 degrees | Recovered replacement for an earlier phased-transmit proposal; firmware/hardware-sensitive and field validation pending |
+| Former Mode 5: literature MIMO track-before-detect (hidden from GUI) | `aesa_radar/`, literature TBD operation | Long-range 3TX/4RX TDM-MIMO, normalised constrained weak-path integration over 8-12 frames, present-frame guard, then Capon angles | Synthetic weak-target acquisition works; actual drone range is unverified |
 
 Important terminology:
 
 - Mode 3 is TDM-MIMO receive processing, not a military active electronically scanned array.
-- Mode 4 is the closest available hardware-safe phased transmit experiment, but the standard board is restricted to two simultaneous transmitters. Do not describe it as equivalent to a military AESA.
+- The former Mode 4 (phased-array STT, hidden) is the closest available hardware-safe phased transmit experiment, but the standard board is restricted to two simultaneous transmitters. Do not describe it as equivalent to a military AESA.
 - The PPI altitude is an estimate derived from measured range and elevation. It is not independently instrumented altitude.
 
-The authoritative operator summary is `aesa_radar/TEST_DAY_GUIDE.md`. Mode 6 design details are in `aesa_radar/README_MODE6.md`.
+The authoritative operator summary is `aesa_radar/TEST_DAY_GUIDE.md`. The hidden literature TBD mode (former Mode 5) is described in `aesa_radar/README_MODE5.md`; the current Mode 4 in `conventional_radar/README_MODE4.md`.
 
 ## Profiles, setup, and model artifacts
 
@@ -165,7 +166,7 @@ manifest.json
 generated/model_sm87_fp16.engine
 ```
 
-Both TensorRT engines were rebuilt locally for this Jetson. The conventional engine was checked against ONNX on 128 windows with maximum probability error about 0.00258 and benchmarked around 0.48 ms median inference. The PMM model was trained under an earlier feature/profile version; the runtime deliberately permits cross-profile inference and logs contract mismatches. That compatibility does not prove drone-classification accuracy in Modes 3, 4, or 6, so classification must be scored during field testing.
+Both TensorRT engines were rebuilt locally for this Jetson. The conventional engine was checked against ONNX on 128 windows with maximum probability error about 0.00258 and benchmarked around 0.48 ms median inference. The PMM model was trained under an earlier feature/profile version; the runtime deliberately permits cross-profile inference and logs contract mismatches. That compatibility does not prove drone-classification accuracy in Modes 3, 4, or 5, so classification must be scored during field testing.
 
 ## Calibration and test setup
 
@@ -196,7 +197,7 @@ Use the detailed checklist and blank table in `aesa_radar/TEST_DAY_GUIDE.md`.
 - Experimental historical material is in `experimental_radar/`.
 - Nested capture and log outputs are intentionally ignored by Git. They are still user data; do not delete them merely because they are untracked or ignored.
 - The GUI Activity tab and terminal log path printed at startup are the first places to inspect after a failed run.
-- Mode 6 output includes `tbd_integrated_score`, `tbd_threshold`, and `tbd_window_frames` fields for evidence analysis.
+- Literature TBD (former Mode 5) output includes `tbd_integrated_score`, `tbd_threshold`, and `tbd_window_frames` fields for evidence analysis.
 
 Earlier problematic observations included tracks snapping to phantom ranges after a target left, limited off-boresight tracking, and drone loss beyond a few metres. These symptoms can arise from background contamination, sidelobes/clutter, stale path integration, incorrect angle gating, low target radar cross-section, or hardware/stream faults. Do not infer the cause from the displayed range alone; correlate processed detections with raw/processed logs, calibration state, angle, score, and ground truth.
 
@@ -222,7 +223,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q aesa_radar/tests
 .venv/bin/python -m pytest -q conventional_radar
 ```
 
-Mode 6 synthetic regression acquired a persistent weak target at about 20 m on frame 8 when individual-frame evidence was below the normal declaration threshold. Synthetic tracker timing was roughly 46 ms median and 52 ms p95, and TensorRT LSTM inference was roughly 2.9 ms median and 4.4 ms p95. These are engineering checks, not field range results.
+The literature TBD (former Mode 5) synthetic regression acquired a persistent weak target at about 20 m on frame 8 when individual-frame evidence was below the normal declaration threshold. Synthetic tracker timing was roughly 46 ms median and 52 ms p95, and TensorRT LSTM inference was roughly 2.9 ms median and 4.4 ms p95. These are engineering checks, not field range results.
 
 An observed successful Mode 3 run had hundreds of valid frames without packet loss or queue drops. Some early 100 ms deadline misses may still appear during calibration/startup; evaluate the sustained rate and queue recovery in the performance log.
 
@@ -251,7 +252,7 @@ Additional papers collected during development are under `tmp/pdfs/`. Preserve a
 2. Re-run automated tests after reconciliation.
 3. Verify hardware readiness with the read-only checks above, then launch the GUI.
 4. Press **Stop all radar processes** before the first run if the previous shutdown state is uncertain.
-5. Run the five modes in a controlled order using the same marked course and empty-scene calibration.
+5. Run the four GUI modes in a controlled order using the same marked course and empty-scene calibration.
 6. Save the exact log/capture path and ground-truth notes for every run.
 7. Analyze detection range, continuity, false tracks, angle accuracy, classification, packet loss, and processing timing before changing parameters.
 8. Tune only the mode with evidence showing a specific failure mechanism; keep the original Modes 1 and 2 as controls.

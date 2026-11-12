@@ -1,8 +1,8 @@
-# Mode 6 — literature-guided MIMO track-before-detect
+# Mode 5 — literature-guided MIMO track-before-detect
 
-Mode 6 is an experimental long-range single-target-track mode for the
+Mode 5 is an experimental long-range single-target-track mode for the
 IWR6843ISK-ODS and DCA1000. It is available in the five-mode touchscreen GUI as
-**6 — Literature MIMO track-before-detect**.
+**5 — Literature MIMO track-before-detect**.
 
 ## What it does
 
@@ -28,7 +28,7 @@ not raise transmitter power and it is not an AESA transmit mode.
 
 The automated synthetic regression injects a persistent target near 20 m at
 12 degrees azimuth and 5 degrees elevation. Each individual PMM score is below
-the ordinary one-frame threshold; Mode 6 acquires it at the eighth frame and
+the ordinary one-frame threshold; Mode 5 acquires it at the eighth frame and
 recovers range and direction. On the Jetson, the measured synthetic tracker
 timing was about 46 ms median and 52 ms p95, below the 100 ms frame period. The
 rebuilt TensorRT LSTM measured about 2.9 ms median and 4.4 ms p95 end-to-end.
@@ -38,7 +38,7 @@ No range improvement should be claimed until the controlled test in
 [TEST_DAY_GUIDE.md](TEST_DAY_GUIDE.md) has been completed.
 
 The available classifier model was trained on earlier baseline data. Its input
-shape and labels are compatible, but Mode 6 predictions are explicitly logged
+shape and labels are compatible, but Mode 5 predictions are explicitly logged
 as cross-profile and their accuracy is not established. Choose the correct
 ground-truth label in the GUI so the evaluation log can be used later.
 
@@ -49,7 +49,7 @@ ground-truth label in the GUI so the evaluation log can be used later.
    distance with **Range / RX calibration**. Keep metal tripod parts behind the
    reflector and out of the beam as far as practical.
 2. Remove the reflector, tripod and people from the field of view.
-3. Select Mode 6, **Top-down tactical PPI**, the correct UART, and the intended
+3. Select Mode 5, **Top-down tactical PPI**, the correct UART, and the intended
    ground-truth label.
 4. Start the radar and keep the complete scene clear throughout the 30-second
    PMM background calibration. Do not introduce a target before the banner
@@ -72,5 +72,5 @@ needed.
 - S. Garcia-Fernandez et al., "4D FMCW MIMO radar based MCMC-EPF track-before-
   detect," 2023. The implementation adopts the multi-frame TBD principle, not
   that paper's complete MCMC-EPF algorithm.
-- Texas Instruments, IWR6843 and IWR6843ISK-ODS documentation. Mode 6 remains
+- Texas Instruments, IWR6843 and IWR6843ISK-ODS documentation. Mode 5 remains
   within the existing three-transmitter TDM capture architecture.
